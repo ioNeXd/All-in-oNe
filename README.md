@@ -1,10 +1,10 @@
 # All iₙ oNe — plugin pessoal e modular para o Obsidian
 
-Um hub único dentro do Obsidian que reúne várias features num só plugin:
-servidor MCP embutido, editor de estilos, templates automáticos por pasta,
-calendário integrado, notificações e auto-update via GitHub — todos
-conectados por um núcleo comum de eventos, e todos configuráveis pelo
-usuário.
+Um hub único dentro do Obsidian que reúne **8 módulos independentes** num só
+plugin: servidor MCP embutido, ciclo de vida de arquivos, editor de estilos,
+templates automáticos por pasta, calendário integrado, notificações,
+histórico persistente e auto-update via GitHub — todos conectados por um
+núcleo comum de eventos, e todos configuráveis pelo usuário.
 
 > Este plugin nasceu como um projeto pessoal, então prioriza o fluxo de
 > trabalho de quem o criou. Ainda assim, foi desenhado para outras pessoas
@@ -14,16 +14,21 @@ usuário.
 
 | Módulo | O que faz |
 |---|---|
-| **Servidor MCP** | Expõe o vault (leitura e escrita) para clientes MCP como Claude Desktop, Cursor ou Claude Code, via Streamable HTTP, enquanto o Obsidian estiver aberto. Permissões por pasta, modo dry-run, rate limiting. |
-| **Estilos** | Editor de CSS livre + painel visual, aba de temas prontos, undo, export/import de tema — estiliza o próprio Obsidian e os outros módulos (ex.: o Calendário). |
-| **Auto-update** | Verifica e aplica atualizações a partir dos Releases do repositório no GitHub (o plugin não está na loja oficial). Canal estável/beta, changelog, rollback. |
+| **Servidor MCP** | Expõe o vault (leitura e escrita) para clientes MCP como Claude Desktop, Cursor ou Claude Code, via Streamable HTTP, enquanto o Obsidian estiver aberto. Permissões por pasta, modo dry-run, rate limiting, split/combine de notas, liberação temporária de escrita. |
+| **Ciclo de vida de arquivos** | Pergunta o nome ao criar qualquer nota antes dos outros módulos reagirem; confirmação opcional para renomear/mover/excluir. |
+| **Estilos** | Editor de CSS livre + painel visual (~40 variáveis), 7 temas prontos, preview antes de aplicar, undo, export/import — estiliza o próprio Obsidian e os outros módulos (ex.: o Calendário). |
+| **Auto-update** | Verifica e aplica atualizações a partir dos Releases do repositório no GitHub (o plugin não está na loja oficial). Canal estável/beta, checksum SHA-256, backup automático e rollback. |
 | **Templates por pasta** | Ao criar uma nota numa pasta configurada, aplica o template certo e preenche metadados automaticamente. Notas incompletas vão para uma pasta `Pendente` e voltam sozinhas quando completadas. |
-| **Calendário** | Interface de calendário ligada ao sistema de templates: clique numa data, escolha um template (definido por você), a nota é criada e organizada automaticamente. Suporta eventos recorrentes notificáveis (ex.: aniversários). |
-| **Notificações** | Pop-up com som para qualquer evento do plugin — configurável por tipo de evento, com modo não-perturbe. |
+| **Calendário** | Interface de calendário ligada ao sistema de templates: clique numa data, escolha um template (definido por você), a nota é criada e organizada automaticamente. Eventos recorrentes com lembrete e nota vinculada (que não quebra ao renomear). |
+| **Notificações** | Pop-up com som para qualquer evento do plugin — configurável por tipo de evento, com modo não-perturbe e histórico persistente. |
+| **Histórico** | Registro persistente de tudo o que o plugin fez (criações, movimentos, ações MCP), com filtro por tipo e limite configurável. |
 
 Todos os módulos podem ser ligados/desligados individualmente pelo **Lobby**
 — o painel central do plugin, acessível pelo ícone na barra lateral ou pelo
-Command Palette (`Ctrl/Cmd+P` → "Abrir All iₙ oNe").
+Command Palette (`Ctrl/Cmd+P` → "Abrir All iₙ oNe"). O Lobby inclui aba de
+**Diagnóstico** (saúde de cada módulo), **Histórico** filtrável e **Ajuda**,
+e cada módulo tem um painel de configurações próprio — usável até com o
+módulo desligado.
 
 ## Instalação
 
@@ -51,7 +56,7 @@ perguntar alguns caminhos básicos.
 npm install
 npm run dev     # build com watch, para desenvolvimento
 npm run build   # build de produção
-npm test        # testes unitários do núcleo/contrato
+npm test        # 103 testes em 14 arquivos — todos importam o código real
 ```
 
 Veja `CONTRIBUTING.md` para o guia de como o projeto é organizado e como
@@ -59,13 +64,16 @@ adicionar um módulo novo sem tocar no núcleo.
 
 ## Arquitetura, em uma frase
 
-Um **núcleo** (event bus + configuração + estilos compartilhados) e **6
-módulos independentes** que seguem um **contrato comum** — nenhum módulo
-conhece outro diretamente, toda comunicação passa pelo núcleo. Isso é o que
-permite ligar/desligar cada feature sem afetar as demais, e adicionar um
-sétimo módulo no futuro sem alterar o que já existe.
+Um **núcleo** (event bus + configuração + fila de escrita + helpers
+compartilhados) e **8 módulos independentes** que seguem um **contrato
+comum** — nenhum módulo conhece outro diretamente, toda comunicação passa
+pelo núcleo. Isso é o que permite ligar/desligar cada feature sem afetar as
+demais, e adicionar um nono módulo no futuro sem alterar o que já existe.
 
-Veja `docs/ARCHITECTURE.md` para o detalhamento completo de cada decisão.
+Veja `docs/ARCHITECTURE.md` para o detalhamento completo de cada decisão,
+`docs/STATUS.md` para o que está funcional de verdade (e o que não está),
+`docs/MANUAL-VALIDATION.md` para o checklist de validação num vault real e
+`CHANGELOG.md` para o histórico de versões.
 
 ## Privacidade
 

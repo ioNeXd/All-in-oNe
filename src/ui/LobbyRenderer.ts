@@ -396,7 +396,7 @@ class ResetModal extends Modal {
 		this.option("Configuração padrão", "Reseta só as configurações do plugin.", "config");
 		this.option(
 			"Limpar dados gerados",
-			"Reseta configurações e limpa histórico e cache. Notas continuam intactas.",
+			"Mantém suas configurações e limpa o histórico de atividades e notificações. Notas continuam intactas.",
 			"data"
 		);
 		this.option("Limpar tudo", "Reset completo do plugin.", "all");
@@ -408,7 +408,16 @@ class ResetModal extends Modal {
 		row.createEl("p", { text: description });
 		const btn = row.createEl("button", { text: "Escolher" });
 		btn.onclick = async () => {
-			await this.core.resetAll(level);
+			try {
+				await this.core.resetAll(level);
+			} catch (err) {
+				// resetAll persiste no disco (saveData) — uma falha aí não pode
+				// virar rejection não tratada nem fechar o modal como se tivesse
+				// dado certo.
+				console.error("[All iₙ oNe] Falha ao restaurar configurações:", err);
+				new Notice("Não foi possível concluir a restauração. Veja o console.", 8000);
+				return; // modal fica aberto para tentar de novo
+			}
 			this.onDone();
 			this.close();
 		};

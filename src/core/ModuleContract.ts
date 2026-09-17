@@ -25,9 +25,10 @@ import type { HubSettings } from "./types";
  *      que escuta. Isso serve tanto de documentação viva quanto de dado que
  *      a "Central de Eventos" do Lobby usa para mostrar o mapa de conexões.
  *   4. Configuração do módulo vive dentro de `settings.modules[moduleId]`,
- *      nunca em outro lugar. O módulo é dono do formato interno dessa fatia,
- *      mas deve fornecer um `settingsSchema` para o Lobby conseguir desenhar
- *      a UI de configuração automaticamente.
+ *      nunca em outro lugar. O módulo é dono do formato interno dessa fatia;
+ *      a UI de configuração é o próprio `renderSettingsPanel` do módulo.
+ *      O `settingsSchema` é documentação declarativa opcional dos campos
+ *      (ex.: diagnósticos, futura UI gerada automaticamente).
  */
 
 export type ModuleId =
@@ -81,8 +82,13 @@ export interface ModuleManifest {
 	emits: string[];
 	/** Nomes de eventos que este módulo escuta no bus. */
 	listensTo: string[];
-	/** Campos de configuração próprios do módulo, para o Lobby gerar a UI. */
-	settingsSchema: SettingsFieldSchema[];
+	/**
+	 * Campos de configuração próprios do módulo — documentação declarativa.
+	 * A UI de configuração de fato é o `renderSettingsPanel` do módulo; este
+	 * schema descreve os campos para ferramentas (diagnóstico, docs) e para
+	 * uma futura UI gerada automaticamente.
+	 */
+	settingsSchema?: SettingsFieldSchema[];
 }
 
 /** Contexto injetado em todo módulo na hora de habilitá-lo. */
@@ -91,8 +97,12 @@ export interface ModuleContext {
 	bus: EventBus;
 	/** Lê a fatia de configuração deste módulo (settings.modules[moduleId]). */
 	getSettings: <T = Record<string, unknown>>() => T;
-	/** Atualiza a fatia de configuração deste módulo e persiste no disco. */
-	updateSettings: (patch: Record<string, unknown>) => Promise<void>;
+	/**
+	 * Atualiza a fatia de configuração deste módulo e persiste no disco.
+	 * Retorna as issues de validação — vazias significa gravado; com erro
+	 * bloqueante, NADA foi persistido (o módulo decide como avisar o usuário).
+	 */
+	updateSettings: (patch: Record<string, unknown>) => Promise<ConfigValidationIssue[]>;
 	/** Acesso de leitura ao restante da config (para casos de integração). */
 	getFullSettings: () => HubSettings;
 	/** Log estruturado — cai automaticamente na aba de Histórico do Lobby. */
@@ -136,8 +146,21 @@ export interface HubModule {
 	/** Chamado quando o módulo é desabilitado (unload do plugin, ou ao desligar pelo Lobby). */
 	onDisable(): Promise<void> | void;
 
-	/** Chamado quando a configuração global (ou deste módulo) muda. */
+	/**
+	 * Chamado quando a configuração global (ou deste módulo) muda — tanto em
+	 * gravações via `updateSettings` quanto nos níveis de reset "config"/"all"
+	 * (que substituem a configuração inteira). Deve ser rápido e não deve
+	 * lançar: o núcleo isola falhas, mas a semântica é "reagir a tempo".
+	 */
 	onSettingsChange?(newSettings: HubSettings): void;
+
+	/**
+	 * Chamado pelo núcleo nos níveis de reset "data" e "all" — o módulo deve
+	 * limpar APENAS os dados que ele mesmo gerou (histórico, cache), gravando
+	 * em sua fatia de configuração. Nunca apagar notas do usuário. O nível
+	 * "config" NÃO chama este hook: configurações não são dados gerados.
+	 */
+	onResetData?(): Promise<void> | void;
 
 	/**
 	 * Valida a configuração antes de salvar — usado pelo núcleo para checar

@@ -1,5 +1,6 @@
 import { App, Menu, Modal, Notice, Setting, TFile, TFolder, normalizePath } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
+import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
 
 export interface FileLifecycleSettings {
 	askNameOnCreate: boolean;
@@ -158,7 +159,7 @@ export class FileLifecycleModule implements HubModule {
 			if (name && name !== file.basename) {
 				const folder = originalPath.substring(0, originalPath.lastIndexOf("/"));
 				const desired = normalizePath(`${folder ? folder + "/" : ""}${name}.md`);
-				const finalPath = await this.uniquePath(desired);
+				const finalPath = await uniqueVaultPath(this.context!.app, desired);
 				await this.context!.fileWriteQueueRun(originalPath, () =>
 					this.context!.app.fileManager.renameFile(file, finalPath)
 				);
@@ -200,7 +201,7 @@ export class FileLifecycleModule implements HubModule {
 
 		const doRename = async () => {
 			const folder = file.path.substring(0, file.path.lastIndexOf("/"));
-			const target = await this.uniquePath(
+			const target = await uniqueVaultPath(this.context!.app, 
 				normalizePath(`${folder ? folder + "/" : ""}${name}.md`)
 			);
 			const oldPath = file.path;
@@ -247,8 +248,8 @@ export class FileLifecycleModule implements HubModule {
 		new MovePromptModal(this.context!.app, file, folders, async (targetFolder) => {
 			const doMove = async () => {
 				const desired = normalizePath(`${targetFolder}/${file.name}`);
-				const finalPath = await this.uniquePath(desired);
-				await this.ensureFolder(targetFolder);
+				const finalPath = await uniqueVaultPath(this.context!.app, desired);
+				await ensureVaultFolder(this.context!.app, targetFolder);
 				const oldPath = file.path;
 				await this.context!.app.fileManager.renameFile(file, finalPath);
 				await this.context?.bus.emit(
@@ -280,30 +281,6 @@ export class FileLifecycleModule implements HubModule {
 		return folders.sort();
 	}
 
-	private async ensureFolder(path: string): Promise<void> {
-		if (!path || path === "/") return;
-		let current = "";
-		for (const segment of path.split("/").filter(Boolean)) {
-			current = current ? `${current}/${segment}` : segment;
-			const node = this.context!.app.vault.getAbstractFileByPath(current);
-			if (!(node instanceof TFolder)) {
-				await this.context!.app.vault.createFolder(current).catch(() => void 0);
-			}
-		}
-	}
-
-	private async uniquePath(desired: string): Promise<string> {
-		if (!this.context!.app.vault.getAbstractFileByPath(desired)) return desired;
-		const dot = desired.lastIndexOf(".");
-		// Sem extensão, dot === -1: slice(0, -1) comeria o último caractere do
-		// nome e slice(-1) viraria a "extensão" — gerando "Nota 2t" em vez de
-		// "Nota 2". Mesmo guard aplicado em TemplatesModule e CalendarModule.
-		const base = dot === -1 ? desired : desired.slice(0, dot);
-		const ext = dot === -1 ? "" : desired.slice(dot);
-		let counter = 2;
-		while (this.context!.app.vault.getAbstractFileByPath(`${base} ${counter}${ext}`)) counter++;
-		return `${base} ${counter}${ext}`;
-	}
 
 	renderSettingsPanel(container: HTMLElement): void {
 		const settings = this.readSettings();

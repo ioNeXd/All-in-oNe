@@ -1,5 +1,6 @@
-import { App, Modal, Setting, TFolder } from "obsidian";
+import { App, Modal, Notice, Setting } from "obsidian";
 import type { HubCore } from "../core/HubCore";
+import { ensureVaultFolder } from "../core/VaultPaths";
 
 /**
  * ONBOARDING
@@ -54,30 +55,41 @@ export class OnboardingModal extends Modal {
 
 	private async finish(): Promise<void> {
 		const settings = this.core.settings.get();
-		await this.core.settings.save({
-			...settings,
-			onboardingCompleted: true,
-			paths: {
-				...settings.paths,
-				calendarFolder: this.calendarFolder,
-				calendarTemplatesFolder: this.calendarTemplatesFolder,
-			},
-		});
+		let issues;
+		try {
+			issues = await this.core.settings.save({
+				...settings,
+				onboardingCompleted: true,
+				paths: {
+					...settings.paths,
+					calendarFolder: this.calendarFolder,
+					calendarTemplatesFolder: this.calendarTemplatesFolder,
+				},
+			});
+		} catch (err) {
+			// O botão chama `void this.finish()` — sem este catch, uma falha de
+			// disco (saveData) viraria rejection não tratada, sem feedback nenhum.
+			console.error("[All iₙ oNe] Onboarding: falha ao salvar configuração inicial:", err);
+			new Notice("Não foi possível salvar a configuração inicial. Tente novamente.", 8000);
+			return; // modal continua aberto
+		}
+
+		// A validação do núcleo bloqueia gravação com erro (ex.: os dois campos
+		// apontando para a MESMA pasta — conflito de caminho entre módulos).
+		// Antes as issues eram ignoradas: o modal fechava sem salvar nem avisar,
+		// e o usuário só descobriria o problema na próxima abertura do plugin.
+		const blocking = issues.filter((i) => i.level === "error");
+		if (blocking.length > 0) {
+			new Notice(blocking.map((i) => i.message).join("\n"), 8000);
+			return; // mantém o modal aberto para o usuário corrigir os caminhos
+		}
 
 		// `vault.createFolder` NÃO cria pastas-pai — num caminho aninhado
 		// (ex.: "Calendario/templates") ele falhava em silêncio aqui, e a
-		// primeira nota de data da vida do usuário morria com ENOENT. Mesma
-		// criação recursiva segmento a segmento usada por Templates, Calendário
-		// e Ciclo de Vida.
-		const segments = this.calendarTemplatesFolder.split("/").filter(Boolean);
-		let current = "";
-		for (const segment of segments) {
-			current = current ? `${current}/${segment}` : segment;
-			const node = this.core.app.vault.getAbstractFileByPath(current);
-			if (!(node instanceof TFolder)) {
-				await this.core.app.vault.createFolder(current).catch(() => void 0);
-			}
-		}
+		// primeira nota de data da vida do usuário morria com ENOENT.
+		// Helper centralizado do núcleo (mesmo usado por Templates,
+		// Calendário e Ciclo de Vida).
+		await ensureVaultFolder(this.core.app, this.calendarTemplatesFolder);
 
 		this.close();
 	}

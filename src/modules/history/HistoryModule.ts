@@ -101,6 +101,15 @@ export class HistoryModule implements HubModule {
 		this.unsubscribers = [];
 	}
 
+	/**
+	 * Reset nível "data"/"all": limpa APENAS os dados gerados (as entradas).
+	 * Preferências do usuário (maxEntries, mutedEvents) ficam intactas — são
+	 * configuração, não dado. No nível "config" este hook não é chamado.
+	 */
+	onResetData(): Promise<void> {
+		return (this.context?.updateSettings({ entries: [] }) ?? Promise.resolve([])).then(() => void 0);
+	}
+
 	getHealthStatus() {
 		return { ok: true, summary: `${this.readSettings().entries.length} entrada(s) registrada(s)` };
 	}

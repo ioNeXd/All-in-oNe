@@ -17,6 +17,7 @@ import type { EventBus } from "./EventBus";
  */
 export class VaultEventBridge {
 	private detachers: (() => void)[] = [];
+	private stopped = false;
 
 	/**
 	 * @param isLifecycleHandlingNotes Quando retorna true, o módulo de Ciclo
@@ -45,6 +46,11 @@ export class VaultEventBridge {
 		// indexação inicial. Só começamos a escutar depois que o layout está
 		// pronto, senão o usuário levaria centenas de notificações ao abrir.
 		this.app.workspace.onLayoutReady(() => {
+			// Corrida de desligamento: se o plugin foi descarregado ANTES do
+			// layout ficar pronto, o stop() rodou com detachers vazio — sem
+			// este guard, os listeners seriam registrados depois e nunca
+			// removidos (histórico/notificações vivas com plugin "desligado").
+			if (this.stopped) return;
 			this.register("create", (file) =>
 				this.emitFor(file, "file:created", "folder:created", "Criado")
 			);
@@ -105,6 +111,7 @@ export class VaultEventBridge {
 	}
 
 	stop(): void {
+		this.stopped = true;
 		this.detachers.forEach((d) => d());
 		this.detachers = [];
 	}

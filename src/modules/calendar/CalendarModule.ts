@@ -1,5 +1,6 @@
 import { TFile, TFolder, normalizePath, Setting, Notice, Modal, App } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
+import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
 import { type CalendarEvent, monthFolderName, describeEvent, shouldFire, MONTH_NAMES } from "./EventTypes";
 import { ReminderModal, playReminderChime } from "./ReminderModal";
 import { attachFilterSuggest } from "../../ui/FilterSuggest";
@@ -551,13 +552,13 @@ export class CalendarModule implements HubModule {
 
 		for (let day = 1; day <= daysInMonth; day++) {
 			const date = new Date(year, month, day);
-		const file = this.findNoteForDate(date);
-		let pending = false;
-		if (file) {
-			const fm = app.metadataCache.getFileCache(file)?.frontmatter;
-			pending = isPendingStatus(fm?.status);
-		}
-		result[day] = { hasNote: !!file, pending, events: this.eventsForDate(date) };
+			const file = this.findNoteForDate(date);
+			let pending = false;
+			if (file) {
+				const fm = app.metadataCache.getFileCache(file)?.frontmatter;
+				pending = isPendingStatus(fm?.status);
+			}
+			result[day] = { hasNote: !!file, pending, events: this.eventsForDate(date) };
 		}
 		return result;
 	}
@@ -681,7 +682,7 @@ export class CalendarModule implements HubModule {
 		}
 
 		const folder = path.substring(0, path.lastIndexOf("/"));
-		await this.ensureFolder(folder);
+		await ensureVaultFolder(this.context!.app, folder);
 
 		const year = date.getFullYear();
 		const month = pad(date.getMonth() + 1);
@@ -728,17 +729,6 @@ export class CalendarModule implements HubModule {
 		return this.context!.app.vault.read(file);
 	}
 
-	private async ensureFolder(path: string): Promise<void> {
-		const segments = path.split("/");
-		let current = "";
-		for (const segment of segments) {
-			current = current ? `${current}/${segment}` : segment;
-			const node = this.context!.app.vault.getAbstractFileByPath(current);
-			if (!(node instanceof TFolder)) {
-				await this.context!.app.vault.createFolder(current).catch(() => void 0);
-			}
-		}
-	}
 
 	async addEvent(event: Omit<CalendarEvent, "id">): Promise<void> {
 		const settings = this.readSettings();
@@ -773,8 +763,8 @@ export class CalendarModule implements HubModule {
 	async linkExistingNote(file: TFile, refId: string): Promise<void> {
 		const folder = this.readSettings().eventNotesFolder;
 
-		await this.ensureFolder(folder);
-		const target = await this.uniquePath(normalizePath(`${folder}/${file.name}`));
+		await ensureVaultFolder(this.context!.app, folder);
+		const target = await uniqueVaultPath(this.context!.app, normalizePath(`${folder}/${file.name}`));
 		if (target !== file.path) {
 			await this.context!.app.fileManager.renameFile(file, target);
 		}
@@ -790,8 +780,8 @@ export class CalendarModule implements HubModule {
 	/** Cria uma nota NOVA já vinculada, na pasta configurável (padrão: Calendario/notas). */
 	async createLinkedNote(name: string, refId: string, folderOverride?: string): Promise<TFile> {
 		const folder = folderOverride?.trim() || this.readSettings().eventNotesFolder;
-		await this.ensureFolder(folder);
-		const path = await this.uniquePath(normalizePath(`${folder}/${name}.md`));
+		await ensureVaultFolder(this.context!.app, folder);
+		const path = await uniqueVaultPath(this.context!.app, normalizePath(`${folder}/${name}.md`));
 		const file = await this.context!.app.vault.create(path, "");
 		await this.context!.app.fileManager.processFrontMatter(file, (fm) => {
 			fm.origem_evento = refId;
@@ -813,21 +803,12 @@ export class CalendarModule implements HubModule {
 		await leaf.openFile(file, { active: false });
 	}
 
-	private async uniquePath(desired: string): Promise<string> {
-		if (!this.context!.app.vault.getAbstractFileByPath(desired)) return desired;
-		const dot = desired.lastIndexOf(".");
-		const base = dot === -1 ? desired : desired.slice(0, dot);
-		const ext = dot === -1 ? "" : desired.slice(dot);
-		let counter = 2;
-		while (this.context!.app.vault.getAbstractFileByPath(`${base} ${counter}${ext}`)) counter++;
-		return `${base} ${counter}${ext}`;
-	}
 
 	/** Pasta das notas de evento, criada sob demanda. */
 	async ensureEventNotesFolder(): Promise<string> {
 		const folder = this.readSettings().eventNotesFolder;
 
-		await this.ensureFolder(folder);
+		await ensureVaultFolder(this.context!.app, folder);
 		return folder;
 	}
 

@@ -13,6 +13,9 @@ contribuições que sigam a arquitetura existente são bem-vindas.
    acontece pelo `EventBus` (`src/core/EventBus.ts`), via `context.bus`.
 3. Caminhos de pasta são sempre configuráveis pelo usuário — nunca hardcode
    um caminho dentro de um módulo.
+4. Regras de negócio puras (sem I/O de vault) vivem em arquivos próprios
+   ao lado do módulo (ex.: `templates/NoteStatus.ts`, `mcp/WriteRules.ts`)
+   e têm suíte de teste própria que importa o código real.
 
 ## Adicionando um módulo novo
 
@@ -23,24 +26,48 @@ contribuições que sigam a arquitetura existente são bem-vindas.
    entre módulos automaticamente na Central de Eventos do Lobby.
 4. Registre a instância do módulo em `src/main.ts`, dentro do array `modules`.
 5. Não é necessário alterar `HubCore`, `EventBus`, `SettingsManager` ou
-   `LobbyView` para adicionar um módulo — se você sentir necessidade de
+   `LobbyRenderer` para adicionar um módulo — se você sentir necessidade de
    alterar algum desses arquivos, é sinal de que o contrato pode estar
    faltando algo, e vale abrir uma discussão antes de um PR grande.
+6. Se o módulo registrar comandos nativos, use `context.registerCommand` —
+   a ponte do núcleo (`src/core/CommandBridge.ts`: registro único +
+   `checkCallback`) cuida do ciclo de vida. Não chame `addCommand`
+   diretamente no `onEnable`.
 
 ## Rodando localmente
 
 ```bash
 npm install
 npm run dev      # build com watch
-npm test         # testes unitários (core/contrato)
+npm test         # 103 testes em 14 arquivos (vitest)
 ```
+
+Os testes importam o **código real** do plugin: o pacote `obsidian` é
+substituído em runtime de teste por um stub (`tests/mocks/obsidian.ts`,
+via alias no `vitest.config.ts`). Ao escrever testes novos, importe as
+implementações de verdade em vez de reimplementar regras à mão — cópias
+espelhadas divergem do código sem ninguém perceber.
 
 Para testar dentro do Obsidian de verdade, copie a pasta do repositório
 (ou os arquivos `main.js`, `manifest.json`, `styles.css` já buildados) para
 `<seu-vault>/.obsidian/plugins/All-in-oNe/`, e habilite o plugin.
 
+## Convenções do projeto
+
+- **Erros nunca ficam silenciosos em caminhos de UI**: falha de gravação,
+  validação bloqueada ou rollback mantêm o contexto aberto (modal/painel)
+  e mostram `Notice` com o motivo.
+- **Escritas no vault passam por `FileWriteQueue`** (`context.queue`).
+- **Criação de pastas usa `VaultPaths`** (o `vault.createFolder` do
+  Obsidian não cria pastas-pai).
+- **`TFile.path` é mutado pelo Obsidian ao renomear** — capture o caminho
+  original numa constante ANTES de qualquer rename.
+- Todo texto de UI está em português (i18n é uma decisão futura, não
+  dívida).
+
 ## Versionamento
 
-O projeto segue SemVer. Uma mudança que quebra o contrato de módulo
+O projeto segue SemVer a partir da v0.1.0 (baseline — veja
+`CHANGELOG.md`). Uma mudança que quebra o contrato de módulo
 (`ModuleContract.ts`) é sempre um bump de major version — módulos escritos
 contra a versão anterior do contrato podem parar de funcionar.

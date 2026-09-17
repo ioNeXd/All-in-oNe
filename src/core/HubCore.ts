@@ -101,6 +101,11 @@ export class HubCore {
 		const shouldEnable = this.enabledModuleIds.has(module.manifest.id) && !this.safeMode;
 		if (shouldEnable) {
 			await this.enableModule(module.manifest.id);
+		} else if (this.safeMode) {
+			// O Set foi semeado pela config no init(); um módulo bloqueado pelo
+			// modo seguro NÃO está habilitado de verdade — a memória não pode
+			// dizer o contrário (Lobby/checkCallback leriam estado falso).
+			this.enabledModuleIds.delete(module.manifest.id);
 		}
 	}
 
@@ -109,7 +114,21 @@ export class HubCore {
 			app: this.app,
 			bus: this.bus,
 			getSettings: () => this.settings.getModuleSettings(id),
-			updateSettings: (patch) => this.settings.updateModuleSettings(id, patch),
+			updateSettings: async (patch) => {
+				const issues = await this.settings.updateModuleSettings(id, patch);
+				// Se a validação bloqueou, nada foi persistido — notificar seria
+				// mentir para o módulo (o hook veria a config ANTIGA como se nova).
+				if (issues.length > 0) return issues;
+				// Contrato v2: onSettingsChange dispara quando a config DO MÓDULO
+				// muda, não só no reset. Síncrono e isolado — erro de um módulo
+				// reagindo não quebra a gravação nem os demais.
+				try {
+					this.modules.get(id)?.onSettingsChange?.(this.settings.get());
+				} catch (err) {
+					console.error(`[All iₙ oNe] Módulo "${id}" falhou ao reagir à mudança de config:`, err);
+				}
+				return issues;
+			},
 			getFullSettings: () => this.settings.get(),
 			log: (message, data) =>
 				this.logHistory({ type: "generic", origin: id, message, path: data?.path as string }),
@@ -141,6 +160,12 @@ export class HubCore {
 			this.lastEnableErrors.delete(id);
 		} catch (err) {
 			console.error(`[All iₙ oNe] Falha ao habilitar o módulo "${id}":`, err);
+			// O Set foi semeado por init() a partir da config — se o onEnable
+			// falhou, a memória precisa voltar a refletir a realidade: módulo
+			// NÃO habilitado. Sem isto, o Lobby mostraria "ligado" num módulo
+			// que falhou e o checkCallback deixaria seus comandos executáveis
+			// fora do ciclo de vida.
+			this.enabledModuleIds.delete(id);
 			this.lastEnableErrors.set(id, describeError(err));
 			this.logHistory({
 				type: "module-error",
@@ -238,22 +263,56 @@ export class HubCore {
 		);
 	}
 
-	/** Restaurar tudo — 3 níveis, conforme decidido na fase de design. */
+	/**
+	 * Restaurar tudo — escadinha real de 3 níveis, como promete o modal:
+	 * - "config": só a configuração volta ao padrão; dados gerados intactos.
+	 * - "data": configuração intacta; módulos limpam seus dados via onResetData;
+	 *   histórico do núcleo/bus também é limpo.
+	 * - "all": config padrão + onResetData (config E dados zerados).
+	 */
 	async resetAll(level: "config" | "data" | "all"): Promise<void> {
-		await this.settings.reset(level);
+		if (level === "all") await this.settings.reset("all");
+		else if (level === "config") await this.settings.reset("config");
+		if (level !== "data") {
+			// O reset substituiu `enabledModules` no disco (default = todos
+			// ligados), mas o Set em memória — que o Lobby usa para toggles e
+			// diagnóstico — só é sincronizado no init(). Sem reconciliar, o
+			// Lobby mostraria "Desligado" num módulo que a config diz estar
+			// ligado (e o estado só bateria após reiniciar o Obsidian).
+			// enableModule/disableModule mantêm o Set e isolam falhas.
+			const desired = new Set(this.settings.get().enabledModules);
+			for (const module of this.getModules()) {
+				const id = module.manifest.id;
+				if (desired.has(id) && !this.isModuleEnabled(id)) await this.enableModule(id);
+				else if (!desired.has(id) && this.isModuleEnabled(id)) await this.disableModule(id);
+			}
+		}
 		if (level !== "config") {
+			// Dados gerados: hook do contrato + histórico do núcleo/bus. Roda para
+			// TODOS os módulos registrados, não só os ligados — dado gerado é dado
+			// gerado; se sobrevivesse ao reset, voltaria ao religar o módulo.
+			for (const module of this.getModules()) {
+				try {
+					await module.onResetData?.();
+				} catch (err) {
+					console.error(`[All iₙ oNe] Módulo "${module.manifest.id}" falhou ao limpar dados no reset:`, err);
+				}
+			}
 			this.history = [];
 			this.bus.clearHistory();
 		}
-		// O reset substituiu a configuração inteira (inclusive as fatias por
-		// módulo). Sem avisar, cada módulo segue rodando com a config ANTIGA em
-		// memória (ex.: Histórico com 500 entradas de volta na próxima gravação).
-		for (const module of this.getModules()) {
-			if (this.isModuleEnabled(module.manifest.id)) {
-				try {
-					module.onSettingsChange?.(this.settings.get());
-				} catch (err) {
-					console.error(`[All iₙ oNe] Módulo "${module.manifest.id}" falhou ao reagir ao reset:`, err);
+		if (level !== "data") {
+			// A fatia de cada módulo pode ter mudado no disco; sem avisar, cada
+			// módulo seguiria com a config ANTIGA em memória (ex.: Histórico com
+			// 500 entradas de volta na próxima gravação). No "data" nada mudou
+			// na config — os módulos acabaram de escrever o próprio dado.
+			for (const module of this.getModules()) {
+				if (this.isModuleEnabled(module.manifest.id)) {
+					try {
+						module.onSettingsChange?.(this.settings.get());
+					} catch (err) {
+						console.error(`[All iₙ oNe] Módulo "${module.manifest.id}" falhou ao reagir ao reset:`, err);
+					}
 				}
 			}
 		}

@@ -1,4 +1,4 @@
-import { Plugin, WorkspaceLeaf, Modal, App, Setting } from "obsidian";
+import { Plugin, WorkspaceLeaf, Modal, App, Setting, Notice } from "obsidian";
 import { HubCore } from "./core/HubCore";
 import type { HubSettings } from "./core/types";
 import { LOBBY_VIEW_TYPE, LobbyView, LobbyModal } from "./ui/LobbyView";
@@ -12,6 +12,7 @@ import { NotificationsModule } from "./modules/notifications/NotificationsModule
 import { HistoryModule } from "./modules/history/HistoryModule";
 import { FileLifecycleModule } from "./modules/filelifecycle/FileLifecycleModule";
 import { VaultEventBridge } from "./core/VaultEventBridge";
+import { CommandBridge } from "./core/CommandBridge";
 
 /**
  * PLUGIN PRINCIPAL
@@ -24,7 +25,7 @@ import { VaultEventBridge } from "./core/VaultEventBridge";
  * ORDEM DE INICIALIZAÇÃO (importante — não reordenar sem entender por quê):
  *   1. HubCore é criado e `init()` carrega/migra a configuração salva.
  *   2. A view do Lobby é registrada no workspace do Obsidian.
- *   3. Os 6 módulos são instanciados e registrados no núcleo — o núcleo
+ *   3. Os 8 módulos são instanciados e registrados no núcleo — o núcleo
  *      decide, com base em `enabledModules`, quais de fato habilitar
  *      (lazy loading: um módulo desligado nunca chega a rodar onEnable).
  *   4. Comandos e ícone da ribbon são registrados por último, já que alguns
@@ -43,9 +44,17 @@ export default class IoneHubPlugin extends Plugin {
 		);
 
 		// Ponte para que módulos consigam registrar comandos nativos do
-		// Obsidian através do contrato (context.registerCommand).
+		// Obsidian através do contrato (context.registerCommand). A lógica está
+		// em src/core/CommandBridge.ts (testada) — aqui só a fiação:
+		// - register = o addCommand real do plugin;
+		// - isModuleEnabled = o estado de verdade do núcleo, consultado a cada
+		//   invocação (checkCallback), nunca capturado no momento do registro.
+		const commandBridge = new CommandBridge(
+			(cmd) => this.addCommand(cmd),
+			(moduleId) => this.core.isModuleEnabled(moduleId)
+		);
 		this.core.onRegisterCommand = (moduleId, cmdId, name, callback) => {
-			this.addCommand({ id: `${moduleId}-${cmdId}`, name, callback });
+			commandBridge.registerCommand(moduleId, cmdId, name, callback);
 		};
 
 		await this.core.init();
@@ -123,15 +132,23 @@ export default class IoneHubPlugin extends Plugin {
 
 		// "ask-each-time": pergunta a cada abertura, com opção de fixar a escolha.
 		new OpenModeModal(this.app, async (choice, remember) => {
-			if (remember) {
-				const settings = this.core.settings.get();
-				await this.core.settings.save({
-					...settings,
-					lobby: { ...settings.lobby, openMode: choice },
-				});
+			try {
+				if (remember) {
+					const settings = this.core.settings.get();
+					await this.core.settings.save({
+						...settings,
+						lobby: { ...settings.lobby, openMode: choice },
+					});
+				}
+				if (choice === "modal") new LobbyModal(this.app, this.core).open();
+				else await this.openLobbyTab();
+			} catch (err) {
+				// Mesma defesa dos outros botões que gravam no disco: o onClick
+				// do Obsidian engole rejections — sem isto, falha de save/setViewState
+				// morreria sem aviso e o usuário ficaria sem o Lobby aberto.
+				console.error("[All iₙ oNe] Falha ao abrir o Lobby:", err);
+				new Notice("Não foi possível abrir o All iₙ oNe. Veja o console.", 8000);
 			}
-			if (choice === "modal") new LobbyModal(this.app, this.core).open();
-			else await this.openLobbyTab();
 		}).open();
 	}
 

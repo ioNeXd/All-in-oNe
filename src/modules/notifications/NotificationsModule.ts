@@ -259,6 +259,14 @@ export class NotificationsModule implements HubModule {
 		this.unsubscribers = [];
 	}
 
+	/**
+	 * Reset nível "data"/"all": limpa o histórico de notificações (dado
+	 * gerado). Regras e não-perturbe ficam intactos — são configuração.
+	 */
+	onResetData(): Promise<void> {
+		return (this.context?.updateSettings({ history: [] }) ?? Promise.resolve([])).then(() => void 0);
+	}
+
 	private readSettings(): NotificationsModuleSettings {
 		return { ...NOTIFICATIONS_DEFAULTS, ...this.context?.getSettings<NotificationsModuleSettings>() };
 	}

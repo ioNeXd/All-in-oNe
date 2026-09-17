@@ -1,5 +1,6 @@
 import { TFile, TFolder, normalizePath, Setting, Notice, Modal, App } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
+import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
 import { decidePendingAction, isPendingStatus as isStillPending } from "./NoteStatus";
 
 export interface FolderTemplateRule {
@@ -257,7 +258,7 @@ export class TemplatesModule implements HubModule {
 							return;
 						}
 						draft.folderPath = draft.folderPath.trim().replace(/^\/+|\/+$/g, "");
-						await this.ensureFolder(draft.folderPath);
+						await ensureVaultFolder(this.context!.app, draft.folderPath);
 						await this.saveRule(draft);
 						new Notice(`Regra salva. Pasta "${draft.folderPath}" pronta para uso.`);
 						this.refreshPanel(container);
@@ -438,9 +439,9 @@ export class TemplatesModule implements HubModule {
 
 			if (action.move) {
 				const targetFolder = origem.substring(0, origem.lastIndexOf("/"));
-				await this.ensureFolder(targetFolder);
+				await ensureVaultFolder(this.context!.app, targetFolder);
 
-				const finalPath = await this.uniquePath(origem);
+				const finalPath = await uniqueVaultPath(this.context!.app, origem);
 				await this.context!.fileWriteQueueRun(file.path, () =>
 					this.context!.app.fileManager.renameFile(file, finalPath)
 				);
@@ -492,8 +493,8 @@ export class TemplatesModule implements HubModule {
 		const category = parts.length > 1 ? parts[0] : undefined;
 		const pendingFolder = category ? `${category}/Pendente` : "Pendente";
 
-		await this.ensureFolder(pendingFolder);
-		const newPath = await this.uniquePath(normalizePath(`${pendingFolder}/${file.name}`));
+		await ensureVaultFolder(this.context!.app, pendingFolder);
+		const newPath = await uniqueVaultPath(this.context!.app, normalizePath(`${pendingFolder}/${file.name}`));
 
 		// Mesma regra do handleNoteModified: capturar o caminho ANTES do rename,
 		// porque o TFile.path muda in-place no meio desta operação.
@@ -505,20 +506,6 @@ export class TemplatesModule implements HubModule {
 			);
 		} finally {
 			this.movingFiles.delete(pathBefore);
-		}
-	}
-
-	/** Cria a pasta e todas as pastas-pai que faltarem. */
-	async ensureFolder(path: string): Promise<void> {
-		if (!path) return;
-		const segments = path.split("/").filter(Boolean);
-		let current = "";
-		for (const segment of segments) {
-			current = current ? `${current}/${segment}` : segment;
-			const node = this.context!.app.vault.getAbstractFileByPath(current);
-			if (!(node instanceof TFolder)) {
-				await this.context!.app.vault.createFolder(current).catch(() => void 0);
-			}
 		}
 	}
 

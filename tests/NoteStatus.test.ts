@@ -88,6 +88,13 @@ describe("decidePendingAction — o que fazer quando 'Pendente' saiu do status",
 		});
 	});
 
+	it("lista vazia (variação do Obsidian ao remover o último item): normaliza E move", () => {
+		expect(decidePendingAction([], origem, pendente)).toEqual({
+			rewriteStatus: true,
+			move: true,
+		});
+	});
+
 	it("status removido por inteiro (usuário apagou a propriedade): normaliza E move", () => {
 		expect(decidePendingAction(undefined, origem, pendente)).toEqual({
 			rewriteStatus: true,

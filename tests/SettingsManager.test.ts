@@ -53,4 +53,25 @@ describe("SettingsManager", () => {
 		expect(manager.getModuleSettings("mcp")).toEqual({});
 		expect((getStored() as any).schemaVersion).toBe(1);
 	});
+
+	it("reset 'config' zera fatias de módulo E caminhos globais", async () => {
+		const { manager } = makeManager(null);
+		await manager.init();
+		await manager.updateModuleSettings("history", { maxEntries: 42 });
+
+		await manager.reset("config");
+
+		expect(manager.getModuleSettings("history")).toEqual({});
+		expect(manager.get().paths.calendarFolder).toBe("Calendario"); // voltou ao default
+	});
+
+	it("reset 'all' também zera configuração (dados são zerados via hook, no HubCore)", async () => {
+		const { manager } = makeManager(null);
+		await manager.init();
+		await manager.updateModuleSettings("history", { maxEntries: 42 });
+
+		await manager.reset("all");
+
+		expect(manager.getModuleSettings("history")).toEqual({});
+	});
 });

@@ -33,9 +33,6 @@ export class SettingsManager {
 		this.modules.set(module.manifest.id, module);
 	}
 
-	unregisterModuleForValidation(id: ModuleId): void {
-		this.modules.delete(id);
-	}
 
 	async init(): Promise<HubSettings> {
 		const loaded = await this.load();
@@ -148,7 +145,10 @@ export class SettingsManager {
 		return [];
 	}
 
-	async updateModuleSettings(moduleId: ModuleId, patch: Record<string, unknown>): Promise<void> {
+	async updateModuleSettings(
+		moduleId: ModuleId,
+		patch: Record<string, unknown>
+	): Promise<ConfigValidationIssue[]> {
 		const next: HubSettings = {
 			...this.current,
 			modules: {
@@ -156,31 +156,24 @@ export class SettingsManager {
 				[moduleId]: { ...(this.current.modules[moduleId] ?? {}), ...patch },
 			},
 		};
-		await this.save(next);
+		// Retorna as issues para o chamador (HubCore) saber se a gravação foi
+		// bloqueada — antes o retorno era engolido aqui e um patch inválido
+		// desaparecia em silêncio.
+		return this.save(next);
 	}
 
 	getModuleSettings<T = Record<string, unknown>>(moduleId: ModuleId): T {
 		return (this.current.modules[moduleId] ?? {}) as T;
 	}
 
-	/** Reset em 3 níveis, conforme decidido: config / dados gerados / tudo. */
-	async reset(level: "config" | "data" | "all"): Promise<void> {
-		if (level === "config") {
-			const fresh = createDefaultSettings();
-			await this.save(fresh, { skipValidation: true });
-			return;
-		}
-		if (level === "data") {
-			// Reseta config e sinaliza (via evento, emitido pelo HubCore que
-			// chama este método) para que módulos limpem seus próprios dados
-			// gerados (cache, histórico) sem tocar em notas do usuário.
-			const fresh = createDefaultSettings();
-			await this.save(fresh, { skipValidation: true });
-			return;
-		}
-		// "all" é tratado no HubCore, que também decide o que fazer com
-		// arquivos gerados no vault (ex.: pastas Pendente) — o
-		// SettingsManager só cuida da configuração em si.
+	/**
+	 * Reset de configuração (níveis "config" e "all" do Lobby): volta TUDO
+	 * à configuração padrão — módulos habilitados, caminhos, fatias por
+	 * módulo. Dados gerados (histórico etc.) NÃO passam por aqui: o nível
+	 * "data" é orquestrado pelo HubCore via hook onResetData, sem tocar na
+	 * configuração — é exatamente a diferença entre os níveis.
+	 */
+	async reset(level: "config" | "all"): Promise<void> {
 		const fresh = createDefaultSettings();
 		await this.save(fresh, { skipValidation: true });
 	}

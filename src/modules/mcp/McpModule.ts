@@ -89,6 +89,8 @@ export class McpModule implements HubModule {
 
 	private context?: ModuleContext;
 	private server?: McpServerHandle;
+	/** Porta em que o servidor está DE FATO escutando (a config pode divergir até o restart). */
+	private listeningPort?: number;
 	private actionTimestamps: number[] = [];
 	private lastServerError?: string;
 	/** Escopo temporário: libera escrita até este timestamp, mesmo com readOnly ligado. */
@@ -113,6 +115,7 @@ export class McpModule implements HubModule {
 				getToken: () => deobfuscate(this.readSettings().tokenObfuscated),
 				handleToolCall: (toolName, args) => this.handleToolCall(toolName, args),
 			});
+			this.listeningPort = settings.port;
 		} catch (err) {
 			this.lastServerError = this.describeServerError(err, settings.port);
 			throw new Error(this.lastServerError);
@@ -122,7 +125,9 @@ export class McpModule implements HubModule {
 		await context.bus.emit("mcp:server-started", { port: settings.port }, "mcp");
 
 		context.registerCommand("mcp-restart-server", "MCP: Reiniciar servidor", () => {
-			void this.restart();
+			// lastServerError já fica visível no painel; aqui só evita rejection
+			// não tratada no console quando o restart falha (ex.: porta ocupada).
+			void this.restart().catch(() => void 0);
 		});
 	}
 
@@ -138,9 +143,36 @@ export class McpModule implements HubModule {
 	}
 
 	async onDisable(): Promise<void> {
-		await this.server?.stop();
-		this.server = undefined;
+		// Sinaliza para um restart em voo: depois de parar o servidor antigo, ele
+		// NÃO deve reabrir — sem isto, desligar o módulo durante um restart
+		// deixava um servidor vivo com o módulo já desligado.
+		this.disabling = true;
+		try {
+			await this.restartInFlight?.catch(() => void 0);
+		} finally {
+			await this.server?.stop();
+			this.server = undefined;
+			this.listeningPort = undefined;
+			this.restartInFlight = undefined;
+			this.disabling = false;
+		}
 		await this.context?.bus.emit("mcp:server-stopped", {}, "mcp");
+	}
+
+	/**
+	 * Contrato v2: dispara em toda mudança de config do módulo (e nos resets
+	 * "config"/"all"). Se a porta CONFIGURADA deixou de ser a porta EM ESCUTA
+	 * (ex.: reset "all" zerou a config, ou o usuário aplicou outra porta),
+	 * reinicia o servidor para que o que escuta volte a ser o que está escrito.
+	 * Erro aqui já foi tratado: o núcleo isola exceções de onSettingsChange.
+	 */
+	onSettingsChange(): void {
+		if (this.server && this.readSettings().port !== this.listeningPort) {
+			void this.restart().catch(() => void 0);
+			return;
+		}
+		// Restart “grátis”: permitlistas e dry-run são lidos por chamada, token via
+		// getToken() — nada além da porta exige reinício.
 	}
 
 	validateSettings(settings: HubSettings): ConfigValidationIssue[] {
@@ -159,7 +191,7 @@ export class McpModule implements HubModule {
 		}
 		return {
 			ok: running,
-			summary: running ? `Rodando na porta ${this.readSettings().port}` : "Parado",
+			summary: running ? `Rodando na porta ${this.listeningPort ?? this.readSettings().port}` : "Parado",
 		};
 	}
 
@@ -354,9 +386,26 @@ export class McpModule implements HubModule {
 		return { ...MCP_DEFAULTS, ...this.context?.getSettings<McpModuleSettings>() };
 	}
 
-	private async restart(): Promise<void> {
+	private restartInFlight?: Promise<void>;
+	/** true enquanto onDisable drena o restart em voo. */
+	private disabling = false;
+
+	private restart(): Promise<void> {
+		// Restart em cascata: se já há um restart em andamento (ex.: o usuário
+		// clicou de novo enquanto a porta antiga ainda liberava), os chamadores
+		// esperam O MESMO. Dois restarts em paralelo fazem o segundo falhar com
+		// EADDRINUSE contra o primeiro e o painel exibir erro fantasma.
+		const pending = this.restartInFlight ?? this.doRestart();
+		this.restartInFlight = pending;
+		return pending.finally(() => {
+			if (this.restartInFlight === pending) this.restartInFlight = undefined;
+		});
+	}
+
+	private async doRestart(): Promise<void> {
 		await this.server?.stop();
 		this.server = undefined;
+		if (this.disabling) return; // desligado durante o restart: não reabrir
 		const settings = this.readSettings();
 		try {
 			this.server = await createMcpServer({
@@ -364,6 +413,7 @@ export class McpModule implements HubModule {
 				getToken: () => deobfuscate(this.readSettings().tokenObfuscated),
 				handleToolCall: (toolName, args) => this.handleToolCall(toolName, args),
 			});
+			this.listeningPort = settings.port;
 			this.lastServerError = undefined;
 		} catch (err) {
 			this.lastServerError = this.describeServerError(err, settings.port);
@@ -686,8 +736,12 @@ function describe(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
-/** Validação do formulário, com mensagens que dizem o que fazer. */
-function validateMcpDraft(draft: {
+/**
+ * Validação do formulário, com mensagens que dizem o que fazer.
+ * Exportada e pura — testada diretamente (foi exatamente aqui que morou o
+ * bug original: porta 80 era aceita silenciosamente e virava 0 no servidor).
+ */
+export function validateMcpDraft(draft: {
 	port: number;
 	rateLimitPerMinute: number;
 }): string[] {

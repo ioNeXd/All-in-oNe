@@ -1,10 +1,11 @@
 name: Build and Release
 
+# CI em push para main e PRs; release em tags v* (padrão SemVer: v0.1.0).
 on:
   push:
     branches: [main]
     tags:
-      - "*"
+      - "v*"
   pull_request:
     branches: [main]
 
@@ -16,12 +17,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npm install
+          cache: "npm"
+      # npm ci (não install): usa o package-lock.json — build reprodutível,
+      # o que importa para o checksum do main.js bater entre CI e release.
+      - run: npm ci
       - run: npm run build
       - run: npm test
 
   release:
-    if: startsWith(github.ref, 'refs/tags/')
+    # Só roda em push de tag v* — o build-and-test já passou antes (needs).
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
@@ -31,8 +36,44 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npm install
+          cache: "npm"
+      - run: npm ci
       - run: npm run build
+
+      # Guarda: o manifest.json publicado precisa descrever a MESMA versão
+      # da tag. Caso contrário o AutoUpdate entra em loop: baixa o release
+      # "novo", o manifest instalado continua com a versão antiga e a
+      # checagem nunca converge. O version-bump.mjs (npm version) atualiza
+      # manifest.json e versions.json juntos — taggear sem rodar
+      # "npm version" antes é exatamente o erro que este passo pega.
+      - name: Conferir versão do manifest × tag
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          if [ "$TAG_VERSION" != "$MANIFEST_VERSION" ]; then
+            echo "::error::manifest.json (v$MANIFEST_VERSION) difere da tag ($GITHUB_REF_NAME). Rode \"npm version $TAG_VERSION\" e suba antes de taggear."
+            exit 1
+          fi
+
+      # Checksums vão para o CORPO do release: é de lá que o parseChecksums
+      # do módulo AutoUpdate lê (formato "sha256 <arquivo>: <hash>", coberto
+      # por tests/ReleaseUtils.test.ts). Sem esta seção, a verificação
+      # SHA-256 do update nunca rodaria para ninguém.
+      - name: Gerar checksums SHA-256
+        id: checksums
+        run: |
+          {
+            echo "body<<EOF"
+            echo "### Checksums SHA-256"
+            echo ""
+            echo "Confira antes de instalar manualmente: \`sha256sum <arquivo>\`."
+            echo ""
+            echo "sha256 main.js: $(sha256sum main.js | awk '{print $1}')"
+            echo "sha256 manifest.json: $(sha256sum manifest.json | awk '{print $1}')"
+            echo "sha256 styles.css: $(sha256sum styles.css | awk '{print $1}')"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release com os artefatos do plugin
         uses: softprops/action-gh-release@v2
         with:
@@ -40,4 +81,14 @@ jobs:
             main.js
             manifest.json
             styles.css
+          body: ${{ steps.checksums.outputs.body }}
           generate_release_notes: true
+          # Sufixo de pré-lançamento SemVer na tag (ex.: v0.2.0-beta.1) vira
+          # prerelease no GitHub — é o que faz o canal estável/beta do
+          # AutoUpdate funcionar de verdade: estável ignora prereleases,
+          # beta aceita.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          # Os 3 arquivos são o contrato de instalação de um plugin do
+          # Obsidian: faltou um, o release é inútil — falhe em vez de
+          # publicar pela metade.
+          fail_on_unmatched_files: true

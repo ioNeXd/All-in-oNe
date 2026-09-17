@@ -12,7 +12,10 @@ export interface AutoUpdateSettings {
 }
 
 export const AUTOUPDATE_DEFAULTS: AutoUpdateSettings = {
-	repo: "ioNeXd/All-in-oNe", // ajuste para o repositório real do plugin
+	// Repositório real deste plugin (confere com o remote do git). FIXO de
+	// propósito — nunca configurável pela UI: apontar o auto-update para
+	// outro repo abriria caminho para atualização maliciosa.
+	repo: "ioNeXd/All-in-oNe",
 	channel: "stable",
 	lastCheckedAt: 0,
 	checkIntervalMs: 1000 * 60 * 60 * 6, // checa no máximo a cada 6h automaticamente
@@ -136,7 +139,14 @@ export class AutoUpdateModule implements HubModule {
 				btn
 					.setButtonText("Reverter")
 					.setDisabled(!settings.previousVersionBackup)
-					.onClick(() => this.rollback())
+					.onClick(() => {
+						// rollback escreve arquivos no disco — sem catch, uma falha de
+						// IO viraria rejection não tratada sem aviso algum.
+						this.rollback().catch((err) => {
+							console.error("[All iₙ oNe] Falha no rollback:", err);
+							new Notice("All iₙ oNe: falha ao reverter. Veja o console.", 8000);
+						});
+					})
 			);
 	}
 
@@ -249,7 +259,13 @@ export class AutoUpdateModule implements HubModule {
 			this.context?.log(`Plugin atualizado para ${release.tag_name}`);
 		} catch (err) {
 			console.error("[All iₙ oNe] Falha ao aplicar atualização:", err);
-			new Notice("All iₙ oNe: falha ao aplicar a atualização. Nenhum arquivo foi corrompido.");
+			// Honestidade: "nenhum arquivo foi corrompido" só vale para falha de
+			// checksum ANTES da escrita. Se a falha foi no meio da escrita (IO,
+			// disco cheio), o backup feito no início permite rollback.
+			new Notice(
+				"All iₙ oNe: falha ao aplicar a atualização. Se o plugin não carregar, use \"Reverter para a versão anterior\" no painel do módulo — o backup foi feito antes.",
+				10000
+			);
 		}
 	}
 
@@ -283,6 +299,10 @@ export class AutoUpdateModule implements HubModule {
 	}
 
 	private getPluginDir(): string {
+		// Deve bater com o `id` do manifest.json — o Obsidian instala o plugin
+		// em plugins/<id>/. Se o id mudar um dia, mudar aqui JUNTO (a Rodada 7
+		// já trocou o id uma vez; atualizar só um dos lados faria o update
+		// gravar main.js/manifest.json numa pasta que o Obsidian não lê).
 		return `${this.context!.app.vault.configDir}/plugins/All-in-oNe`;
 	}
 
