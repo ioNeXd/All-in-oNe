@@ -1,11 +1,11 @@
 {
-  "id": "All-in-oNe",
-  "name": "All iₙ oNe",
-  "version": "0.1.0",
-  "minAppVersion": "1.5.0",
-  "description": "Hub pessoal e modular para o Obsidian: servidor MCP embutido, editor de estilos, templates automáticos por pasta, calendário com eventos e lembretes, notificações, histórico e auto-update via GitHub — tudo conectado por um núcleo comum de eventos.",
-  "author": "ioNe",
-  "authorUrl": "",
-  "fundingUrl": "",
-  "isDesktopOnly": true
+	"id": "All-in-oNe",
+	"name": "All iₙ oNe",
+	"version": "0.1.1",
+	"minAppVersion": "1.5.0",
+	"description": "Hub pessoal e modular para o Obsidian: servidor MCP embutido, editor de estilos, templates automáticos por pasta, calendário com eventos e lembretes, notificações, histórico e auto-update via GitHub — tudo conectado por um núcleo comum de eventos.",
+	"author": "ioNe",
+	"authorUrl": "",
+	"fundingUrl": "",
+	"isDesktopOnly": true
 }
