@@ -56,7 +56,7 @@ perguntar alguns caminhos básicos.
 npm install
 npm run dev     # build com watch, para desenvolvimento
 npm run build   # build de produção
-npm test        # 103 testes em 14 arquivos — todos importam o código real
+npm test        # 120 testes em 16 arquivos — todos importam o código real
 ```
 
 Veja `CONTRIBUTING.md` para o guia de como o projeto é organizado e como

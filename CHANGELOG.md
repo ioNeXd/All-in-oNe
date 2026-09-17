@@ -15,6 +15,79 @@ o versionamento segue [SemVer](https://semver.org/lang/pt-BR/), conforme
 > valer formalmente: quebra de contrato de módulo = major, feature nova =
 > minor, correção = patch.
 
+## [Não lançado]
+
+Correções da primeira revisão externa pós-baseline — lista de 22 itens,
+todos verificados contra o código: **15 implementados** (abaixo) e 7
+refutados por descreverem estado anterior a correções já aplicadas
+(itens 12, 14, 16, 17, 18, 20 e 22).
+
+### Corrigido
+
+**Servidor MCP**
+
+- Handshake JSON-RPC: `initialize` responde `protocolVersion` (ecoa a
+  versão pedida pelo cliente; default `2025-06-18`), `capabilities`
+  e `serverInfo`; notificações (sem `id`) recebem `202 Accepted` sem
+  corpo — clientes reais (Claude Desktop, Cursor) morriam no primeiro
+  passo, antes de qualquer listagem de ferramentas
+- `stop()` fecha conexões keep-alive (`closeAllConnections`): desligar
+  ou reiniciar o servidor não espera mais clientes pendentes; o
+  diagnóstico mostra a porta REAL em escuta, lida de `server.address()`
+
+**Configurações**
+
+- Lost update de disco: gravações concorrentes disparavam persists fora
+  de ordem — o persist lento do save antigo sobrescrevia o novo e a
+  perda só aparecia ao reiniciar o Obsidian. A persistência agora é
+  serializada numa fila de promises (validação síncrona fora da fila;
+  falha de disco propaga ao chamador sem envenenar a fila)
+- `SettingsManager.reset()` sem parâmetro: a assinatura aceitava
+  `"config" | "all"` executando o mesmo código; a semântica real dos 3
+  níveis de reset vive no `HubCore.resetAll`
+
+**Núcleo de eventos**
+
+- Throttle de `file:created` AGRUPA em vez de descartar: emissões
+  dentro da janela saem no fim dela como `{ coalesced: [...] }` — uma
+  rajada de 200 notas perdia 199 registros de Histórico/Notificações;
+  agora perde zero. Histórico registra um por ocorrência; Notificações
+  toca popup/som só no 1º da rajada
+- Fonte única de verdade de "módulo ligado": novo
+  `context.isModuleEnabled` (estado de RUNTIME, não config persistida);
+  o fallback do Templates lia a config e calava quando o Ciclo de Vida
+  falhava ao habilitar — templates paravam de aplicar em silêncio
+- `context.log` emite `core:log` no bus (a promessa do contrato volta a
+  valer); conflito de sync vira evento `core:sync-conflict`; falha de
+  `onEnable`, `core:module-error`
+
+**Histórico e Notificações**
+
+- Write-behind (janela de 2s): N eventos = 1 escrita de disco em vez de
+  N — o data.json inteiro era gravado a cada evento (dezenas de
+  escritas/min em vault ativo), com flush no desligar e invalidação por
+  geração para reset/limpeza não ressuscitarem entradas
+- Histórico: leitura (painel, diagnóstico) inclui as pendentes na hora
+  (dedupe por id) — sem esperar a janela de flush
+- Histórico: ids com `cryptoRandomId` (mesmo gerador do núcleo,
+  Notificações e MCP) — o padrão anterior colidia no mesmo milissegundo
+
+**Memória e limpeza**
+
+- `FileWriteQueue` remove a chave do Map quando a fila do caminho drena
+  (guarda por dono-atual) — antes crescia a cada caminho tocado na
+  sessão
+- Removido código morto: buffer de histórico do HubCore (zero leitores
+  em produção), `uniquePath` privado do Templates, campo
+  `CalendarEvent.done` (nunca lido nem escrito)
+
+### Alterado
+
+- `ModuleContract`: união `ModuleId` completa com os 8 módulos reais;
+  `isModuleEnabled` documentado como estado de runtime
+- Comentários alinhados ao comportamento real (rotina do calendário:
+  10s com dedupe por minuto; throttle ATRASA, não descarta)
+
 ## [0.1.0] — 2026-09-17
 
 Primeira versão pública da linha de base.

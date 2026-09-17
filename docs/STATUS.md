@@ -7,7 +7,7 @@ módulo está funcional na sua função principal, e as lacunas restantes estão
 listadas aqui sem rodeio.
 
 > Estado da validação nesta linha de base: typecheck estrito ✅ ·
-> **103 testes em 14 arquivos** (todos importando código real, não cópias
+> **120 testes em 16 arquivos** (todos importando código real, não cópias
 > espelhadas) ✅ · build de produção ✅. O que os testes não cobrem é o
 > runtime de verdade no Obsidian — para isso, siga `docs/MANUAL-VALIDATION.md`.
 
@@ -178,7 +178,7 @@ painéis são funcionais mas simples (sem drag-and-drop).
 
 ## Como continuar a partir daqui
 
-1. **Validar o runtime num vault real** — o que os 103 testes não cobrem:
+1. **Validar o runtime num vault real** — o que os 120 testes não cobrem:
    Lobby completo, reset em 3 níveis, servidor MCP respondendo a um cliente
    de verdade, calendário navegando meses, update/rollback.
 2. Pegar a lista de "não implementado" de **um módulo por vez**,

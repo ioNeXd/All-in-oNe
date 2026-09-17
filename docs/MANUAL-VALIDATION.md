@@ -58,8 +58,11 @@ olhos — o objetivo é gerar confiança para o primeiro bump de versão
       `27931` (padrão — escolhida para não colidir com o "Local REST API");
 - [ ] **Configurar um cliente MCP real** (Claude Desktop, Cursor ou
       `mcp-remote`) apontando para `http://127.0.0.1:27931` com o token do
-      painel; ferramentas `read_note`, `list_folder`, `search_vault`,
-      `describe_vault`, `get_note_metadata` funcionam no cliente;
+      painel. O cliente conclui o **handshake** sozinho (`initialize` →
+      `notifications/initialized` — implementado; antes disso, clientes
+      reais falhavam no primeiro passo) e só depois lista as ferramentas;
+      `read_note`, `list_folder`, `search_vault`, `describe_vault`,
+      `get_note_metadata` funcionam no cliente;
 - [ ] **Sem token** (requisição sem `Authorization`): cliente recebe erro —
       autenticação antes de qualquer leitura;
 - [ ] Token errado: erro imediato; token certo: funciona;
@@ -196,7 +199,13 @@ olhos — o objetivo é gerar confiança para o primeiro bump de versão
       notificação não colidem (duas ações rápidas seguidas ficam **duas**
       entradas no histórico);
 - [ ] Histórico do módulo: filtro por tipo com autocomplete em português;
-      persiste entre recargas do plugin (desabilitar/habilitar o Obsidian).
+      persiste entre recargas do plugin (desabilitar/habilitar o Obsidian);
+- [ ] **Rajada de criação** (selecionar 20+ notas e criar): o Histórico do
+      módulo registra **todas** as ocorrências (throttle do bus agrupa, não
+      descarta); Notificações toca popup/som apenas no 1º item da rajada;
+- [ ] **Leitura fresca**: registrar um evento e abrir o diagnóstico do
+      Histórico na sequência — a contagem inclui a entrada na hora, sem
+      esperar a janela de gravação de 2s (write-behind);
 
 ## 10. Estabilidade de sessão e desligamento
 
