@@ -1,5 +1,6 @@
 import { Setting, Notice } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
+import { cryptoRandomId } from "../../core/types";
 
 /**
  * Janela de coalescência das gravações (write-behind). O Histórico recebe
@@ -153,7 +154,19 @@ export class HistoryModule implements HubModule {
 	}
 
 	private readSettings(): HistoryModuleSettings {
-		return { ...HISTORY_DEFAULTS, ...this.context?.getSettings<HistoryModuleSettings>() };
+		const settings = { ...HISTORY_DEFAULTS, ...this.context?.getSettings<HistoryModuleSettings>() };
+		// As pendentes do write-behind fazem parte do estado lógico — leitura
+		// (painel, contagem do diagnóstico) inclui o que ainda não chegou ao
+		// disco, sem esperar a janela de flush. Mesmo contrato do
+		// NotificationsModule.readSettings: pendentes primeiro, dedupe por id
+		// contra o que já está persistido, teto de maxEntries.
+		if (this.pendingEntries.length > 0) {
+			const persisted = settings.entries.filter(
+				(e) => !this.pendingEntries.some((p) => p.id === e.id)
+			);
+			settings.entries = [...this.pendingEntries, ...persisted].slice(0, settings.maxEntries);
+		}
+		return settings;
 	}
 
 	private record(
@@ -165,7 +178,10 @@ export class HistoryModule implements HubModule {
 		if (settings.mutedEvents.includes(eventName)) return;
 
 		const entry: HistoryEntryRecord = {
-			id: `h-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+			// cryptoRandomId (mesmo gerador do núcleo): duas entradas no mesmo
+			// milissegundo não colidem — o id é chave do dedupe contra pendentes
+			// e do "Limpar histórico" em voo.
+			id: `h-${cryptoRandomId()}`,
 			event: eventName,
 			origin,
 			path: typeof payload?.path === "string" ? payload.path : undefined,
