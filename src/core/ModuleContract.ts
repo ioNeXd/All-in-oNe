@@ -5,9 +5,9 @@ import type { HubSettings } from "./types";
 /**
  * CONTRATO DE MÓDULO
  * -------------------
- * Este é o "contrato" (interface) que todo módulo do plugin — os 6 que já
- * existem (MCP, Estilos, Auto-update, Templates, Calendário, Notificações)
- * e qualquer módulo futuro — precisa implementar.
+ * Este é o "contrato" (interface) que todo módulo do plugin — os 8 que já
+ * existem (MCP, Ciclo de Vida, Estilos, Auto-update, Templates, Calendário,
+ * Notificações, Histórico) e qualquer módulo futuro — precisa implementar.
  *
  * O núcleo (HubCore) nunca conhece os detalhes internos de um módulo. Ele só
  * conhece esta interface. Isso é o que permite adicionar um 7º, 8º, 9º módulo
@@ -33,11 +33,13 @@ import type { HubSettings } from "./types";
 
 export type ModuleId =
 	| "mcp"
+	| "filelifecycle"
 	| "styles"
 	| "autoupdate"
 	| "templates"
 	| "calendar"
 	| "notifications"
+	| "history"
 	| (string & {}); // permite módulos futuros com IDs não previstos aqui
 
 /** Nível de severidade de um campo de configuração inválido. */
@@ -105,7 +107,19 @@ export interface ModuleContext {
 	updateSettings: (patch: Record<string, unknown>) => Promise<ConfigValidationIssue[]>;
 	/** Acesso de leitura ao restante da config (para casos de integração). */
 	getFullSettings: () => HubSettings;
-	/** Log estruturado — cai automaticamente na aba de Histórico do Lobby. */
+	/**
+	 * Estado de RUNTIME: o módulo está ativo AGORA? Não confundir com a config
+	 * persistida (`enabledModules`) — um módulo listado lá pode ter FALHADO ao
+	 * habilitar (erro no onEnable, modo seguro). Decisões do tipo "se o módulo
+	 * X está ligado, ele cuida disso" precisam do estado real, senão os dois
+	 * lados divergem e ninguém faz o trabalho (ex.: fallback do Templates).
+	 */
+	isModuleEnabled: (moduleId: ModuleId) => boolean;
+	/**
+	 * Log estruturado do módulo — vira um evento `core:log` no bus: aparece
+	 * na Central de Eventos do Lobby (log da sessão) e pode ser registrado
+	 * de forma persistente por quem o escutar (ex.: o módulo de Histórico).
+	 */
 	log: (message: string, data?: Record<string, unknown>) => void;
 	/** Registra um comando no Command Palette do Obsidian, com cleanup automático. */
 	registerCommand: (id: string, name: string, callback: () => void) => void;

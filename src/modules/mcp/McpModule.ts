@@ -113,9 +113,10 @@ export class McpModule implements HubModule {
 			this.server = await createMcpServer({
 				port: settings.port,
 				getToken: () => deobfuscate(this.readSettings().tokenObfuscated),
+				serverInfo: { name: "All iₙ oNe", version: this.manifest.version },
 				handleToolCall: (toolName, args) => this.handleToolCall(toolName, args),
 			});
-			this.listeningPort = settings.port;
+			this.listeningPort = this.server.port;
 		} catch (err) {
 			this.lastServerError = this.describeServerError(err, settings.port);
 			throw new Error(this.lastServerError);
@@ -411,9 +412,10 @@ export class McpModule implements HubModule {
 			this.server = await createMcpServer({
 				port: settings.port,
 				getToken: () => deobfuscate(this.readSettings().tokenObfuscated),
+				serverInfo: { name: "All iₙ oNe", version: this.manifest.version },
 				handleToolCall: (toolName, args) => this.handleToolCall(toolName, args),
 			});
-			this.listeningPort = settings.port;
+			this.listeningPort = this.server.port;
 			this.lastServerError = undefined;
 		} catch (err) {
 			this.lastServerError = this.describeServerError(err, settings.port);

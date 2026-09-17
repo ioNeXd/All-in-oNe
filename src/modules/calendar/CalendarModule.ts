@@ -618,8 +618,10 @@ export class CalendarModule implements HubModule {
 	private lastCheckedMinute = "";
 
 	/**
-	 * Roda a cada minuto. Verifica a virada do dia E a chegada do horário de
-	 * cada evento — por isso a granularidade é de minuto, não de dia.
+	 * Roda a cada 10 segundos (ver setInterval abaixo). Verifica a virada do
+	 * dia E a chegada do horário de cada evento — cada minuto é processado
+	 * UMA vez (dedupe por lastCheckedMinute), então a janela de 10s só
+	 * encurta o atraso, não multiplica o trabalho.
 	 */
 	private checkTodaysEvents(): void {
 		const now = new Date();

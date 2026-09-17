@@ -23,6 +23,16 @@ const INSTANCE_ID = cryptoRandomId();
 export class SettingsManager {
 	private current: HubSettings;
 	private modules: Map<ModuleId, HubModule> = new Map();
+	/**
+	 * Serializa as gravações (fila de promises encadeada). O read-modify-write
+	 * em si é atômico (entre ler e escrever `current` não há await), mas dois
+	 * saves concorrentes disparam dois persist FORA DE ORDEM: se o persist do
+	 * save antigo terminar DEPOIS do novo (disco lento/variável), o disco
+	 * termina com a versão antiga — lost update que só aparece ao reiniciar o
+	 * Obsidian. Histórico/Notificações chamam updateSettings a cada evento, e
+	 * dois eventos quase simultâneos são o caso comum, não a exceção.
+	 */
+	private writeQueue: Promise<unknown> = Promise.resolve();
 
 	constructor(private load: Load, private persist: Persist) {
 		this.current = createDefaultSettings();
@@ -131,6 +141,8 @@ export class SettingsManager {
 	}
 
 	async save(next: HubSettings, options?: { skipValidation?: boolean }): Promise<ConfigValidationIssue[]> {
+		// A validação roda FORA da fila (síncrona e barata): um save bloqueado
+		// não pode ficar preso atrás de um persist lento de outro chamador.
 		if (!options?.skipValidation) {
 			const issues = this.validate(next);
 			const blocking = issues.filter((i) => i.level === "error");
@@ -141,7 +153,13 @@ export class SettingsManager {
 
 		next.sync = { lastWrittenBy: INSTANCE_ID, lastWrittenAt: Date.now() };
 		this.current = next;
-		await this.persist(next);
+
+		// Enfileira APENAS a persistência: mesmo que o persist de um save
+		// anterior esteja lento, este save grava DEPOIS dele — o disco sempre
+		// termina com a última versão aceita.
+		const operation = this.writeQueue.then(() => this.persist(next));
+		this.writeQueue = operation.catch(() => undefined); // falha não quebra a fila para os próximos
+		await operation;
 		return [];
 	}
 
@@ -167,13 +185,14 @@ export class SettingsManager {
 	}
 
 	/**
-	 * Reset de configuração (níveis "config" e "all" do Lobby): volta TUDO
-	 * à configuração padrão — módulos habilitados, caminhos, fatias por
-	 * módulo. Dados gerados (histórico etc.) NÃO passam por aqui: o nível
-	 * "data" é orquestrado pelo HubCore via hook onResetData, sem tocar na
-	 * configuração — é exatamente a diferença entre os níveis.
+	 * Volta a CONFIGURAÇÃO inteira ao padrão — módulos habilitados, caminhos,
+	 * fatias por módulo. É o que os níveis "config" e "all" do Lobby usam;
+	 * a diferença entre eles é orquestrada pelo HubCore.resetAll (que chama
+	 * este método e, nos níveis com dados, também o hook onResetData dos
+	 * módulos — o manager não conhece os módulos, então dados gerados não
+	 * passam por aqui).
 	 */
-	async reset(level: "config" | "all"): Promise<void> {
+	async reset(): Promise<void> {
 		const fresh = createDefaultSettings();
 		await this.save(fresh, { skipValidation: true });
 	}

@@ -36,12 +36,36 @@ interface Subscription {
 
 const DEFAULT_HISTORY_LIMIT = 500;
 
+/**
+ * Payload de uma emissão coalescida (ver emit): em vez de DESCARTAR emissões
+ * dentro da janela de throttle, elas são agrupadas e entregues no fim da
+ * janela como um único evento cujo payload é `{ coalesced: T[] }`. Descartar
+ * fazia Histórico e Notificações PERDEREM eventos reais (uma rajada de 200
+ * notas criadas virava 1 entrada — 199 caíam na mesma janela, pois o
+ * throttle é chaveado por evento:fonte e todas vinham da mesma fonte).
+ * Consumidores que se importam com cada ocorrência expandem o array;
+ * consumidores que só queriam "cadência" continuam funcionando (recebem o
+ * último evento da rajada com um campo a mais).
+ */
+export interface CoalescedPayload<T = unknown> {
+	coalesced: T[];
+}
+
 export class EventBus {
 	private subscriptions = new Map<HubEventName, Subscription[]>();
 	private history: HubEvent[] = [];
 	private historyLimit = DEFAULT_HISTORY_LIMIT;
 	private throttleWindows = new Map<HubEventName, number>(); // ms
-	private lastEmitAt = new Map<string, number>(); // chave: eventName+source
+	/**
+	 * Chaves evento:fonte — CRESCE LIMITADA por construção: só eventos COM
+	 * janela de throttle registrada escrevem aqui (o `set` está dentro do
+	 * branch do throttle no emit), então o teto é (#eventos com throttle) ×
+	 * (#fontes distintas de cada um). Hoje: 1 evento ("file:created") × 2
+	 * fontes ("core", "filelifecycle"). Eventos sem janela nunca tocam a Map.
+	 */
+	private lastEmitAt = new Map<string, number>();
+	private coalescedPayloads = new Map<string, unknown[]>();
+	private coalesceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 	/** Escuta um evento. Retorna uma função para cancelar a escuta (cleanup). */
 	on<T = unknown>(eventName: HubEventName, moduleId: string, handler: Handler<T>): () => void {
@@ -72,8 +96,8 @@ export class EventBus {
 
 	/**
 	 * Define uma janela de throttle (ms) para um evento específico. Emissões
-	 * do mesmo evento dentro dessa janela são descartadas. Usado para eventos
-	 * de alta frequência como escrita de arquivo em vaults grandes.
+	 * do mesmo evento dentro dessa janela são AGRUPADAS (ver emit). Usado
+	 * para eventos de alta frequência como escrita de arquivo em vaults grandes.
 	 */
 	setThrottle(eventName: HubEventName, windowMs: number): void {
 		this.throttleWindows.set(eventName, windowMs);
@@ -86,7 +110,24 @@ export class EventBus {
 			const last = this.lastEmitAt.get(throttleKey) ?? 0;
 			const now = Date.now();
 			if (now - last < windowMs) {
-				return; // descartado por throttle
+				// Dentro da janela: AGRUPA em vez de descartar. A rajada inteira
+				// sai no fim da janela como um único evento { coalesced: [...] }.
+				const pending = this.coalescedPayloads.get(throttleKey) ?? [];
+				pending.push(payload);
+				this.coalescedPayloads.set(throttleKey, pending);
+				if (!this.coalesceTimers.has(throttleKey)) {
+					const wait = Math.max(1, windowMs - (now - last));
+					const timer = setTimeout(() => {
+						this.coalesceTimers.delete(throttleKey);
+						const batch = this.coalescedPayloads.get(throttleKey) ?? [];
+						this.coalescedPayloads.delete(throttleKey);
+						if (batch.length > 0) {
+							void this.emit(eventName, { coalesced: batch } as unknown as T, source);
+						}
+					}, wait);
+					this.coalesceTimers.set(throttleKey, timer);
+				}
+				return; // entrega adiada para o fim da janela (não perdida)
 			}
 			this.lastEmitAt.set(throttleKey, now);
 		}

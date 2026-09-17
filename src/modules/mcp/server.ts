@@ -12,14 +12,17 @@ import * as http from "http";
  *
  * Isto é deliberadamente uma implementação enxuta do protocolo — o
  * suficiente para os clientes MCP atuais (Claude Desktop, Cursor, Claude
- * Code) conseguirem listar e chamar as ferramentas. Ao adicionar suporte a
- * mais recursos do protocolo (resources, prompts), estenda o roteamento em
- * `handleRequest` mantendo o mesmo formato de resposta JSON-RPC.
+ * Code) conseguirem completar o handshake, listar e chamar as ferramentas.
+ * Ao adicionar suporte a mais recursos do protocolo (resources, prompts),
+ * estenda o roteamento em `handleRequest` mantendo o mesmo formato de
+ * resposta JSON-RPC.
  */
 
 export interface McpServerOptions {
 	port: number;
 	getToken: () => string;
+	/** Identidade devolvida no handshake initialize (JSON-RPC serverInfo). */
+	serverInfo: { name: string; version: string };
 	handleToolCall: (
 		toolName: string,
 		args: Record<string, unknown>
@@ -28,7 +31,12 @@ export interface McpServerOptions {
 
 export interface McpServerHandle {
 	stop: () => Promise<void>;
+	/** Porta efetivamente em escuta (útil com porta 0/efêmera em testes). */
+	port: number;
 }
+
+/** Versão mais recente do protocolo MCP que este servidor entende. */
+const LATEST_PROTOCOL_VERSION = "2025-06-18";
 
 const TOOL_DEFINITIONS = [
 	{ name: "read_note", description: "Lê o conteúdo de uma nota." },
@@ -74,10 +82,18 @@ export async function createMcpServer(options: McpServerOptions): Promise<McpSer
 		server.listen(options.port, "127.0.0.1", () => resolve());
 	});
 
+	const address = server.address();
+	const port = typeof address === "object" && address !== null ? address.port : options.port;
+
 	return {
+		port,
 		stop: () =>
 			new Promise<void>((resolve) => {
 				server.close(() => resolve());
+				// Conexões keep-alive de clientes ainda abertas segurariam o
+				// close() até o timeout do socket — o desligamento do módulo
+				// (e o restart de porta) não pode esperar por elas.
+				server.closeAllConnections();
 			}),
 	};
 }
@@ -124,9 +140,31 @@ async function handleRequest(
 		return;
 	}
 
+	// Notificação JSON-RPC (requisição SEM id — ex.: notifications/initialized,
+	// que clientes reais mandam logo após o initialize): por definição não tem
+	// resposta. O Streamable HTTP usa 202 Accepted sem corpo — responder com
+	// um erro aqui confundiria o cliente no meio do handshake.
+	if (message.id === undefined) {
+		res.writeHead(202).end();
+		return;
+	}
+
 	res.setHeader("Content-Type", "application/json");
 
 	switch (message.method) {
+		case "initialize": {
+			// Handshake MCP: clientes reais enviam isto ANTES de tools/list — sem
+			// responder, a conexão morre no primeiro passo. A versão pedida é
+			// ecoada (nosso conjunto tools/* é estável entre versões do
+			// protocolo); sem pedido, a mais recente que este servidor fala.
+			const requested = message.params?.protocolVersion;
+			respond(res, message.id, {
+				protocolVersion: typeof requested === "string" && requested ? requested : LATEST_PROTOCOL_VERSION,
+				capabilities: { tools: { listChanged: false } },
+				serverInfo: options.serverInfo,
+			});
+			return;
+		}
 		case "tools/list": {
 			respond(res, message.id, { tools: TOOL_DEFINITIONS });
 			return;

@@ -80,6 +80,38 @@ describe("HubCore — ciclo de vida de módulos", () => {
 		expect(core.isModuleEnabled("mcp")).toBe(false);
 	});
 
+	it("context.isModuleEnabled reflete o RUNTIME, não a config (módulo falhado)", async () => {
+		// Regressão da divergência de fonte de verdade: Templates decidia o
+		// fallback pela CONFIG persistida enquanto a ponte do vault decidia
+		// pelo RUNTIME — com o Ciclo de Vida na config mas falhado ao
+		// habilitar, a ponte emitia file:created, o fallback calava e o
+		// template nunca era aplicado. Agora o contrato expõe o estado real.
+		const initial = customSettings();
+		initial.enabledModules = ["mcp", "templates"]; // ambos na config
+		const { core } = makeCore(initial);
+		await core.init();
+
+		let ctxForTemplates: import("../src/core/ModuleContract").ModuleContext | undefined;
+		const templates = makeTestModule({ id: "templates" });
+		templates.onRegister = (ctx) => (ctxForTemplates = ctx);
+		await core.registerModule(templates);
+
+		// "mcp" na config mas FALHA ao habilitar:
+		await core.registerModule(
+			makeTestModule({
+				id: "mcp",
+				onEnable: () => {
+					throw new Error("porta ocupada");
+				},
+			})
+		);
+
+		const ctx = ctxForTemplates!;
+		expect(ctx.getFullSettings().enabledModules).toContain("mcp"); // config diz ligado...
+		expect(ctx.isModuleEnabled("mcp")).toBe(false); // ...mas o runtime diz NÃO
+		expect(ctx.isModuleEnabled("templates")).toBe(true); // módulo saudável
+	});
+
 	it("onDisable que lançando não impede a limpeza do estado (finally)", async () => {
 		const { core } = makeCore(customSettings());
 		await core.init();
@@ -202,10 +234,7 @@ describe("HubCore — reset em 3 níveis (escadinha real)", () => {
 		expect(core.isModuleEnabled("custom-x")).toBe(false);
 
 		await core.settings.updateModuleSettings("mcp", { port: 9999 });
-		core.logHistory({ type: "generic", origin: "core", message: "entrada 1" });
-		core.logHistory({ type: "generic", origin: "core", message: "entrada 2" });
 		await core.bus.emit("demo:evento", {}, "core");
-		expect(core.getHistory()).toHaveLength(2);
 		expect(core.bus.getHistory()).toHaveLength(1);
 
 		await core.resetAll("data");
@@ -220,10 +249,9 @@ describe("HubCore — reset em 3 níveis (escadinha real)", () => {
 		expect(onResetDataMcp).toHaveBeenCalledTimes(1);
 		expect(onResetDataCustom).toHaveBeenCalledTimes(1);
 
-		// Histórico do núcleo zerado; no bus, sobra só o próprio "core:reset"
-		// (emitido DEPOIS da limpeza — a Central de Eventos registra que o
-		// reset aconteceu, nada além disso):
-		expect(core.getHistory()).toHaveLength(0);
+		// O log de eventos da sessão (bus) é limpo; sobra só o próprio
+		// "core:reset" (emitido DEPOIS da limpeza — a Central de Eventos
+		// registra que o reset aconteceu, nada além disso):
 		expect(core.bus.getHistory().map((e) => e.name)).toEqual(["core:reset"]);
 
 		// "data" não muda config → sem onSettingsChange:
@@ -237,14 +265,12 @@ describe("HubCore — reset em 3 níveis (escadinha real)", () => {
 		const onResetData = vi.fn();
 		await core.registerModule(makeTestModule({ id: "mcp", onResetData }));
 		await core.settings.updateModuleSettings("mcp", { port: 9999 });
-		core.logHistory({ type: "generic", origin: "core", message: "entrada" });
 
 		await core.resetAll("all");
 
 		expect(core.settings.getModuleSettings("mcp")).toEqual({});
 		expect(getStored()!.enabledModules).toContain("history"); // default
 		expect(onResetData).toHaveBeenCalledTimes(1);
-		expect(core.getHistory()).toHaveLength(0);
 	});
 
 	it("onResetData de um módulo que lança não impede os demais (isolamento)", async () => {

@@ -82,11 +82,16 @@ export class TemplatesModule implements HubModule {
 			}
 		});
 
-		// Reserva: se o módulo de Ciclo de Vida estiver desligado, ninguém emite
-		// "lifecycle:note-ready" — então continuamos aceitando o evento do vault.
+		// Reserva: se o módulo de Ciclo de Vida não estiver ATIVO de verdade
+		// (runtime, não config — um módulo listado na config pode ter falhado
+		// ao habilitar), ninguém emite "lifecycle:note-ready" — então o create
+		// cru do vault assume. Antes lia a config persistida e DIVERGIA do
+		// VaultEventBridge (que usa runtime): com o Ciclo de Vida na config mas
+		// falhado, a ponte emitia file:created, o fallback calava e o template
+		// nunca era aplicado — sem erro em lugar nenhum.
 		const createRef = context.app.vault.on("create", (file) => {
 			if (!(file instanceof TFile) || file.extension !== "md") return;
-			if (context.getFullSettings().enabledModules.includes("filelifecycle")) return;
+			if (context.isModuleEnabled("filelifecycle")) return;
 			void this.handleNoteCreated(file);
 		});
 
@@ -456,17 +461,6 @@ export class TemplatesModule implements HubModule {
 		} finally {
 			this.movingFiles.delete(pathBefore);
 		}
-	}
-
-	/** Evita sobrescrever um arquivo existente ao devolver a nota. */
-	private async uniquePath(desired: string): Promise<string> {
-		if (!this.context!.app.vault.getAbstractFileByPath(desired)) return desired;
-		const dot = desired.lastIndexOf(".");
-		const base = dot === -1 ? desired : desired.slice(0, dot);
-		const ext = dot === -1 ? "" : desired.slice(dot);
-		let counter = 2;
-		while (this.context!.app.vault.getAbstractFileByPath(`${base} ${counter}${ext}`)) counter++;
-		return `${base} ${counter}${ext}`;
 	}
 
 	private buildTemplateContent(rule: FolderTemplateRule): string {

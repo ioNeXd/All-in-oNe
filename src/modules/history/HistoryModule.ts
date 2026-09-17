@@ -1,6 +1,16 @@
 import { Setting, Notice } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
 
+/**
+ * Janela de coalescência das gravações (write-behind). O Histórico recebe
+ * eventos a cada arquivo tocado no vault — persistir o settings inteiro em
+ * CADA evento significava dezenas de escritas de disco por minuto em vault
+ * ativo. As entradas novas acumulam em memória e um único save leva tudo ao
+ * disco após a janela fechar. Dado volátil por natureza: o pior caso de uma
+ * queda do Obsidian dentro da janela é perder os últimos ~2s de registro.
+ */
+const FLUSH_INTERVAL_MS = 2000;
+
 export interface HistoryEntryRecord {
 	id: string;
 	event: string;
@@ -82,6 +92,11 @@ export class HistoryModule implements HubModule {
 	private context?: ModuleContext;
 	private unsubscribers: (() => void)[] = [];
 	private filter = "";
+	/** Entradas ainda não persistidas (dreno no flush). */
+	private pendingEntries: HistoryEntryRecord[] = [];
+	private flushTimer?: ReturnType<typeof setTimeout>;
+	/** Protetor de corrida clear/reset × flush pendente (ver clearEntries). */
+	private flushGeneration = 0;
 
 	onRegister(context: ModuleContext): void {
 		this.context = context;
@@ -89,9 +104,25 @@ export class HistoryModule implements HubModule {
 
 	onEnable(): void {
 		for (const eventName of TRACKED_EVENTS) {
-			const unsub = this.context!.bus.on(eventName, "history", (event) =>
-				this.record(eventName, event.source, event.payload as Record<string, unknown>)
-			);
+			const unsub = this.context!.bus.on(eventName, "history", (event) => {
+				// O bus coalesce rajadas (ver EventBus): uma emissão dentro da
+				// janela de throttle vira { coalesced: [...] } no fim dela. O
+				// Histórico quer CADA ocorrência — expande e registra uma a uma.
+				const payload = event.payload as
+					| { coalesced?: Record<string, unknown>[] }
+					| Record<string, unknown>;
+				if (
+					payload &&
+					typeof payload === "object" &&
+					Array.isArray((payload as { coalesced?: unknown }).coalesced)
+				) {
+					for (const item of (payload as { coalesced: Record<string, unknown>[] }).coalesced) {
+						this.record(eventName, event.source, item);
+					}
+					return;
+				}
+				this.record(eventName, event.source, payload as Record<string, unknown>);
+			});
 			this.unsubscribers.push(unsub);
 		}
 	}
@@ -99,6 +130,7 @@ export class HistoryModule implements HubModule {
 	onDisable(): void {
 		this.unsubscribers.forEach((u) => u());
 		this.unsubscribers = [];
+		void this.flushNow(); // não perde o que já foi registrado na sessão
 	}
 
 	/**
@@ -107,6 +139,12 @@ export class HistoryModule implements HubModule {
 	 * configuração, não dado. No nível "config" este hook não é chamado.
 	 */
 	onResetData(): Promise<void> {
+		// Cancela o flush pendente e invalida o que estiver em voo: sem isto,
+		// o save atrasado ressuscitaria as entradas recém-limpas.
+		this.flushGeneration++;
+		if (this.flushTimer) clearTimeout(this.flushTimer);
+		this.flushTimer = undefined;
+		this.pendingEntries = [];
 		return (this.context?.updateSettings({ entries: [] }) ?? Promise.resolve([])).then(() => void 0);
 	}
 
@@ -118,11 +156,11 @@ export class HistoryModule implements HubModule {
 		return { ...HISTORY_DEFAULTS, ...this.context?.getSettings<HistoryModuleSettings>() };
 	}
 
-	private async record(
+	private record(
 		eventName: string,
 		origin: string,
 		payload: Record<string, unknown>
-	): Promise<void> {
+	): void {
 		const settings = this.readSettings();
 		if (settings.mutedEvents.includes(eventName)) return;
 
@@ -135,8 +173,31 @@ export class HistoryModule implements HubModule {
 			timestamp: Date.now(),
 		};
 
-		const entries = [entry, ...settings.entries].slice(0, settings.maxEntries);
-		await this.context?.updateSettings({ entries });
+		// Write-behind: acumula em memória e agenda o dreno. A leitura da
+		// lista (record/painel) SEMPRE inclui as pendentes — o usuário vê na
+		// hora; só o DISCO é que é coalescido.
+		this.pendingEntries = [entry, ...this.pendingEntries];
+		if (!this.flushTimer) {
+			this.flushTimer = setTimeout(() => void this.flushNow(), FLUSH_INTERVAL_MS);
+		}
+	}
+
+	/** Drena as entradas pendentes num único save (batedor: reset invalida a geração). */
+	private async flushNow(): Promise<void> {
+		this.flushTimer = undefined;
+		if (this.pendingEntries.length === 0) return;
+		const generation = this.flushGeneration;
+		const batch = this.pendingEntries;
+		this.pendingEntries = [];
+
+		const settings = this.readSettings();
+		const merged = [...batch, ...settings.entries].slice(0, settings.maxEntries);
+		await this.context?.updateSettings({ entries: merged });
+		if (generation !== this.flushGeneration) {
+			// Reset aconteceu enquanto o save estava em voo: a fatia limpa no
+			// disco acabou de ser sobrescrita — desfaz.
+			await this.context?.updateSettings({ entries: [] });
+		}
 	}
 
 	renderSettingsPanel(container: HTMLElement): void {
@@ -174,6 +235,12 @@ export class HistoryModule implements HubModule {
 			.setName(`${settings.entries.length} entrada(s)`)
 			.addButton((btn) =>
 				btn.setButtonText("Limpar histórico").onClick(async () => {
+					// Invalida o flush em voo (mesma lógica do onResetData): sem
+					// isto, o save pendente ressuscitaria o que acabou de ser limpo.
+					this.flushGeneration++;
+					if (this.flushTimer) clearTimeout(this.flushTimer);
+					this.flushTimer = undefined;
+					this.pendingEntries = [];
 					await this.context?.updateSettings({ entries: [] });
 					this.refresh(container);
 				})

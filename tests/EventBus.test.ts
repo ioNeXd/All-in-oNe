@@ -1,7 +1,16 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventBus } from "../src/core/EventBus";
 
 describe("EventBus", () => {
+	// Timers FALSOS nos testes de throttle: janela e espera avançam juntas
+	// (advanceTimersByTimeAsync) — com timers reais + sleeps fixos, a suíte
+	// paralela podia dessincronizar as duas coisas e gerar flake.
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
 	it("entrega um evento para todos os inscritos", async () => {
 		const bus = new EventBus();
 		const received: unknown[] = [];
@@ -41,16 +50,63 @@ describe("EventBus", () => {
 		expect(handler).not.toHaveBeenCalled();
 	});
 
-	it("throttle descarta emissões repetidas dentro da janela", async () => {
+	it("throttle AGRUPA emissões dentro da janela e entrega no fim dela (sem perder evento)", async () => {
 		const bus = new EventBus();
-		const handler = vi.fn();
-		bus.on("vault:modify", "mod-a", handler);
-		bus.setThrottle("vault:modify", 10_000);
+		const received: unknown[] = [];
+		bus.on("vault:modify", "mod-a", (e) => received.push(e.payload));
+		bus.setThrottle("vault:modify", 20);
 
-		await bus.emit("vault:modify", {}, "mod-a");
-		await bus.emit("vault:modify", {}, "mod-a");
+		await bus.emit("vault:modify", { n: 1 }, "mod-a"); // sai na hora
+		await bus.emit("vault:modify", { n: 2 }, "mod-a"); // coalescida
+		await bus.emit("vault:modify", { n: 3 }, "mod-a"); // coalescida
 
-		expect(handler).toHaveBeenCalledTimes(1);
+		// Imediato: só a 1ª emissão saiu (a janela não fechou ainda):
+		expect(received).toEqual([{ n: 1 }]);
+
+		// Fim da janela: as coalescidas chegam juntas como { coalesced: [...] }.
+		await vi.advanceTimersByTimeAsync(20); // adianta até o fim da janela de 20ms
+		expect(received).toEqual([
+			{ n: 1 },
+			{ coalesced: [{ n: 2 }, { n: 3 }] },
+		]);
+	});
+
+	it("rajada de 200 emissões numa janela: NADA é perdido (todas chegam coalescidas)", async () => {
+		const bus = new EventBus();
+		const received: unknown[] = [];
+		bus.on("file:created", "history", (e) => {
+			const p = e.payload as { coalesced?: unknown[]; path?: string };
+			if (p.coalesced) received.push(...p.coalesced);
+			else received.push(p);
+		});
+		bus.setThrottle("file:created", 30);
+
+		await bus.emit("file:created", { path: "n-0.md" }, "filelifecycle"); // sai na hora
+		for (let i = 1; i < 200; i++) {
+			await bus.emit("file:created", { path: `n-${i}.md` }, "filelifecycle");
+		}
+		await vi.advanceTimersByTimeAsync(30); // fim da janela de 30ms
+
+		expect(received.length).toBe(200); // antes do coalescing: 1 (199 descartados)
+		expect(received.some((p) => (p as { path: string }).path === "n-199.md")).toBe(true);
+	});
+
+	it("coalescing não vaza para a janela seguinte nem entre fontes distintas", async () => {
+		const bus = new EventBus();
+		const received: unknown[] = [];
+		bus.on("demo", "mod-a", (e) => received.push(e.payload));
+		bus.setThrottle("demo", 15);
+
+		await bus.emit("demo", { n: 1 }, "mod-a");
+		await bus.emit("demo", { n: 2 }, "mod-a"); // coalescida (mesma fonte)
+		await bus.emit("demo", { n: 3 }, "mod-b"); // fonte diferente: NÃO é coalescida
+		await vi.advanceTimersByTimeAsync(15); // fim da janela de 15ms
+
+		expect(received).toEqual([
+			{ n: 1 },
+			{ n: 3 }, // fontes distintas nunca se misturam
+			{ coalesced: [{ n: 2 }] },
+		]);
 	});
 
 	it("mantém histórico consultável por nome e origem", async () => {

@@ -48,7 +48,7 @@ describe("SettingsManager", () => {
 		await manager.init();
 		await manager.updateModuleSettings("mcp", { port: 9999 });
 
-		await manager.reset("config");
+		await manager.reset();
 
 		expect(manager.getModuleSettings("mcp")).toEqual({});
 		expect((getStored() as any).schemaVersion).toBe(1);
@@ -59,7 +59,7 @@ describe("SettingsManager", () => {
 		await manager.init();
 		await manager.updateModuleSettings("history", { maxEntries: 42 });
 
-		await manager.reset("config");
+		await manager.reset();
 
 		expect(manager.getModuleSettings("history")).toEqual({});
 		expect(manager.get().paths.calendarFolder).toBe("Calendario"); // voltou ao default
@@ -70,8 +70,62 @@ describe("SettingsManager", () => {
 		await manager.init();
 		await manager.updateModuleSettings("history", { maxEntries: 42 });
 
-		await manager.reset("all");
+		await manager.reset();
 
 		expect(manager.getModuleSettings("history")).toEqual({});
+	});
+
+	it("gravações concorrentes de módulos diferentes chegam TODAS ao disco (sem lost update)", async () => {
+		// Regressão do hazard de persist fora de ordem: dois eventos quase
+		// simultâneos (Histórico e Notificações disparam updateSettings a cada
+		// evento) com persist de latência variável faziam o disco terminar com
+		// a versão ANTIGA — o patch mais novo era sobrescrito pelo persist
+		// lento do save anterior e a perda só aparecia ao reiniciar o Obsidian.
+		let stored: unknown = null;
+		let first = true;
+		const persist = async (data: unknown) => {
+			// 1º persist lento, demais rápidos — a ordem de TÉRMINO fica
+			// invertida em relação à ordem de chamada.
+			const slow = first;
+			first = false;
+			await new Promise((r) => setTimeout(r, slow ? 50 : 5));
+			stored = data;
+		};
+		const manager = new SettingsManager(async () => null, persist);
+		await manager.init();
+		await manager.updateModuleSettings("mcp", { port: 1111 }); // consome o persist lento
+
+		await Promise.all([
+			manager.updateModuleSettings("history", { max: 1 }),
+			manager.updateModuleSettings("notifications", { enabled: true }),
+		]);
+
+		// A memória sempre teve os dois; o DISCO é que perdia o segundo:
+		const disk = (stored as { modules: Record<string, Record<string, unknown>> }).modules;
+		expect(disk["history"]).toEqual({ max: 1 });
+		expect(disk["notifications"]).toEqual({ enabled: true });
+		expect(manager.getModuleSettings("history")).toEqual({ max: 1 });
+	});
+
+	it("falha de persist não trava a fila: a gravação seguinte chega ao disco", async () => {
+		let stored: unknown = null;
+		let failNext = false;
+		const persist = async (data: unknown) => {
+			if (failNext) {
+				failNext = false;
+				throw new Error("disco cheio");
+			}
+			stored = data;
+		};
+		const manager = new SettingsManager(async () => null, persist);
+		await manager.init();
+
+		failNext = true;
+		// A falha PROPAGA ao chamador (contrato pré-existente — quem chamou
+		// precisa saber que não foi gravado), mas não envenena a fila:
+		await expect(manager.updateModuleSettings("history", { max: 1 })).rejects.toThrow("disco cheio");
+
+		await manager.updateModuleSettings("history", { max: 2 }); // tem que funcionar
+		expect((stored as { modules: Record<string, Record<string, unknown>> }).modules["history"]).toEqual({ max: 2 });
 	});
 });

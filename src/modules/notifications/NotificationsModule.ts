@@ -79,6 +79,16 @@ export const NOTIFICATIONS_DEFAULTS: NotificationsModuleSettings = {
 const MAX_HISTORY = 100;
 
 /**
+ * Janela de coalescência das gravações (write-behind), igual ao Histórico:
+ * notificações de eventos de vault são frequentes em vault ativo — persistir
+ * o settings inteiro a cada uma dava dezenas de escritas de disco por
+ * minuto. Entradas novas acumulam em memória e um único save as leva ao
+ * disco após a janela (pior caso de queda: ~2s de notificações não lidas
+ * não persistidas).
+ */
+const FLUSH_INTERVAL_MS = 2000;
+
+/**
  * MÓDULO DE NOTIFICAÇÕES
  * ------------------------
  * Escuta eventos de OUTROS módulos via bus (nunca importa esses módulos
@@ -107,6 +117,11 @@ export class NotificationsModule implements HubModule {
 
 	private context?: ModuleContext;
 	private unsubscribers: (() => void)[] = [];
+	/** Notificações ainda não persistidas (write-behind, ver FLUSH_INTERVAL_MS). */
+	private pendingNotifications: StoredNotification[] = [];
+	private flushTimer?: ReturnType<typeof setTimeout>;
+	/** Protetor de corrida clear/reset × flush pendente (ver flushNow). */
+	private flushGeneration = 0;
 	private audioCtx?: AudioContext;
 
 	onRegister(context: ModuleContext): void {
@@ -121,9 +136,27 @@ export class NotificationsModule implements HubModule {
 		// ser escutado até reiniciar o módulo, o que fazia parecer que
 		// notificação "não funcionava".
 		for (const trigger of Object.keys(TRIGGER_LABELS) as NotifiableTrigger[]) {
-			const unsub = context.bus.on(trigger, "notifications", (event) =>
-				this.handleEvent(trigger, event.payload as Record<string, unknown>)
-			);
+			const unsub = context.bus.on(trigger, "notifications", (event) => {
+				// O bus coalesce rajadas (ver EventBus): em vez de perder eventos
+				// dentro da janela de throttle, eles chegam agrupados como
+				// { coalesced: [...] }. Notifica CADA item — o popup/som é
+				// separado (sem rajada de sons) e o histórico fica completo.
+				const raw = event.payload as
+					| { coalesced?: Record<string, unknown>[] }
+					| Record<string, unknown>;
+				if (
+					raw &&
+					typeof raw === "object" &&
+					Array.isArray((raw as { coalesced?: unknown }).coalesced)
+				) {
+					const items = (raw as { coalesced: Record<string, unknown>[] }).coalesced;
+					for (let i = 0; i < items.length; i++) {
+						this.handleEvent(trigger, items[i], i === 0);
+					}
+					return;
+				}
+				this.handleEvent(trigger, raw as Record<string, unknown>);
+			});
 			this.unsubscribers.push(unsub);
 		}
 
@@ -223,6 +256,12 @@ export class NotificationsModule implements HubModule {
 			)
 			.addButton((btn) =>
 				btn.setButtonText("Limpar histórico").onClick(async () => {
+					// Invalida o flush em voo (mesma lógica do onResetData): sem
+					// isto, o save pendente ressuscitaria o que acabou de ser limpo.
+					this.flushGeneration++;
+					if (this.flushTimer) clearTimeout(this.flushTimer);
+					this.flushTimer = undefined;
+					this.pendingNotifications = [];
 					await this.context?.updateSettings({ history: [] });
 					container.empty();
 					this.renderSettingsPanel(container);
@@ -257,6 +296,7 @@ export class NotificationsModule implements HubModule {
 	onDisable(): void {
 		this.unsubscribers.forEach((u) => u());
 		this.unsubscribers = [];
+		void this.flushNow(); // não perde o que já foi notificado na sessão
 	}
 
 	/**
@@ -264,22 +304,45 @@ export class NotificationsModule implements HubModule {
 	 * gerado). Regras e não-perturbe ficam intactos — são configuração.
 	 */
 	onResetData(): Promise<void> {
+		// Cancela o flush pendente e invalida o que estiver em voo: sem isto,
+		// o save atrasado ressuscitaria as notificações recém-limpas.
+		this.flushGeneration++;
+		if (this.flushTimer) clearTimeout(this.flushTimer);
+		this.flushTimer = undefined;
+		this.pendingNotifications = [];
 		return (this.context?.updateSettings({ history: [] }) ?? Promise.resolve([])).then(() => void 0);
 	}
 
 	private readSettings(): NotificationsModuleSettings {
-		return { ...NOTIFICATIONS_DEFAULTS, ...this.context?.getSettings<NotificationsModuleSettings>() };
+		const settings = { ...NOTIFICATIONS_DEFAULTS, ...this.context?.getSettings<NotificationsModuleSettings>() };
+		// As pendentes do write-behind fazem parte do estado lógico — leitura
+		// (painel, contagem de não lidas) inclui o que ainda não chegou ao disco.
+		if (this.pendingNotifications.length > 0) {
+			const persisted = settings.history.filter(
+				(h) => !this.pendingNotifications.some((p) => p.id === h.id)
+			);
+			settings.history = [...this.pendingNotifications, ...persisted].slice(0, MAX_HISTORY);
+		}
+		return settings;
 	}
 
-	private handleEvent(trigger: NotifiableTrigger, payload: Record<string, unknown>): void {
+	private handleEvent(
+		trigger: NotifiableTrigger,
+		payload: Record<string, unknown>,
+		allowFeedback = true
+	): void {
 		const settings = this.readSettings();
 		const rule = settings.rules.find((r) => r.trigger === trigger);
 		if (!rule || !rule.enabled) return;
 		if (this.isWithinDoNotDisturb(settings)) return;
 
 		const message = this.formatMessage(trigger, payload);
-		this.showPopup(message, rule.priority);
-		if (rule.sound) void this.playSound(rule.priority);
+		// Numa rajada coalescida, popup/som só no PRIMEIRO item — notificar 200
+		// vezes viraria rajada de sons; o histórico registra todos.
+		if (allowFeedback) {
+			this.showPopup(message, rule.priority);
+			if (rule.sound) void this.playSound(rule.priority);
+		}
 		void this.appendHistory(trigger, message);
 	}
 
@@ -379,8 +442,7 @@ export class NotificationsModule implements HubModule {
 		}
 	}
 
-	private async appendHistory(trigger: NotifiableTrigger, message: string): Promise<void> {
-		const settings = this.readSettings();
+	private appendHistory(trigger: NotifiableTrigger, message: string): void {
 		const entry: StoredNotification = {
 			// cryptoRandomId (mesmo gerador do núcleo): duas notificações no mesmo
 			// milissegundo colidiam com `notif-${Date.now()}` e uma sobrescrevia
@@ -391,14 +453,41 @@ export class NotificationsModule implements HubModule {
 			timestamp: Date.now(),
 			read: false,
 		};
-		const history = [entry, ...settings.history].slice(0, MAX_HISTORY);
-		await this.context?.updateSettings({ history });
+
+		// Write-behind: a leitura (painel) SEMPRE inclui as pendentes — o
+		// usuário vê na hora; só o DISCO é que é coalescido.
+		this.pendingNotifications = [entry, ...this.pendingNotifications].slice(0, MAX_HISTORY);
+		if (!this.flushTimer) {
+			this.flushTimer = setTimeout(() => void this.flushNow(), FLUSH_INTERVAL_MS);
+		}
+	}
+
+	/** Drena as notificações pendentes num único save (batedor: reset invalida a geração). */
+	private async flushNow(): Promise<void> {
+		this.flushTimer = undefined;
+		if (this.pendingNotifications.length === 0) return;
+		const generation = this.flushGeneration;
+		const batch = this.pendingNotifications;
+		this.pendingNotifications = [];
+
+		const settings = this.readSettings();
+		const merged = [...batch, ...settings.history].slice(0, MAX_HISTORY);
+		await this.context?.updateSettings({ history: merged });
+		if (generation !== this.flushGeneration) {
+			// Reset/limpeza aconteceu enquanto o save estava em voo: a fatia
+			// limpa no disco acabou de ser sobrescrita — desfaz.
+			await this.context?.updateSettings({ history: [] });
+		}
 	}
 
 	async markAllRead(): Promise<void> {
 		const settings = this.readSettings();
-		await this.context?.updateSettings({
-			history: settings.history.map((h) => ({ ...h, read: true })),
-		});
+		const readAll = settings.history.map((h) => ({ ...h, read: true }));
+		// As pendentes viram "lidas" também na memória, para o flush não as
+		// ressuscitar como não lidas no disco depois.
+		this.pendingNotifications = readAll.filter((h) =>
+			this.pendingNotifications.some((p) => p.id === h.id)
+		);
+		await this.context?.updateSettings({ history: readAll });
 	}
 }

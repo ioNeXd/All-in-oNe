@@ -53,4 +53,46 @@ describe("FileWriteQueue", () => {
 
 		expect(results).toEqual(["erro-capturado", "segunda-operacao-rodou"]);
 	});
+
+	it("remove a chave quando a fila do caminho drena (sem vazamento)", async () => {
+		const queue = new FileWriteQueue();
+		await queue.run("a.md", async () => {});
+		await queue.run("b.md", async () => {});
+
+		// A limpeza roda no microtask após a resolução — cede um tick:
+		await new Promise((r) => setTimeout(r, 0));
+
+		// Reflexão sobre o Map privado, sem expor API só para o teste:
+		const size = (queue as unknown as { queues: Map<string, unknown> }).queues.size;
+		expect(size).toBe(0); // antes: 2 entradas para sempre por caminho tocado
+	});
+
+	it("NÃO remove a chave se um run novo encadeou antes do dreno", async () => {
+		const queue = new FileWriteQueue();
+		let releaseSecond!: () => void;
+		const gate = new Promise<void>((r) => (releaseSecond = r));
+
+		const first = queue.run("y.md", async () => {
+			await gate; // segura a fila aberta
+		});
+		const second = queue.run("y.md", async () => {}); // encadeia atrás
+
+		releaseSecond();
+		await Promise.all([first, second]);
+		await new Promise((r) => setTimeout(r, 0));
+
+		// Nenhum dos dois removeu no meio: o 1º drena primeiro, mas a chave
+		// já era do `chained` do 2º (que encadeou antes) — a conferência
+		// `still === chained` só deixa o DONO ATUAL da chave remover, então a
+		// serialização de um 3º run concorrente nunca é quebrada. Com a fila
+		// inteira drenada, a chave saiu do Map.
+		const size = (queue as unknown as { queues: Map<string, unknown> }).queues.size;
+		expect(size).toBe(0);
+
+		// E um run novo depois do dreno continua serializado normalmente
+		// (recomeça uma fila nova, sem depender da entrada antiga):
+		await queue.run("y.md", async () => {});
+		await new Promise((r) => setTimeout(r, 0));
+		expect((queue as unknown as { queues: Map<string, unknown> }).queues.size).toBe(0);
+	});
 });

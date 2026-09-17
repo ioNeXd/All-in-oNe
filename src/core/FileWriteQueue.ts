@@ -20,11 +20,20 @@ export class FileWriteQueue {
 	async run<T>(path: string, operation: () => Promise<T>): Promise<T> {
 		const previous = this.queues.get(path) ?? Promise.resolve();
 		const current = previous.then(operation, operation); // roda mesmo se a anterior falhou
-		// Evita vazamento de memória: guarda só a última promessa da fila.
-		this.queues.set(
-			path,
-			current.catch(() => undefined)
-		);
+		// Encadeia a fila com a promise blindada (a falha de `operation` não
+		// pode travar os runs seguintes do mesmo caminho).
+		const chained = current.catch(() => undefined);
+		this.queues.set(path, chained);
+		// Limpeza da chave: quando ESTA promessa da fila resolver (sem nenhum
+		// run novo encadeado na frente), o caminho drenou — apagar evita que
+		// o Map cresça sem limite numa sessão longa (o plugin vive no
+		// processo do Obsidian por horas; cada caminho tocado deixava uma
+		// entrada para sempre). A conferência `still === chained` só permite
+		// a remoção se NENHUM run novo assumiu a chave nesse meio-tempo: se
+		// assumiu, a chave pertence à nova promessa da fila.
+		void chained.then(() => {
+			if (this.queues.get(path) === chained) this.queues.delete(path);
+		});
 		return current;
 	}
 }

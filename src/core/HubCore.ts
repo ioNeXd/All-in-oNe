@@ -3,8 +3,7 @@ import { EventBus } from "./EventBus";
 import { SettingsManager } from "./SettingsManager";
 import { FileWriteQueue } from "./FileWriteQueue";
 import type { HubModule, ModuleContext, ModuleId } from "./ModuleContract";
-import type { HistoryEntry, HistoryEventType, HubSettings } from "./types";
-import { cryptoRandomId } from "./types";
+import type { HubSettings } from "./types";
 
 const CONTRACT_VERSION = "2.0.0"; // v2: onRegister/onEnable separados (ver ModuleContract.ts)
 const CRASH_LIMIT_BEFORE_SAFE_MODE = 3;
@@ -39,9 +38,6 @@ export class HubCore {
 	private enabledModuleIds = new Set<ModuleId>();
 	private crashCounts = new Map<ModuleId, number>();
 	private lastEnableErrors = new Map<ModuleId, string>();
-	private history: HistoryEntry[] = [];
-	/** Buffer pequeno: o histórico de produto vive no módulo History, persistido. */
-	private historyLimit = 200;
 	private safeMode = false;
 
 	constructor(
@@ -53,19 +49,23 @@ export class HubCore {
 
 		// Eventos de vault são de alta frequência em vaults grandes — throttle
 		// evita sobrecarregar listeners caros (Histórico, Notificações).
-		// ATENÇÃO: o throttle do bus descarta emissões inteiras, então NÃO
-		// aplicar a "file:modified" enquanto o módulo de Templates precisar
-		// reagir a ela (retornar nota de Pendente). "file:created" não tem
-		// listener que precise de cadência exata e é o que pode explodir em
-		// rajada (selecionar 200 notas → criar). Se um dia o Histórico/Notifi-
-		// cações tratarem file:modified, o mute deles no HistoryModule resolve.
+		// ATENÇÃO: o throttle do bus AGRUPA as emissões dentro da janela e as
+		// entrega no fim dela como { coalesced: [...] } — nada é perdido, mas a
+		// entrega é ATRASADA até o fim da janela. NÃO aplicar a "file:modified"
+		// enquanto o módulo de Templates precisar reagir a ela na hora (retornar
+		// nota de Pendente): a entrega atrasada quebraria o fluxo. "file:created"
+		// não tem listener que precise de cadência exata e é o que pode explodir
+		// em rajada (selecionar 200 notas → criar); Histórico e Notificações
+		// expandem o coalesced (um registro por ocorrência — Notificações toca
+		// popup/som só no 1º item, para não virar rajada de sons).
 		this.bus.setThrottle("file:created", 500);
 
 		// NOTA para quem for estender isto: o EventBus atual não tem wildcard
-		// ("escutar tudo"). A aba de Histórico do Lobby usa `bus.getHistory()`
-		// (buffer interno do próprio bus) em vez de se inscrever em cada
-		// evento manualmente — é o jeito mais simples de ter um "escutador
-		// universal" sem precisar listar todo evento existente aqui.
+		// ("escutar tudo"). A Central de Eventos do Lobby usa `bus.getHistory()`
+		// (log da SESSÃO, debug) em vez de se inscrever em cada evento manualmente
+		// — é o jeito mais simples de ter um "escutador universal" sem precisar
+		// listar todo evento existente aqui. Registro PERSISTENTE de produto é
+		// papel do módulo de Histórico, que escuta os eventos relevantes.
 	}
 
 	async init(): Promise<void> {
@@ -73,12 +73,17 @@ export class HubCore {
 		this.enabledModuleIds = new Set(settings.enabledModules);
 
 		if (await this.settings.detectExternalChange()) {
-			this.logHistory({
-				type: "generic",
-				origin: "core",
-				message:
-					"Configuração foi alterada por outro dispositivo desde a última vez que este Obsidian salvou. Revise antes de editar configurações.",
-			});
+			// Aviso vai para o log de eventos da sessão (Central de Eventos):
+			// o buffer próprio do núcleo foi removido — quem quer registro
+			// persistente de eventos é o módulo de Histórico, via bus.
+			void this.bus.emit(
+				"core:sync-conflict",
+				{
+					message:
+						"Configuração foi alterada por outro dispositivo desde a última vez que este Obsidian salvou. Revise antes de editar configurações.",
+				},
+				"core"
+			);
 		}
 	}
 
@@ -128,10 +133,16 @@ export class HubCore {
 					console.error(`[All iₙ oNe] Módulo "${id}" falhou ao reagir à mudança de config:`, err);
 				}
 				return issues;
-			},
-			getFullSettings: () => this.settings.get(),
-			log: (message, data) =>
-				this.logHistory({ type: "generic", origin: id, message, path: data?.path as string }),
+			},				getFullSettings: () => this.settings.get(),
+				// Estado de runtime (não a config): é o que permite um módulo
+				// decidir "quem cuida disso" sem divergir de outro lado que usa
+				// o mesmo critério (ex.: fallback do Templates × ponte do vault).
+				isModuleEnabled: (targetId) => this.enabledModuleIds.has(targetId),				// Log do módulo = evento no bus: aparece na Central de Eventos da
+				// sessão e qualquer interessado (ex.: Histórico) pode escutar.
+				// Antes caía num buffer interno do núcleo que NINGUÉM lia.
+				log: (message, data) => {
+					void this.bus.emit("core:log", { message, path: data?.path as string | undefined }, id);
+				},
 			registerCommand: (cmdId, name, callback) => {
 				this.onRegisterCommand?.(id, cmdId, name, callback);
 			},
@@ -167,11 +178,15 @@ export class HubCore {
 			// fora do ciclo de vida.
 			this.enabledModuleIds.delete(id);
 			this.lastEnableErrors.set(id, describeError(err));
-			this.logHistory({
-				type: "module-error",
-				origin: id,
-				message: `Falha ao habilitar: ${describeError(err)}`,
-			});
+			// Falha de habilitação vira evento no bus — o Histórico (produto,
+			// persistente) registra, em vez de sumir num buffer interno sem
+			// leitor. O aviso imediato segue sendo o Notice do Lobby +
+			// getLastEnableError.
+			void this.bus.emit(
+				"core:module-error",
+				{ moduleId: id, eventName: "onEnable", error: describeError(err) },
+				"core"
+			);
 			const crashes = (this.crashCounts.get(id) ?? 0) + 1;
 			this.crashCounts.set(id, crashes);
 			if (crashes >= CRASH_LIMIT_BEFORE_SAFE_MODE) {
@@ -211,13 +226,8 @@ export class HubCore {
 	private async enterSafeMode(offendingModuleId: ModuleId, error: unknown): Promise<void> {
 		this.safeMode = true;
 		this.enabledModuleIds.delete(offendingModuleId);
-		this.logHistory({
-			type: "module-error",
-			origin: "core",
-			message: `Módulo "${offendingModuleId}" falhou ${CRASH_LIMIT_BEFORE_SAFE_MODE}x ao habilitar e foi desligado automaticamente. Detalhe: ${String(
-				error
-			)}`,
-		});
+		// O registro cabe ao bus (o Histórico escuta core:safe-mode-entered e
+		// persiste com rótulo próprio) — não há buffer duplicado no núcleo.
 		await this.bus.emit(
 			"core:safe-mode-entered",
 			{ moduleId: offendingModuleId, error: String(error) },
@@ -245,24 +255,6 @@ export class HubCore {
 		callback: () => void
 	) => void;
 
-	logHistory(entry: Omit<HistoryEntry, "id" | "timestamp">): void {
-		const full: HistoryEntry = {
-			...entry,
-			id: cryptoRandomId(),
-			timestamp: Date.now(),
-		};
-		this.history.push(full);
-		if (this.history.length > this.historyLimit) this.history.shift();
-	}
-
-	getHistory(filter?: { type?: HistoryEventType; origin?: string }): HistoryEntry[] {
-		if (!filter) return [...this.history];
-		return this.history.filter(
-			(h) =>
-				(!filter.type || h.type === filter.type) && (!filter.origin || h.origin === filter.origin)
-		);
-	}
-
 	/**
 	 * Restaurar tudo — escadinha real de 3 níveis, como promete o modal:
 	 * - "config": só a configuração volta ao padrão; dados gerados intactos.
@@ -271,8 +263,10 @@ export class HubCore {
 	 * - "all": config padrão + onResetData (config E dados zerados).
 	 */
 	async resetAll(level: "config" | "data" | "all"): Promise<void> {
-		if (level === "all") await this.settings.reset("all");
-		else if (level === "config") await this.settings.reset("config");
+		// A diferença entre "config" e "all" não está no manager (ele não
+		// conhece módulos): ambos zeram a CONFIG; o que muda é se o reset de
+		// DADOS (onResetData + histórico) roda ou não — orquestrado abaixo.
+		if (level !== "data") await this.settings.reset();
 		if (level !== "data") {
 			// O reset substituiu `enabledModules` no disco (default = todos
 			// ligados), mas o Set em memória — que o Lobby usa para toggles e
@@ -288,9 +282,11 @@ export class HubCore {
 			}
 		}
 		if (level !== "config") {
-			// Dados gerados: hook do contrato + histórico do núcleo/bus. Roda para
-			// TODOS os módulos registrados, não só os ligados — dado gerado é dado
-			// gerado; se sobrevivesse ao reset, voltaria ao religar o módulo.
+			// Dados gerados: hook do contrato (o Histórico limpa as próprias
+			// entradas persistidas; o bus mantém o log da SESSÃO — é debug,
+			// não produto). Roda para TODOS os módulos registrados, não só os
+			// ligados — dado gerado é dado gerado; se sobrevivesse ao reset,
+			// voltaria ao religar o módulo.
 			for (const module of this.getModules()) {
 				try {
 					await module.onResetData?.();
@@ -298,7 +294,6 @@ export class HubCore {
 					console.error(`[All iₙ oNe] Módulo "${module.manifest.id}" falhou ao limpar dados no reset:`, err);
 				}
 			}
-			this.history = [];
 			this.bus.clearHistory();
 		}
 		if (level !== "data") {

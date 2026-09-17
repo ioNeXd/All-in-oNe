@@ -24,8 +24,6 @@ export interface CalendarEvent {
 	noteRefId?: string;
 	/** Ano em que já disparou — evita repetir no mesmo dia. */
 	lastFiredYear?: number;
-	/** Marcado quando um evento único já disparou (será removido). */
-	done?: boolean;
 }
 
 export const MONTH_NAMES = [
@@ -61,7 +59,6 @@ export function describeEvent(event: CalendarEvent): string {
 
 /** Decide se o evento deve disparar agora. Separado para ser testável. */
 export function shouldFire(event: CalendarEvent, now: Date): boolean {
-	if (event.done) return false;
 	if (event.day !== now.getDate() || event.month !== now.getMonth() + 1) return false;
 
 	if (event.recurrence === "once") {
