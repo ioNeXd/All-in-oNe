@@ -1,0 +1,476 @@
+/* All iₙ oNe — usa variáveis nativas do Obsidian sempre que possível, para
+   respeitar automaticamente o tema claro/escuro ativo, além do sistema de
+   Estilos próprio do plugin (que pode sobrescrever qualquer coisa aqui). */
+
+.ione-hub-lobby {
+	height: 100%;
+}
+
+.ione-hub-lobby__layout {
+	display: flex;
+	height: 100%;
+}
+
+.ione-hub-lobby__sidebar {
+	width: 240px;
+	border-right: 1px solid var(--background-modifier-border);
+	padding: var(--size-4-2);
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-3);
+	overflow-y: auto;
+}
+
+.ione-hub-lobby__content {
+	flex: 1;
+	padding: var(--size-4-4);
+	overflow-y: auto;
+}
+
+.ione-hub-lobby__search {
+	width: 100%;
+	padding: var(--size-4-1);
+	border-radius: var(--radius-s);
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+}
+
+.ione-hub-lobby__section-title {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	margin-bottom: var(--size-4-1);
+}
+
+.ione-hub-lobby__nav-item {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: var(--size-4-1) var(--size-4-2);
+	border-radius: var(--radius-s);
+	cursor: pointer;
+}
+
+.ione-hub-lobby__nav-item:hover,
+.ione-hub-lobby__nav-item:focus-visible {
+	background: var(--background-modifier-hover);
+}
+
+.ione-hub-lobby__nav-item.is-active {
+	background: var(--background-modifier-active-hover);
+	font-weight: 600;
+}
+
+.ione-hub-lobby__quick-btn {
+	width: 100%;
+	text-align: left;
+	margin-bottom: var(--size-4-1);
+}
+
+.ione-hub-lobby__reset-btn {
+	margin-top: auto;
+	color: var(--text-error);
+}
+
+.ione-hub-lobby__description {
+	color: var(--text-muted);
+}
+
+.ione-hub-lobby__diagnostic-row,
+.ione-hub-lobby__history-row {
+	padding: var(--size-4-1) 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+	font-size: var(--font-ui-small);
+}
+
+.ione-hub-lobby__history-time {
+	color: var(--text-faint);
+}
+
+.ione-hub-reset-option {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	padding: var(--size-4-3);
+	margin-bottom: var(--size-4-2);
+}
+
+.ione-hub-onboarding__footer {
+	margin-top: var(--size-4-4);
+	display: flex;
+	justify-content: flex-end;
+}
+
+/* Notificações */
+.ione-hub-notification {
+	border-left: 4px solid var(--interactive-accent);
+}
+
+.ione-hub-notification--high {
+	border-left-color: var(--text-error);
+}
+
+.ione-hub-notification--low {
+	border-left-color: var(--text-faint);
+}
+
+.ione-hub-changelog {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin: var(--size-4-1) 0;
+}
+
+.ione-hub-notice-actions {
+	display: flex;
+	gap: var(--size-4-2);
+	margin-top: var(--size-4-1);
+}
+
+/* Slot de estilo do Calendário — o módulo de Estilos pode sobrescrever
+   qualquer coisa aqui via seu editor CSS livre. */
+.ione-hub-calendar {
+	display: grid;
+	grid-template-columns: repeat(7, 1fr);
+	gap: var(--size-4-1);
+}
+
+.ione-hub-calendar__day {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: var(--size-4-1);
+	cursor: pointer;
+}
+
+.ione-hub-calendar__day:hover {
+	background: var(--background-modifier-hover);
+}
+
+.ione-hub-calendar__day--has-note {
+	border-color: var(--interactive-accent);
+}
+
+.ione-hub-calendar__day--pending {
+	border-color: var(--text-error);
+}
+
+/* ---- Calendário: cabeçalho, grade e visões ---- */
+.ione-hub-calendar__header {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	margin-bottom: var(--size-4-2);
+}
+
+.ione-hub-calendar__title {
+	font-weight: 600;
+	text-transform: capitalize;
+	flex: 1;
+}
+
+.ione-hub-calendar__weekday {
+	text-align: center;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	padding: var(--size-4-1) 0;
+}
+
+.ione-hub-calendar__day--empty {
+	border: none;
+	cursor: default;
+}
+
+.ione-hub-calendar__day--today {
+	outline: 2px solid var(--interactive-accent);
+	font-weight: 700;
+}
+
+.ione-hub-calendar__day--has-event::after {
+	content: "•";
+	display: block;
+	text-align: center;
+	line-height: 0.6;
+	color: var(--interactive-accent);
+}
+
+.ione-hub-calendar__week-row,
+.ione-hub-calendar__agenda > div {
+	padding: var(--size-4-1) var(--size-4-2);
+	border-bottom: 1px solid var(--background-modifier-border);
+	cursor: pointer;
+}
+
+.ione-hub-calendar__week-row:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* ---- Notificações: central persistente ---- */
+.ione-hub-notification-list__row {
+	padding: var(--size-4-1) 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+	font-size: var(--font-ui-small);
+}
+
+.ione-hub-notification-list__row.is-unread {
+	border-left: 3px solid var(--interactive-accent);
+	padding-left: var(--size-4-2);
+}
+
+/* ---- Estilos: preview de tema ---- */
+.ione-hub-theme-preview {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	padding: var(--size-4-3);
+	margin: var(--size-4-2) 0;
+	background: var(--background-primary);
+	color: var(--text-normal);
+}
+
+.ione-hub-theme-preview__sample a {
+	color: var(--text-accent);
+}
+
+.ione-hub-styles__editor {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	padding: var(--size-4-2);
+}
+
+/* Foco visível para navegação por teclado */
+.ione-hub-lobby__nav-item:focus-visible,
+.ione-hub-lobby__history-row:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
+/* ---- Estilos: autocomplete e referência ---- */
+.ione-hub-styles__suggestions {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+	max-height: 220px;
+	overflow-y: auto;
+	margin-top: -4px;
+}
+
+.ione-hub-styles__suggestion {
+	padding: var(--size-4-1) var(--size-4-2);
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+}
+
+.ione-hub-styles__suggestion.is-selected,
+.ione-hub-styles__suggestion:hover {
+	background: var(--background-modifier-hover);
+}
+
+.ione-hub-styles__reference {
+	margin-top: var(--size-4-3);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	padding: var(--size-4-2);
+}
+
+.ione-hub-styles__reference summary {
+	cursor: pointer;
+	font-weight: 600;
+}
+
+.ione-hub-styles__reference-row {
+	padding: var(--size-4-1) 0;
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ione-hub-styles__reference-row:hover {
+	background: var(--background-modifier-hover);
+}
+
+.ione-hub-code {
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: var(--size-4-2);
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+.ione-hub-lobby__warning {
+	color: var(--text-error);
+	background: var(--background-modifier-error-hover, transparent);
+	border-left: 3px solid var(--text-error);
+	padding: var(--size-4-1) var(--size-4-2);
+	border-radius: var(--radius-s);
+}
+
+/* Lobby em modo janela precisa de altura utilizável */
+.ione-hub-lobby-modal {
+	width: min(1000px, 92vw);
+	height: min(720px, 85vh);
+}
+
+.ione-hub-lobby-modal .modal-content,
+.ione-hub-lobby-modal .ione-hub-lobby,
+.ione-hub-lobby-modal .ione-hub-lobby__layout {
+	height: 100%;
+}
+
+/* ---- Abas internas de módulo ---- */
+.ione-hub-tabs {
+	display: flex;
+	gap: var(--size-4-1);
+	border-bottom: 1px solid var(--background-modifier-border);
+	margin-bottom: var(--size-4-3);
+}
+
+.ione-hub-tabs__tab {
+	padding: var(--size-4-2) var(--size-4-3);
+	cursor: pointer;
+	border-bottom: 2px solid transparent;
+	color: var(--text-muted);
+}
+
+.ione-hub-tabs__tab:hover { color: var(--text-normal); }
+
+.ione-hub-tabs__tab.is-active {
+	color: var(--text-normal);
+	border-bottom-color: var(--interactive-accent);
+	font-weight: 600;
+}
+
+/* ---- Galeria de temas prontos ---- */
+.ione-hub-preset-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+	gap: var(--size-4-3);
+	margin-bottom: var(--size-4-4);
+}
+
+.ione-hub-preset-card {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	padding: var(--size-4-3);
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-2);
+}
+
+.ione-hub-preset-card__swatches { display: flex; gap: 4px; }
+
+.ione-hub-preset-card__swatch {
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	border: 1px solid var(--background-modifier-border);
+}
+
+.ione-hub-preset-card__name { font-weight: 600; }
+
+.ione-hub-preset-card__desc {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	flex: 1;
+}
+
+.ione-hub-preset-card__actions { display: flex; gap: var(--size-4-1); }
+.ione-hub-preset-card__actions button { flex: 1; }
+
+/* ---- Editor de CSS: retângulo grande e confortável ---- */
+.ione-hub-styles__editor {
+	width: 100%;
+	min-height: 420px;
+	resize: vertical;
+	font-family: var(--font-monospace);
+	font-size: 13px;
+	line-height: 1.6;
+	tab-size: 2;
+	padding: var(--size-4-3);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background: var(--background-primary-alt, var(--background-primary));
+	color: var(--text-normal);
+}
+
+/* ---- Módulo desligado ---- */
+.ione-hub-lobby__disabled-box {
+	border: 1px solid var(--background-modifier-border);
+	border-left: 4px solid var(--text-error);
+	border-radius: var(--radius-m);
+	padding: var(--size-4-3);
+	margin-bottom: var(--size-4-3);
+	background: var(--background-secondary);
+}
+
+.ione-hub-lobby__disabled-title {
+	font-weight: 600;
+	color: var(--text-error);
+	margin-bottom: var(--size-4-1);
+}
+
+.ione-hub-toggle-emoji {
+	margin: 0 4px 0 10px;
+	font-size: 15px;
+}
+
+/* ---- Janela de lembrete ---- */
+.ione-hub-reminder {
+	border: 2px solid var(--interactive-accent);
+	box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+}
+
+.ione-hub-reminder__badge {
+	display: inline-block;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	padding: 2px 10px;
+	border-radius: 999px;
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	margin-bottom: var(--size-4-2);
+}
+
+.ione-hub-reminder__description {
+	font-size: var(--font-ui-medium);
+	color: var(--text-normal);
+}
+
+.ione-hub-reminder__when {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	margin-bottom: var(--size-4-3);
+}
+
+/* ---- Editor de eventos: seções ---- */
+.ione-hub-lobby__quick-actions select {
+	background: var(--background-primary);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 2px 6px;
+}
+
+/* ---- Campo com sugestões filtráveis (pastas, notas) ---- */
+.ione-hub-filter-suggest__box {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+	max-height: 200px;
+	overflow-y: auto;
+	margin-top: -4px;
+}
+
+.ione-hub-filter-suggest__row {
+	padding: var(--size-4-1) var(--size-4-2);
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+}
+
+.ione-hub-filter-suggest__row.is-selected,
+.ione-hub-filter-suggest__row:hover {
+	background: var(--background-modifier-hover);
+}

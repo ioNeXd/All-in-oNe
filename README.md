@@ -1,0 +1,79 @@
+# All iₙ oNe — plugin pessoal e modular para o Obsidian
+
+Um hub único dentro do Obsidian que reúne várias features num só plugin:
+servidor MCP embutido, editor de estilos, templates automáticos por pasta,
+calendário integrado, notificações e auto-update via GitHub — todos
+conectados por um núcleo comum de eventos, e todos configuráveis pelo
+usuário.
+
+> Este plugin nasceu como um projeto pessoal, então prioriza o fluxo de
+> trabalho de quem o criou. Ainda assim, foi desenhado para outras pessoas
+> conseguirem instalar, entender e usar sem contexto prévio.
+
+## O que ele faz
+
+| Módulo | O que faz |
+|---|---|
+| **Servidor MCP** | Expõe o vault (leitura e escrita) para clientes MCP como Claude Desktop, Cursor ou Claude Code, via Streamable HTTP, enquanto o Obsidian estiver aberto. Permissões por pasta, modo dry-run, rate limiting. |
+| **Estilos** | Editor de CSS livre + painel visual, aba de temas prontos, undo, export/import de tema — estiliza o próprio Obsidian e os outros módulos (ex.: o Calendário). |
+| **Auto-update** | Verifica e aplica atualizações a partir dos Releases do repositório no GitHub (o plugin não está na loja oficial). Canal estável/beta, changelog, rollback. |
+| **Templates por pasta** | Ao criar uma nota numa pasta configurada, aplica o template certo e preenche metadados automaticamente. Notas incompletas vão para uma pasta `Pendente` e voltam sozinhas quando completadas. |
+| **Calendário** | Interface de calendário ligada ao sistema de templates: clique numa data, escolha um template (definido por você), a nota é criada e organizada automaticamente. Suporta eventos recorrentes notificáveis (ex.: aniversários). |
+| **Notificações** | Pop-up com som para qualquer evento do plugin — configurável por tipo de evento, com modo não-perturbe. |
+
+Todos os módulos podem ser ligados/desligados individualmente pelo **Lobby**
+— o painel central do plugin, acessível pelo ícone na barra lateral ou pelo
+Command Palette (`Ctrl/Cmd+P` → "Abrir All iₙ oNe").
+
+## Instalação
+
+O All iₙ oNe **não está na loja oficial de plugins do Obsidian**. Duas formas
+de instalar:
+
+### Opção 1 — BRAT (recomendado)
+1. Instale o plugin [BRAT](https://github.com/TfTHacker/obsidian42-brat) pela loja oficial do Obsidian.
+2. No BRAT, adicione este repositório como plugin beta.
+3. O BRAT cuida de manter o plugin atualizado — como alternativa ao
+   auto-update próprio deste plugin.
+
+### Opção 2 — Manual
+1. Baixe `main.js`, `manifest.json` e `styles.css` do [Release mais recente](../../releases/latest).
+2. Crie a pasta `<seu-vault>/.obsidian/plugins/All-in-oNe/` e coloque os três arquivos lá.
+3. Recarregue o Obsidian e habilite o plugin em Configurações → Plugins da comunidade.
+4. A partir daí, o módulo de Auto-update deste próprio plugin cuida das próximas atualizações.
+
+Na primeira execução, um assistente de configuração inicial (onboarding) vai
+perguntar alguns caminhos básicos.
+
+## Desenvolvimento
+
+```bash
+npm install
+npm run dev     # build com watch, para desenvolvimento
+npm run build   # build de produção
+npm test        # testes unitários do núcleo/contrato
+```
+
+Veja `CONTRIBUTING.md` para o guia de como o projeto é organizado e como
+adicionar um módulo novo sem tocar no núcleo.
+
+## Arquitetura, em uma frase
+
+Um **núcleo** (event bus + configuração + estilos compartilhados) e **6
+módulos independentes** que seguem um **contrato comum** — nenhum módulo
+conhece outro diretamente, toda comunicação passa pelo núcleo. Isso é o que
+permite ligar/desligar cada feature sem afetar as demais, e adicionar um
+sétimo módulo no futuro sem alterar o que já existe.
+
+Veja `docs/ARCHITECTURE.md` para o detalhamento completo de cada decisão.
+
+## Privacidade
+
+Este plugin não envia nenhum dado para fora do seu computador, exceto:
+checagem de novas versões (API pública do GitHub) e, se você habilitar e
+usar o módulo MCP, o que um cliente MCP que você mesmo autorizou ler/
+escrever no seu vault. Não há telemetria.
+
+## Licença
+
+MIT — veja `LICENSE`.
