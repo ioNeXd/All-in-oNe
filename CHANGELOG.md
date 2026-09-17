@@ -15,7 +15,7 @@ o versionamento segue [SemVer](https://semver.org/lang/pt-BR/), conforme
 > valer formalmente: quebra de contrato de módulo = major, feature nova =
 > minor, correção = patch.
 
-## [Não lançado]
+## [0.1.1] — 2026-09-17
 
 Correções da primeira revisão externa pós-baseline — lista de 22 itens,
 todos verificados contra o código: **15 implementados** (abaixo) e 7

@@ -1,8 +1,9 @@
-# Status de implementação — v0.1.0
+# Status de implementação — v0.1.1
 
 Este documento existe para ser honesto sobre o que está **funcional de
 verdade** neste projeto versus o que é **esqueleto pronto para expandir**.
-A v0.1.0 é a linha de base: a arquitetura está completa e auditada, cada
+A v0.1.0 é a linha de base (v0.1.1 corrige 15 achados da primeira revisão
+externa — ver CHANGELOG): a arquitetura está completa e auditada, cada
 módulo está funcional na sua função principal, e as lacunas restantes estão
 listadas aqui sem rodeio.
 
@@ -184,5 +185,6 @@ painéis são funcionais mas simples (sem drag-and-drop).
 2. Pegar a lista de "não implementado" de **um módulo por vez**,
    implementar, testar, e só então passar ao próximo — em vez de tentar
    preencher todas as lacunas ao mesmo tempo.
-3. Quando houver confiança no runtime, o primeiro bump de versão (0.1.x)
-   inaugura o SemVer formal descrito no `CHANGELOG.md`.
+3. O bump 0.1.1 já inaugurou o SemVer formal descrito no `CHANGELOG.md`:
+   a partir daqui, quebra de contrato de módulo = major, feature nova =
+   minor, correção = patch.
