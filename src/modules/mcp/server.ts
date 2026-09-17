@@ -56,7 +56,17 @@ const TOOL_DEFINITIONS = [
 
 export async function createMcpServer(options: McpServerOptions): Promise<McpServerHandle> {
 	const server = http.createServer((req, res) => {
-		void handleRequest(req, res, options);
+		// Última linha de defesa: uma exceção assíncrona num handler NUNCA pode
+		// derrubar o processo do Obsidian (e com ele o vault do usuário) — nem
+		// deixar a conexão aberta para sempre. Loga e responde 500.
+		handleRequest(req, res, options).catch((err) => {
+			console.error("[All iₙ oNe] Erro não tratado no servidor MCP:", err);
+			if (!res.headersSent) {
+				res.writeHead(500).end(JSON.stringify({ error: "Erro interno do servidor MCP." }));
+			} else {
+				res.end();
+			}
+		});
 	});
 
 	await new Promise<void>((resolve, reject) => {
@@ -89,7 +99,23 @@ async function handleRequest(
 		return;
 	}
 
-	const body = await readBody(req);
+	// Limite de tamanho aplicado NO STREAMING: um corpo maior que MAX_BODY_BYTES
+	// derruba a conexão no meio, em vez de acumular tudo na memória antes de
+	// decidir (o check pós-readBody protegia o JSON.parse, mas o body inteiro
+	// já teria sido acumulado).
+	let body: string;
+	try {
+		body = await readBody(req, MAX_BODY_BYTES);
+	} catch (err) {
+		const tooLarge = (err as NodeJS.ErrnoException & { tooLarge?: boolean })?.tooLarge === true;
+		if (tooLarge) {
+			res.writeHead(413).end(JSON.stringify({ error: "Corpo da requisição grande demais." }));
+		} else {
+			res.writeHead(400).end(JSON.stringify({ error: "Falha ao ler a requisição." }));
+		}
+		return;
+	}
+
 	let message: { method?: string; id?: unknown; params?: Record<string, unknown> };
 	try {
 		message = JSON.parse(body);
@@ -129,11 +155,40 @@ function respondError(res: http.ServerResponse, id: unknown, error: string): voi
 	res.writeHead(200).end(JSON.stringify({ jsonrpc: "2.0", id, error: { message: error } }));
 }
 
-function readBody(req: http.IncomingMessage): Promise<string> {
+function readBody(req: http.IncomingMessage, maxBytes: number): Promise<string> {
 	return new Promise((resolve, reject) => {
 		let data = "";
-		req.on("data", (chunk) => (data += chunk));
-		req.on("end", () => resolve(data));
-		req.on("error", reject);
+		let bytes = 0;
+		let settled = false;
+		req.on("data", (chunk) => {
+			if (settled) return;
+			bytes += chunk.length;
+			if (bytes > maxBytes) {
+				settled = true;
+				const err = new Error("Corpo da requisição grande demais.") as NodeJS.ErrnoException & {
+					tooLarge?: boolean;
+				};
+				err.tooLarge = true;
+				req.destroy(); // para de acumular memória já
+				reject(err);
+				return;
+			}
+			data += chunk;
+		});
+		req.on("end", () => {
+			if (!settled) {
+				settled = true;
+				resolve(data);
+			}
+		});
+		req.on("error", (err) => {
+			if (!settled) {
+				settled = true;
+				reject(err);
+			}
+		});
 	});
 }
+
+/** 10 MB — nenhuma ferramenta atual precisa de mais que isso num POST. */
+const MAX_BODY_BYTES = 10 * 1024 * 1024;

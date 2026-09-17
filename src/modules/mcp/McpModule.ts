@@ -9,6 +9,7 @@ import type {
 import type { HubSettings } from "../../core/types";
 import { obfuscate, deobfuscate } from "../../core/secureStore";
 import { createMcpServer, McpServerHandle } from "./server";
+import { pathMatchesFolder as pathMatches, collectWriteTargets } from "./WriteRules";
 import { cryptoRandomId } from "../../core/types";
 
 export interface McpModuleSettings {
@@ -394,9 +395,14 @@ export class McpModule implements HubModule {
 		}
 
 		if (isWrite) {
-			const targetPath = String(args.path ?? "");
-			if (!this.isWriteAllowed(targetPath, settings)) {
-				return { ok: false, error: `Escrita não permitida no caminho "${targetPath}".` };
+			// Checa TODOS os caminhos que a ferramenta pode tocar — rename_note
+			// escreve em args.newPath, combine_notes em args.targetPath. Antes só
+			// args.path era checado, então era possível "mover" uma nota para
+			// dentro de uma pasta bloqueada.
+			const targets = collectWriteTargets(args);
+			const denied = targets.find((t) => !this.isWriteAllowed(t, settings));
+			if (denied !== undefined) {
+				return { ok: false, error: `Escrita não permitida no caminho "${denied}".` };
 			}
 		}
 
@@ -430,17 +436,26 @@ export class McpModule implements HubModule {
 
 	private isWriteAllowed(path: string, settings: McpModuleSettings): boolean {
 		const normalized = normalizePath(path);
-		if (settings.writeBlocklist.some((p) => normalized.startsWith(normalizePath(p)))) {
+		if (settings.writeBlocklist.some((p) => pathMatches(normalized, p))) {
 			return false;
 		}
 		if (settings.writeAllowlist.length === 0) return true;
-		return settings.writeAllowlist.some((p) => normalized.startsWith(normalizePath(p)));
+		return settings.writeAllowlist.some((p) => pathMatches(normalized, p));
 	}
 
-	/** Execução de fato das ferramentas — usa a fila de escrita do núcleo para evitar race conditions. */
+	/**
+	 * Execução de fato das ferramentas. Toda ferramenta de ESCRITA passa pela
+	 * fila de escrita do núcleo (FileWriteQueue) — é exatamente a corrida que
+	 * ela existe para evitar (ex.: Templates movendo a nota no meio de um
+	 * patch_note vindo de um cliente MCP).
+	 */
 	private async executeTool(toolName: string, args: Record<string, unknown>): Promise<unknown> {
 		const app = this.context!.app;
 		const vault = app.vault;
+		const write = <T>(path: string, op: () => Promise<T>): Promise<T> =>
+			WRITE_TOOLS.has(toolName)
+				? this.context!.fileWriteQueueRun(path, op)
+				: op();
 
 		switch (toolName) {
 			case "read_note": {
@@ -450,28 +465,28 @@ export class McpModule implements HubModule {
 			}
 			case "create_note": {
 				const path = normalizePath(String(args.path));
-				await vault.create(path, String(args.content ?? ""));
+				await write(path, () => vault.create(path, String(args.content ?? "")));
 				return { path };
 			}
 			case "append_note": {
 				const path = normalizePath(String(args.path));
 				const file = vault.getAbstractFileByPath(path);
 				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
-				await vault.append(file as TFile, String(args.content ?? ""));
+				await write(path, () => vault.append(file as TFile, String(args.content ?? "")));
 				return { path };
 			}
 			case "edit_note": {
 				const path = normalizePath(String(args.path));
 				const file = vault.getAbstractFileByPath(path);
 				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
-				await vault.modify(file as TFile, String(args.content ?? ""));
+				await write(path, () => vault.modify(file as TFile, String(args.content ?? "")));
 				return { path };
 			}
 			case "delete_note": {
 				const path = normalizePath(String(args.path));
 				const file = vault.getAbstractFileByPath(path);
 				if (!file) throw new Error("Nota não encontrada.");
-				await vault.trash(file, true); // vai para a lixeira, nunca exclusão direta (rede de segurança)
+				await write(path, () => vault.trash(file, true)); // vai para a lixeira, nunca exclusão direta (rede de segurança)
 				return { path };
 			}
 			case "list_folder": {
@@ -507,7 +522,7 @@ export class McpModule implements HubModule {
 				const newPath = normalizePath(String(args.newPath));
 				const file = vault.getAbstractFileByPath(path);
 				if (!file) throw new Error("Nota não encontrada.");
-				await app.fileManager.renameFile(file, newPath);
+				await write(path, () => app.fileManager.renameFile(file, newPath));
 				return { from: path, to: newPath };
 			}
 			case "patch_note": {
@@ -519,7 +534,12 @@ export class McpModule implements HubModule {
 				const replace = String(args.replace ?? "");
 				const content = await vault.read(file as TFile);
 				if (!content.includes(search)) throw new Error("Trecho a substituir não encontrado.");
-				await vault.modify(file as TFile, content.replace(search, replace));
+				// replace com string TRATA `$&`, `$1` etc. como padrões especiais;
+				// um replace vindo de um cliente MCP precisaria escapar cada `$`
+				// para funcionar. Função substitui literalmente.
+				await write(path, () =>
+					vault.modify(file as TFile, content.replace(search, () => replace))
+				);
 				return { path };
 			}
 			case "get_links": {
@@ -605,7 +625,11 @@ export class McpModule implements HubModule {
 					if (!title) continue;
 					const safeTitle = title.replace(/[\\/:*?"<>|]/g, "-");
 					const newPath = normalizePath(`${folder}/${safeTitle}.md`);
-					await vault.create(newPath, `${marker}${section}`).catch(() => void 0);
+					try {
+						await write(newPath, () => vault.create(newPath, `${marker}${section}`));
+					} catch {
+						continue; // já existia (ou falhou) — não entra na lista de criadas
+					}
 					created.push(newPath);
 				}
 				return { created };
@@ -618,7 +642,7 @@ export class McpModule implements HubModule {
 					const file = vault.getAbstractFileByPath(normalizePath(raw));
 					if (file instanceof TFileClass) parts.push(await vault.read(file as TFile));
 				}
-				await vault.create(target, parts.join("\n\n---\n\n"));
+				await write(target, () => vault.create(target, parts.join("\n\n---\n\n")));
 				return { target, combined: paths.length };
 			}
 			case "dataview_query": {
@@ -656,6 +680,7 @@ function splitLines(raw: string): string[] {
 		.map((v) => v.trim())
 		.filter(Boolean);
 }
+
 
 function describe(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);

@@ -1,5 +1,6 @@
 import { TFile, TFolder, normalizePath, Setting, Notice, Modal, App } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
+import { decidePendingAction, isPendingStatus as isStillPending } from "./NoteStatus";
 
 export interface FolderTemplateRule {
 	id: string;
@@ -44,7 +45,11 @@ export class TemplatesModule implements HubModule {
 		version: "0.1.0",
 		contractVersion: "2.0.0",
 		desktopOnly: false,
-		emits: ["templates:note-pending", "templates:note-restored", "vault:modify"],
+		emits: [
+			"templates:note-pending",
+			"templates:note-restored",
+			"templates:similar-rule-suggested",
+		],
 		listensTo: ["lifecycle:note-ready"],
 		settingsSchema: [],
 	};
@@ -410,24 +415,28 @@ export class TemplatesModule implements HubModule {
 		if (isStillPending(fm.status)) return; // ainda tem o chip "Pendente" — nada a fazer
 
 		// Chegou aqui: "Pendente" não está mais presente (usuário removeu o
-		// chip, apagou o campo inteiro, ou escreveu "Completo" à mão). Todos
-		// esses casos viram a mesma coisa: normaliza para ["Completo"] — só
-		// regrava se ainda não estiver exatamente assim, para não entrar em
-		// loop reescrevendo o mesmo valor a cada `changed`.
-		const alreadyNormalized =
-			Array.isArray(fm.status) && fm.status.length === 1 && String(fm.status[0]).toLowerCase() === "completo";
+		// chip, apagou o campo inteiro, ou escreveu "Completo" à mão). A regra
+		// de decisão (normalizar status, devolver à origem, evitar loop) está
+		// centralizada em NoteStatus.decidePendingAction — testada em
+		// tests/NoteStatus.test.ts contra o código real.
+		const action = decidePendingAction(fm.status, origem, file.path);
+		if (!action.rewriteStatus && !action.move) return; // nada a fazer
 
-		if (origem === file.path && alreadyNormalized) return; // nada a fazer
-
-		this.movingFiles.add(file.path);
+		// Captura o caminho ANTES de qualquer operação que o mude — o TFile é
+		// mutado in-place pelo Obsidian no rename (mesma armadilha da v0.4.0,
+		// ver tests/AwaitingPathBug.test.ts). Usar file.path depois do rename
+			// faria o finally abaixo apagar a chave ERRADA e vazar a marca de
+			// reentrância — travando qualquer operação futura com a nota.
+		const pathBefore = file.path;
+		this.movingFiles.add(pathBefore);
 		try {
-			if (!alreadyNormalized) {
+			if (action.rewriteStatus) {
 				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
 					frontmatter.status = ["Completo"];
 				});
 			}
 
-			if (origem !== file.path) {
+			if (action.move) {
 				const targetFolder = origem.substring(0, origem.lastIndexOf("/"));
 				await this.ensureFolder(targetFolder);
 
@@ -444,7 +453,7 @@ export class TemplatesModule implements HubModule {
 				new Notice(`Nota completada e devolvida para ${finalPath}`);
 			}
 		} finally {
-			this.movingFiles.delete(file.path);
+			this.movingFiles.delete(pathBefore);
 		}
 	}
 
@@ -452,8 +461,8 @@ export class TemplatesModule implements HubModule {
 	private async uniquePath(desired: string): Promise<string> {
 		if (!this.context!.app.vault.getAbstractFileByPath(desired)) return desired;
 		const dot = desired.lastIndexOf(".");
-		const base = desired.slice(0, dot);
-		const ext = desired.slice(dot);
+		const base = dot === -1 ? desired : desired.slice(0, dot);
+		const ext = dot === -1 ? "" : desired.slice(dot);
 		let counter = 2;
 		while (this.context!.app.vault.getAbstractFileByPath(`${base} ${counter}${ext}`)) counter++;
 		return `${base} ${counter}${ext}`;
@@ -486,13 +495,16 @@ export class TemplatesModule implements HubModule {
 		await this.ensureFolder(pendingFolder);
 		const newPath = await this.uniquePath(normalizePath(`${pendingFolder}/${file.name}`));
 
-		this.movingFiles.add(file.path);
+		// Mesma regra do handleNoteModified: capturar o caminho ANTES do rename,
+		// porque o TFile.path muda in-place no meio desta operação.
+		const pathBefore = file.path;
+		this.movingFiles.add(pathBefore);
 		try {
-			await this.context!.fileWriteQueueRun(file.path, () =>
+			await this.context!.fileWriteQueueRun(pathBefore, () =>
 				this.context!.app.fileManager.renameFile(file, newPath)
 			);
 		} finally {
-			this.movingFiles.delete(file.path);
+			this.movingFiles.delete(pathBefore);
 		}
 	}
 
@@ -547,11 +559,5 @@ function stripFrontmatter(content: string): string {
 	const end = content.indexOf("\n---", 3);
 	if (end === -1) return content;
 	return content.slice(end + 4);
-}
-
-/** Aceita `status` como lista (["Pendente"]) ou texto ("Pendente"), com qualquer capitalização. */
-function isStillPending(status: unknown): boolean {
-	const values = Array.isArray(status) ? status : [status];
-	return values.some((v) => typeof v === "string" && v.trim().toLowerCase() === "pendente");
 }
 

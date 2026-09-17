@@ -295,8 +295,11 @@ export class FileLifecycleModule implements HubModule {
 	private async uniquePath(desired: string): Promise<string> {
 		if (!this.context!.app.vault.getAbstractFileByPath(desired)) return desired;
 		const dot = desired.lastIndexOf(".");
-		const base = desired.slice(0, dot);
-		const ext = desired.slice(dot);
+		// Sem extensão, dot === -1: slice(0, -1) comeria o último caractere do
+		// nome e slice(-1) viraria a "extensão" — gerando "Nota 2t" em vez de
+		// "Nota 2". Mesmo guard aplicado em TemplatesModule e CalendarModule.
+		const base = dot === -1 ? desired : desired.slice(0, dot);
+		const ext = dot === -1 ? "" : desired.slice(dot);
 		let counter = 2;
 		while (this.context!.app.vault.getAbstractFileByPath(`${base} ${counter}${ext}`)) counter++;
 		return `${base} ${counter}${ext}`;

@@ -1,5 +1,6 @@
 import { Notice, requestUrl, Setting } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
+import { isNewerVersion, parseChecksums } from "./ReleaseUtils";
 
 export interface AutoUpdateSettings {
 	repo: string; // formato "usuario/repositorio" — hardcoded no manifesto do plugin, não editável por terceiros
@@ -158,10 +159,20 @@ export class AutoUpdateModule implements HubModule {
 			if (!candidate) return null;
 
 			const remoteVersion = candidate.tag_name.replace(/^v/, "");
-			if (remoteVersion === this.currentVersion) {
-				if (opts.manual) new Notice("All iₙ oNe: você já está na versão mais recente.");
+			// Comparação SemVer real: v0.10.0 > v0.9.0 (a comparação de string
+			// tratava "0.10.0" < "0.9.0" lexicograficamente e "0.2.0" == "0.2").
+			if (!isNewerVersion(remoteVersion, this.currentVersion)) {
+				if (opts.manual && remoteVersion === this.currentVersion) {
+					new Notice("All iₙ oNe: você já está na versão mais recente.");
+				}
 				return null;
 			}
+
+			// "Ignorar" significa ignorar ESTA versão: o lastKnownVersion (que
+			// existia no tipo mas nunca era lido) guarda a versão dispensada, e a
+			// notificação automática não reaparece a cada 6h pela mesma versão.
+			// Checagem manual sempre mostra — o usuário pediu explicitamente.
+			if (!opts.manual && settings.lastKnownVersion === remoteVersion) return candidate;
 
 			this.notifyUpdateAvailable(remoteVersion, candidate);
 			await this.context?.bus.emit(
@@ -192,7 +203,11 @@ export class AutoUpdateModule implements HubModule {
 			notice.hide();
 			void this.applyUpdate(release);
 		};
-		dismissBtn.onclick = () => notice.hide();
+		dismissBtn.onclick = () => {
+			notice.hide();
+			// Persiste a versão dispensada para o próximo ciclo de 6h não re-avisar.
+			void this.context?.updateSettings({ lastKnownVersion: version });
+		};
 	}
 
 	async applyUpdate(release: GitHubRelease): Promise<void> {
@@ -284,15 +299,6 @@ export class AutoUpdateModule implements HubModule {
  * Se o release não declarar nenhum, a verificação é simplesmente pulada
  * (não é obrigatório — mas quando existe, precisa bater).
  */
-function parseChecksums(body: string): Record<string, string> {
-	const result: Record<string, string> = {};
-	for (const line of (body ?? "").split("\n")) {
-		const match = line.match(/sha256\s+([\w.\-]+)\s*[:=]\s*([a-fA-F0-9]{64})/);
-		if (match) result[match[1]] = match[2];
-	}
-	return result;
-}
-
 async function sha256Hex(text: string): Promise<string> {
 	const bytes = new TextEncoder().encode(text);
 	const digest = await crypto.subtle.digest("SHA-256", bytes);

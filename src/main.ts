@@ -53,6 +53,11 @@ export default class IoneHubPlugin extends Plugin {
 		// Traduz eventos nativos do vault para o barramento interno. Fica no
 		// núcleo (não num módulo) para que esses eventos existam sempre,
 		// independentemente de quais módulos estejam ligados.
+		// ORDEM IMPORTA: o módulo de Ciclo de Vida precisa existir (e registrar
+		// seu listener de criação) ANTES do primeiro evento de criação que a
+		// ponte possa repassar — e o callback abaixo o referencia, então a
+		// instância tem que já existir aqui.
+		const fileLifecycle = new FileLifecycleModule();
 		this.vaultBridge = new VaultEventBridge(
 			this.app,
 			this.core.bus,
@@ -66,9 +71,6 @@ export default class IoneHubPlugin extends Plugin {
 		const autoUpdate = new AutoUpdateModule();
 		autoUpdate.setCurrentVersion(this.manifest.version);
 
-		// ORDEM IMPORTA: o Ciclo de Vida precisa registrar seu listener de
-		// criação antes do Templates, para perguntar o nome da nota primeiro.
-		const fileLifecycle = new FileLifecycleModule();
 		const modules = [
 			fileLifecycle,
 			new McpModule(),

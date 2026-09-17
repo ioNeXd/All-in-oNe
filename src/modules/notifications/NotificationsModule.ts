@@ -1,5 +1,6 @@
 import { Notice, Setting } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
+import { cryptoRandomId } from "../../core/types";
 
 export type NotifiableTrigger =
 	| "file:created"
@@ -98,15 +99,9 @@ export class NotificationsModule implements HubModule {
 		contractVersion: "2.0.0",
 		desktopOnly: false,
 		emits: [],
-		listensTo: [
-			"file:created",
-			"file:deleted",
-			"calendar:event-fired",
-			"autoupdate:available",
-			"templates:note-pending",
-			"templates:note-restored",
-			"core:safe-mode-entered",
-		],
+		// Espelha os gatilhos de TRIGGER_LABELS — o onEnable escuta todos eles,
+		// então este manifesto tem que listar todos (é "documentação viva").
+		listensTo: Object.keys(TRIGGER_LABELS) as string[],
 		settingsSchema: [],
 	};
 
@@ -379,7 +374,10 @@ export class NotificationsModule implements HubModule {
 	private async appendHistory(trigger: NotifiableTrigger, message: string): Promise<void> {
 		const settings = this.readSettings();
 		const entry: StoredNotification = {
-			id: `notif-${Date.now()}`,
+			// cryptoRandomId (mesmo gerador do núcleo): duas notificações no mesmo
+			// milissegundo colidiam com `notif-${Date.now()}` e uma sobrescrevia
+			// a outra no "marcar como lida" por id.
+			id: `notif-${cryptoRandomId()}`,
 			trigger,
 			message,
 			timestamp: Date.now(),

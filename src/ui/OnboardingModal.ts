@@ -1,4 +1,4 @@
-import { App, Modal, Setting } from "obsidian";
+import { App, Modal, Setting, TFolder } from "obsidian";
 import type { HubCore } from "../core/HubCore";
 
 /**
@@ -64,9 +64,20 @@ export class OnboardingModal extends Modal {
 			},
 		});
 
-		await this.core.app.vault
-			.createFolder(this.calendarTemplatesFolder)
-			.catch(() => void 0);
+		// `vault.createFolder` NÃO cria pastas-pai — num caminho aninhado
+		// (ex.: "Calendario/templates") ele falhava em silêncio aqui, e a
+		// primeira nota de data da vida do usuário morria com ENOENT. Mesma
+		// criação recursiva segmento a segmento usada por Templates, Calendário
+		// e Ciclo de Vida.
+		const segments = this.calendarTemplatesFolder.split("/").filter(Boolean);
+		let current = "";
+		for (const segment of segments) {
+			current = current ? `${current}/${segment}` : segment;
+			const node = this.core.app.vault.getAbstractFileByPath(current);
+			if (!(node instanceof TFolder)) {
+				await this.core.app.vault.createFolder(current).catch(() => void 0);
+			}
+		}
 
 		this.close();
 	}

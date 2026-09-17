@@ -53,7 +53,13 @@ export class HubCore {
 
 		// Eventos de vault são de alta frequência em vaults grandes — throttle
 		// evita sobrecarregar listeners caros (Histórico, Notificações).
-		this.bus.setThrottle("vault:modify", 500);
+		// ATENÇÃO: o throttle do bus descarta emissões inteiras, então NÃO
+		// aplicar a "file:modified" enquanto o módulo de Templates precisar
+		// reagir a ela (retornar nota de Pendente). "file:created" não tem
+		// listener que precise de cadência exata e é o que pode explodir em
+		// rajada (selecionar 200 notas → criar). Se um dia o Histórico/Notifi-
+		// cações tratarem file:modified, o mute deles no HistoryModule resolve.
+		this.bus.setThrottle("file:created", 500);
 
 		// NOTA para quem for estender isto: o EventBus atual não tem wildcard
 		// ("escutar tudo"). A aba de Histórico do Lobby usa `bus.getHistory()`
@@ -238,6 +244,18 @@ export class HubCore {
 		if (level !== "config") {
 			this.history = [];
 			this.bus.clearHistory();
+		}
+		// O reset substituiu a configuração inteira (inclusive as fatias por
+		// módulo). Sem avisar, cada módulo segue rodando com a config ANTIGA em
+		// memória (ex.: Histórico com 500 entradas de volta na próxima gravação).
+		for (const module of this.getModules()) {
+			if (this.isModuleEnabled(module.manifest.id)) {
+				try {
+					module.onSettingsChange?.(this.settings.get());
+				} catch (err) {
+					console.error(`[All iₙ oNe] Módulo "${module.manifest.id}" falhou ao reagir ao reset:`, err);
+				}
+			}
 		}
 		await this.bus.emit("core:reset", { level }, "core");
 	}

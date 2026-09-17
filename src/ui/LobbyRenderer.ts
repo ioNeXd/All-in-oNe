@@ -1,6 +1,7 @@
 import { App, Notice, Setting, TFile, Modal } from "obsidian";
 import type { HubCore } from "../core/HubCore";
 import type { HubModule } from "../core/ModuleContract";
+import { isPendingStatus } from "../modules/templates/NoteStatus";
 
 /** Rótulos amigáveis para as chaves de `settings.paths`. */
 const PATH_LABELS: Record<string, string> = {
@@ -368,7 +369,10 @@ export class LobbyRenderer {
 	private async quickShowPending(): Promise<void> {
 		const pending = this.app.vault.getMarkdownFiles().filter((file) => {
 			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-			return fm?.status === "pendente";
+			// Mesma regra do módulo de Templates (lista ["Pendente","Completo"]) —
+			// comparar com a string "pendente" nunca casava e a ação rápida
+			// dizia "Nenhuma nota pendente" mesmo com pendências.
+			return isPendingStatus(fm?.status);
 		});
 		if (pending.length === 0) {
 			new Notice("Nenhuma nota pendente no vault.");

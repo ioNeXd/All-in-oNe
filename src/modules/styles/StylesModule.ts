@@ -66,6 +66,15 @@ export class StylesModule implements HubModule {
 		this.styleEl = undefined;
 	}
 
+	/**
+	 * "Restaurar tudo" zera a config, mas o <style> injetado no <head> é
+	 * estado em memória — sem isto, o CSS antigo continuava aplicado depois
+	 * do reset, na cara do usuário, até reiniciar o plugin.
+	 */
+	onSettingsChange(): void {
+		if (this.styleEl) this.applyCss(this.readSettings().activeCss);
+	}
+
 	getHealthStatus() {
 		const hasCustomCss = !!this.readSettings().activeCss.trim();
 		return { ok: true, summary: hasCustomCss ? "CSS customizado ativo" : "Usando padrão do Obsidian" };

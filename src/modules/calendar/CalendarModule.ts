@@ -3,6 +3,7 @@ import type { HubModule, ModuleContext, ModuleManifest } from "../../core/Module
 import { type CalendarEvent, monthFolderName, describeEvent, shouldFire, MONTH_NAMES } from "./EventTypes";
 import { ReminderModal, playReminderChime } from "./ReminderModal";
 import { attachFilterSuggest } from "../../ui/FilterSuggest";
+import { isPendingStatus } from "../templates/NoteStatus";
 export type { CalendarEvent } from "./EventTypes";
 
 export interface CalendarModuleSettings {
@@ -526,7 +527,7 @@ export class CalendarModule implements HubModule {
 		const app = this.context!.app;
 		return app.vault.getMarkdownFiles().filter((file) => {
 			const fm = app.metadataCache.getFileCache(file)?.frontmatter;
-			return fm?.status === "pendente";
+			return isPendingStatus(fm?.status);
 		});
 	}
 
@@ -550,13 +551,13 @@ export class CalendarModule implements HubModule {
 
 		for (let day = 1; day <= daysInMonth; day++) {
 			const date = new Date(year, month, day);
-			const file = this.findNoteForDate(date);
-			let pending = false;
-			if (file) {
-				const fm = app.metadataCache.getFileCache(file)?.frontmatter;
-				pending = fm?.status === "pendente";
-			}
-			result[day] = { hasNote: !!file, pending, events: this.eventsForDate(date) };
+		const file = this.findNoteForDate(date);
+		let pending = false;
+		if (file) {
+			const fm = app.metadataCache.getFileCache(file)?.frontmatter;
+			pending = isPendingStatus(fm?.status);
+		}
+		result[day] = { hasNote: !!file, pending, events: this.eventsForDate(date) };
 		}
 		return result;
 	}
@@ -575,7 +576,6 @@ export class CalendarModule implements HubModule {
 		);
 	}
 
-	/** Clique num dia: abre a nota existente, ou pergunta o template antes de criar. */
 	/** Clique num dia: abre a nota existente, ou pergunta o que fazer. */
 	private async handleDayClick(date: Date): Promise<void> {
 		const existing = this.findNoteForDate(date);
@@ -841,6 +841,7 @@ function pad(n: number): string {
 	return String(n).padStart(2, "0");
 }
 
+
 /** Remove um bloco de frontmatter do início do texto, se houver. */
 function stripFrontmatter(content: string): string {
 	if (!content.startsWith("---")) return content;
@@ -914,15 +915,12 @@ class DayActionModal extends Modal {
 }
 
 /**
- * Formulário de evento: recorrência, data, horário, lembrete, descrição e
- * nota a abrir. Tudo numa janela só, para o usuário ver as consequências de
- * cada escolha enquanto preenche.
- */
-/**
  * Formulário de evento — cria OU edita, dependendo se `existing` foi passado.
- * A seção "nota vinculada" oferece selecionar uma nota já existente (que é
- * movida para a pasta de eventos e ganha o metadado `origem_evento`) ou criar
- * uma nota nova numa pasta configurável (padrão: Calendario/notas).
+ * Recorrência, data, horário, lembrete, descrição e nota a abrir, tudo numa
+ * janela só. A seção "nota vinculada" oferece selecionar uma nota já
+ * existente (que é movida para a pasta de eventos e ganha o metadado
+ * `origem_evento`) ou criar uma nota nova numa pasta configurável
+ * (padrão: Calendario/notas).
  */
 class EventEditorModal extends Modal {
 	private draft: Omit<CalendarEvent, "id">;
