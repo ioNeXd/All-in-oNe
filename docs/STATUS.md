@@ -11,9 +11,34 @@ módulo está funcional na sua função principal, e as lacunas restantes estão
 listadas aqui sem rodeio.
 
 > Estado da validação nesta linha de base: typecheck estrito ✅ ·
-> **252 testes em 23 arquivos** (todos importando código real, não cópias
+> **258 testes em 23 arquivos** (todos importando código real, não cópias
 > espelhadas) ✅ · build de produção ✅. O que os testes não cobrem é o
 > runtime de verdade no Obsidian — para isso, siga `docs/MANUAL-VALIDATION.md`.
+
+## Versões por módulo
+
+Cada módulo carrega uma `version` independente no seu manifest, além da
+versão do plugin em `manifest.json`. A regra é a mesma SemVer do plugin:
+feature nova no módulo = bump minor, correção = patch, quebra de
+contrato = major. A tabela mapeia cada versão com o que a produziu; as
+seções seguintes detalham cada módulo em seu estado atual.
+
+| Módulo | v0.1.0 (baseline) | v0.1.1 (2026-09-17) | v0.2.0 (2026-09-22) |
+|---|---|---|---|
+| MCP | `0.1.0` — ferramentas base de leitura e escrita | `0.1.0` | `0.2.0` — anexos completos (`put_attachment`/`delete_attachment`), log de atividade dedicado (`mcp:action-logged`), negociação de `toolsApiVersion` no handshake e `get_server_info` |
+| Ciclo de vida de arquivos | `0.1.0` — nome ao criar, confirmação opcional de renome/mover/exclusão | `0.1.0` | `0.1.0` — sem mudanças |
+| Estilos | `0.1.0` — temas, painel visual, preview/undo/export | `0.1.0` | `0.2.0` — realce de sintaxe no editor livre (overlay + `CssHighlight.ts`) |
+| Templates por pasta | `0.1.0` — regras por pasta, herança, status, movimentação | `0.1.0` | `0.1.0` — sem mudanças de código (a Parte 0 do plano corrigiu apenas docs) |
+| Calendário | `0.2.0`¹ — grade/semana/agenda, recorrentes, lembretes, `DayActionModal` | `0.2.0`¹ | `0.3.0` — importador `.ics` (`IcsParser.ts`), `onResetData` e diagnóstico da última importação |
+| Notificações | `0.1.0` — 11 gatilhos, regras, não-perturbe, histórico no painel | `0.1.0` | `0.2.0` — filtro por gatilho persistido e agrupamento por dia (`NotificationList.ts`) |
+| Histórico | `0.1.0` — registro persistente e filtro por tipo | `0.1.0` | `0.2.0` — busca por texto combinada ao filtro (`HistoryFilter.ts`) e consumidor de `mcp:action-logged` |
+| Auto-update | `0.1.0` — checagem, SemVer, canal, backup/rollback, checksum | `0.1.0` | `0.2.0` — verificação de assinatura GPG opt-in (`SignatureUtils.ts`), cedência ao BRAT e validação da chave pública |
+
+¹ O `0.2.0` do Calendário na baseline é herança do dev pré-baseline —
+nunca correspondeu a um release do plugin. No ciclo 0.2.0 o módulo
+ganhou features SEM bump; corrigido no `[Não lançado]` com bump para
+`0.3.0`. As colunas de baseline e 0.1.1 apontam para o mesmo estado de
+código, apenas com rótulos de versão diferentes.
 
 ## Núcleo — completo
 
@@ -44,6 +69,10 @@ listadas aqui sem rodeio.
   listeners órfãos.
 
 ## Módulo MCP — funcional
+
+**Versão do módulo:** `0.2.0` — anexos completos, log de atividade
+dedicado e negociação de versão são os marcos desta versão do módulo
+(ver tabela acima).
 
 **Funciona:** servidor Streamable HTTP real (Node `http`), autenticação
 por token, rate limiting, modo dry-run, permissões de escrita por pasta
@@ -88,6 +117,9 @@ interno do `Menu` e pode deixar de funcionar num update futuro do Obsidian
 
 ## Módulo Estilos — funcional
 
+**Versão do módulo:** `0.2.0` — o realce de sintaxe no editor livre é o
+que distingue esta versão da `0.1.0` da baseline.
+
 **Funciona:** injeção de CSS em tempo real, 7 temas prontos gerados por
 `buildTheme()` (~45 variáveis derivadas de cores-base), painel visual com
 ~40 variáveis editáveis (sliders/color pickers), preview de tema antes de
@@ -100,6 +132,9 @@ ligado/desligado no próprio editor), re-aplicação reativa a mudanças de
 configuração e reset (o `<style>` injetado é limpo ao "Restaurar tudo").
 
 ## Módulo Auto-update — funcional
+
+**Versão do módulo:** `0.2.0` — assinatura GPG e interoperabilidade com
+o BRAT são os marcos desta versão do módulo.
 
 **Funciona:** checagem manual e automática com throttle, canal estável/
 beta, comparação SemVer real (pré-lançamento é mais antigo que o release
@@ -137,6 +172,11 @@ trava contra ciclos de herança via `wouldCreateInheritanceLoop`), e seção
 
 ## Módulo Calendário — funcional
 
+**Versão do módulo:** `0.3.0` — a importação `.ics` e o reset de dados
+importado são os marcos desta versão; o número `0.2.0` visto entre a
+baseline e o ciclo 0.2.0 do plugin era herança do dev pré-baseline (ver
+tabela acima).
+
 **Funciona:** grade clicável com navegação entre meses (‹ › e "Hoje",
 sem duplicar controles), indicadores por dia (nota existente, pendente,
 evento) com tooltip, visões de semana e agenda, modal de escolha de
@@ -159,6 +199,9 @@ boa).
 
 ## Módulo Notificações — funcional
 
+**Versão do módulo:** `0.2.0` — filtro e agrupamento entraram nesta
+versão do módulo.
+
 **Funciona:** pop-up com som via `Notice` (com `resume()` do
 `AudioContext`), 11 gatilhos documentados no manifest do módulo, regras
 globais (criação/renomeação/exclusão) ligadas de fábrica, modo
@@ -171,6 +214,9 @@ módulo; filtro de gatilho removido degrada para "Todas" em vez de esconder
 tudo.
 
 ## Módulo Histórico — funcional
+
+**Versão do módulo:** `0.2.0` — a busca por texto e o consumo do log do
+MCP são os marcos desta versão do módulo.
 
 **Funciona:** módulo independente (não vive no núcleo), persistente entre
 sessões, filtro com autocomplete e rótulos em português, busca por texto
@@ -220,7 +266,7 @@ equivale a apresentação e NÃO muda quais módulos estão ligados
 
 ## Como continuar a partir daqui
 
-1. **Validar o runtime num vault real** — o que os 252 testes não cobrem:
+1. **Validar o runtime num vault real** — o que os 258 testes não cobrem:
    Lobby completo, reset em 3 níveis, servidor MCP respondendo a um cliente
    de verdade, calendário navegando meses, update/rollback.
 2. Pegar a lista de "não implementado" de **um módulo por vez**,
@@ -229,3 +275,8 @@ equivale a apresentação e NÃO muda quais módulos estão ligados
 3. O bump 0.1.1 já inaugurou o SemVer formal descrito no `CHANGELOG.md`:
    a partir daqui, quebra de contrato de módulo = major, feature nova =
    minor, correção = patch.
+4. **Bump da `version` do módulo junto da feature** — cada módulo tem
+   versão própria no manifest (tabela no topo deste doc); feature que
+   entra no módulo exige bump minor ali, além da versão do plugin. Ao
+   fechar release, conferir a tabela: toda coluna de release nova deve
+   mostrar cada módulo sem mudanças OU com bump justificado.

@@ -54,7 +54,7 @@ export class CalendarModule implements HubModule {
 		displayName: "Calendário",
 		description: "Calendário integrado com o sistema de templates e eventos recorrentes notificáveis.",
 		icon: "calendar",
-		version: "0.2.0",
+		version: "0.3.0", // 0.1.0→0.2.0 no dev pré-baseline (nunca lançado); .ics + onResetData → 0.3.0
 		contractVersion: "2.0.0",
 		desktopOnly: false,
 		emits: ["calendar:event-fired", "calendar:note-opened", "calendar:note-created"],

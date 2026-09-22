@@ -1,6 +1,6 @@
 # Checklist de validação manual — v0.2.0
 
-O que os **252 testes automatizados** não cobrem é o runtime de verdade
+O que os **258 testes automatizados** não cobrem é o runtime de verdade
 dentro do Obsidian: ciclo de vida do plugin, interações de UI, portas,
 arquivos e o comportamento sob uso real. Este checklist guia essa validação
 no vault. Marque cada item só depois de ver o resultado com os próprios

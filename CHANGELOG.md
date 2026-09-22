@@ -7,6 +7,22 @@ o versionamento segue [SemVer](https://semver.org/lang/pt-BR/), conforme
 
 ## [Não lançado]
 
+### Alterado
+
+- Bump da `version` do módulo Calendário: `0.2.0` → `0.3.0` — o número
+  antigo era herança do dev pré-baseline e nunca correspondeu a um
+  release; manter `0.2.0` faria a v0.1.1 e a v0.2.0 do plugin conterem o
+  MESMO `0.2.0` do módulo com conjuntos de features diferentes. As
+  features do ciclo 0.2.0 (`.ics`, `onResetData`, diagnóstico de
+  importação) agora têm bump próprio
+- Teste de integração do reset nível "data" com o módulo Calendário REAL
+  em `tests/HubCore.test.ts`: a suíte de reset do núcleo (antes só com
+  módulos-fantasma) agora prova o hook do Calendário ponta a ponta —
+  eventos importados de `.ics` (`ics:<uid>`) saem, os criados à mão
+  (`evt-*`) ficam — exercitando `resetAll("data")` de verdade, com o
+  módulo registrado DESLIGADO (dado de módulo desligado não sobrevive ao
+  reset)
+
 ## [0.2.0] — 2026-09-22
 
 ### Adicionado
@@ -79,7 +95,8 @@ o versionamento segue [SemVer](https://semver.org/lang/pt-BR/), conforme
   RRULE `FREQ=YEARLY` mapeia para a recorrência anual do modelo;
   frequências não representáveis (MONTHLY, WEEKLY, DAILY…) viram evento
   único com aviso explícito, em vez de aproximação silenciosa
-- Botão "Importar .ics" na aba de Eventos: falha de leitura/validação
+- Botão "Importar .ics" na aba de Eventos (bump do módulo:
+  `0.2.0` → `0.3.0`): falha de leitura/validação
   mantém o painel aberto com Notice do motivo; eventos importados entram
   na fatia de settings via `updateSettings`, mesclados por UID — importar
   o mesmo arquivo de novo substitui os eventos anteriores (dedupe por id
@@ -139,7 +156,14 @@ o versionamento segue [SemVer](https://semver.org/lang/pt-BR/), conforme
   por ferramenta, nunca no handshake). Regra pura em
   `mcp/ToolsApiVersion.ts`, com suíte própria
 - Ferramentas novas declaradas no `tools/list`: `put_attachment`,
-  `delete_attachment`, `get_server_info`
+  `delete_attachment`, `get_server_info` — bump do módulo: `0.1.0` →
+  `0.2.0`
+- Testes da recusa de autenticação do servidor MCP (furo de cobertura da
+  suíte): requisição SEM header `Authorization`, token ERRADO e variações
+  de esquema (`bearer tok`, token sem esquema) → **401** com
+  `{ error: "Token inválido." }`; a recusa acontece ANTES de ler/processar
+  (o handler da ferramenta nunca é chamado — spy prova o curto-circuito);
+  controle positivo com o token certo completa o par
 
 ### Decisões de design documentadas
 

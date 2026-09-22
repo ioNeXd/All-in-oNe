@@ -10,7 +10,8 @@ import {
  * efêmera (port: 0 — o SO escolhe; o handle expõe a porta real). Cobre o
  * handshake do protocolo MCP, que clientes reais (Claude Desktop, Cursor)
  * executam ANTES de listar ferramentas — sem isto, a conexão morria no
- * primeiro passo.
+ * primeiro passo. Também cobre a autenticação por token: a recusa (401)
+ * acontece antes de ler o corpo e de executar qualquer ferramenta.
  */
 
 const handles: McpServerHandle[] = [];
@@ -121,6 +122,71 @@ describe("MCP — handshake do protocolo (initialize + notificações)", () => {
 		const json = (await res.json()) as { id: number; result: { content: unknown } };
 		expect(json.id).toBe(9);
 		expect(json.result.content).toEqual({ eco: "read_note" });
+	});
+});
+
+describe("MCP — autenticação (401 antes de qualquer processamento)", () => {
+	const CALL = {
+		jsonrpc: "2.0",
+		id: 42,
+		method: "tools/call",
+		params: { name: "read_note", arguments: { path: "x.md" } },
+	};
+
+	it("requisição SEM header Authorization → 401 com erro explícito", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" }, // sem Authorization
+			body: JSON.stringify(CALL),
+		});
+		expect(res.status).toBe(401);
+		expect(await res.json()).toEqual({ error: "Token inválido." });
+	});
+
+	it("token ERRADO → 401, mesmo com corpo JSON-RPC válido", async () => {
+		const h = await start();
+		const res = await post(h.port, CALL, "token-errado");
+		expect(res.status).toBe(401);
+		expect(await res.json()).toEqual({ error: "Token inválido." });
+	});
+
+	it("comparação EXATA: esquema minúsculo ou token sem esquema também recusa", async () => {
+		// O gate compara a string inteira com `Bearer ${token}` — não basta o
+		// token aparecer no header de qualquer forma (evita confusão de esquema).
+		const h = await start();
+		for (const authValue of ["bearer tok", "tok"]) {
+			const res = await fetch(`http://127.0.0.1:${h.port}`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json", Authorization: authValue },
+				body: JSON.stringify(CALL),
+			});
+			expect(res.status, `Authorization: "${authValue}" deveria ser recusado`).toBe(401);
+		}
+	});
+
+	it("a recusa acontece ANTES de executar qualquer ferramenta (spy nunca é chamado)", async () => {
+		let toolCalls = 0;
+		const handle = await createMcpServer({
+			port: 0,
+			getToken: () => "tok",
+			serverInfo: { name: "All iₙ oNe", version: "0.1.0" },
+			getToolsApiVersion: () => "1.0.0",
+			handleToolCall: async (toolName) => {
+				toolCalls += 1;
+				return { ok: true, result: { eco: toolName } };
+			},
+		});
+		handles.push(handle);
+		const res = await post(handle.port, CALL, "token-errado");
+		expect(res.status).toBe(401);
+		expect(toolCalls).toBe(0); // gate curto-circuita antes do handler
+	});
+
+	it("controle positivo: o MESMO corpo com o token certo passa (200)", async () => {
+		const h = await start();
+		const res = await post(h.port, CALL);
+		expect(res.status).toBe(200);
 	});
 });
 

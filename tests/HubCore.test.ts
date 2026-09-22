@@ -1,6 +1,7 @@
 import type { App } from "obsidian";
 import { describe, it, expect, vi } from "vitest";
 import { HubCore } from "../src/core/HubCore";
+import { CalendarModule } from "../src/modules/calendar/CalendarModule";
 import { createDefaultSettings, type HubSettings } from "../src/core/types";
 import { makeTestModule } from "./helpers";
 
@@ -291,5 +292,57 @@ describe("HubCore — reset em 3 níveis (escadinha real)", () => {
 		await core.resetAll("data"); // não deve propagar
 
 		expect(onResetDataOk).toHaveBeenCalledTimes(1);
+	});
+
+	it("reset 'data' com o Calendário REAL: eventos .ics saem, criados à mão ficam", async () => {
+		// Integração real (sem makeTestModule): o hook onResetData do
+		// Calendário filtra por origem — eventos importados de .ics
+		// (id `ics:<uid>`, derivados de um arquivo, refazer é um clique)
+		// são removidos; os criados pelo usuário no painel (id `evt-*`)
+		// sobrevivem, pois são configuração. Exercita resetAll de verdade,
+		// sem reimplementar a regra de reset nem a do Calendário.
+		const { core } = makeCore(customSettings());
+		await core.init();
+
+		const calendar = new CalendarModule();
+		await core.registerModule(calendar); // desligado: onResetData deve rodar mesmo assim
+		expect(core.isModuleEnabled("calendar")).toBe(false);
+
+		const ctx = calendar["context"]!;
+		await ctx.updateSettings({
+			events: [
+				{
+					id: "ics:reuniao-anual@exemplo",
+					title: "Reunião importada",
+					description: "",
+					recurrence: "yearly",
+					day: 10,
+					month: 3,
+					reminder: false,
+				},
+				{
+					id: "evt-abc123",
+					title: "Aniversário criado à mão",
+					description: "",
+					recurrence: "yearly",
+					day: 25,
+					month: 12,
+					reminder: false,
+				},
+			],
+		});
+		expect(core.settings.getModuleSettings("calendar")).toEqual(
+			expect.objectContaining({ events: expect.any(Array) })
+		);
+		const stored = core.settings.getModuleSettings("calendar") as { events: unknown[] };
+		expect(stored.events).toHaveLength(2); // os dois gravados antes do reset
+
+		await core.resetAll("data");
+
+		const after = core.settings.getModuleSettings("calendar") as {
+			events: { id: string; title: string }[];
+		};
+		expect(after.events.map((e) => e.id)).toEqual(["evt-abc123"]); // só o manual
+		expect(after.events[0].title).toBe("Aniversário criado à mão"); // intacto
 	});
 });
