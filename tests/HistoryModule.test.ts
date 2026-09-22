@@ -4,6 +4,11 @@ import {
 	HISTORY_DEFAULTS,
 	type HistoryEntryRecord,
 } from "../src/modules/history/HistoryModule";
+import {
+	filterHistoryEntries,
+	normalizeSearchText,
+	parseSearchQuery,
+} from "../src/modules/history/HistoryFilter";
 import type { ModuleContext } from "../src/core/ModuleContract";
 import type { EventBus } from "../src/core/EventBus";
 import type { HubSettings } from "../src/core/types";
@@ -104,7 +109,7 @@ describe("HistoryModule — write-behind e leitura fresca", () => {
 	it("onEnable inscreve todos os eventos rastreados; onDisable chama cada unsubscribe", () => {
 		const { module, unsubscribers } = setup();
 		module.onEnable();
-		expect(unsubscribers.length).toBe(19); // TRACKED_EVENTS.length
+		expect(unsubscribers.length).toBe(20); // TRACKED_EVENTS.length
 
 		module.onDisable();
 		expect(unsubscribers.every((u) => u.mock.calls.length === 1)).toBe(true);
@@ -182,5 +187,110 @@ describe("HistoryModule — write-behind e leitura fresca", () => {
 
 		expect(slice.entries).toEqual([]); // UNDONE — nada ressuscitado
 		expect(updateSettings).toHaveBeenCalledTimes(3); // batch, reset e revert
+	});
+});
+
+describe("HistoryFilter — busca por texto combinada com o filtro de tipo", () => {
+	const entries: HistoryEntryRecord[] = [
+		makeEntry({ id: "a", event: "file:created", path: "Projetos/Reunião.md", message: "Arquivo criado: Projetos/Reunião.md" }),
+		makeEntry({ id: "b", event: "file:deleted", path: "Projetos/rascunho.md", message: "Arquivo excluído: Projetos/rascunho.md" }),
+		makeEntry({ id: "c", event: "mcp:action", message: "MCP executou \"write_note\" em Projetos/Reunião.md" }),
+		makeEntry({ id: "d", event: "file:created", path: "Diário/2026-09-22.md", message: "Arquivo criado: Diário/2026-09-22.md" }),
+	];
+
+	it("busca por substring do message, case-insensitive", () => {
+		const result = filterHistoryEntries(entries, "", "EXECUTOU");
+		expect(result.map((e) => e.id)).toEqual(["c"]);
+	});
+
+	it("busca por substring do path", () => {
+		const result = filterHistoryEntries(entries, "", "rascunho");
+		expect(result.map((e) => e.id)).toEqual(["b"]);
+	});
+
+	it("busca ignora acentos: 'reuniao' encontra 'Reunião'", () => {
+		const result = filterHistoryEntries(entries, "", "reuniao");
+		expect(result.map((e) => e.id)).toEqual(["a", "c"]); // ordem de entrada preservada
+	});
+
+	it("query normalizada: minúsculas, sem diacríticos, trim nas bordas", () => {
+		expect(normalizeSearchText("ReuniÃO")).toBe("reuniao");
+		expect(parseSearchQuery("  Reunião  ")).toBe("reuniao");
+	});
+
+	it("combina com o filtro de tipo (E lógico)", () => {
+		// "Reunião" bate em a e c; o filtro mcp:action reduz a só c.
+		const result = filterHistoryEntries(entries, "mcp:action", "reuniao");
+		expect(result.map((e) => e.id)).toEqual(["c"]);
+		// E o inverso: mesmo texto, outro tipo, outro resultado.
+		const onlyFiles = filterHistoryEntries(entries, "file:created", "reuniao");
+		expect(onlyFiles.map((e) => e.id)).toEqual(["a"]);
+	});
+
+	it("query vazia/branca não filtra por texto (mas o tipo continua filtrando)", () => {
+		expect(filterHistoryEntries(entries, "file:created", "")).toHaveLength(2);
+		expect(filterHistoryEntries(entries, "file:created", "   ")).toHaveLength(2);
+	});
+
+	it("nenhuma correspondência devolve lista vazia sem lançar", () => {
+		expect(filterHistoryEntries(entries, "", "zzz-inexistente")).toEqual([]);
+		expect(filterHistoryEntries(entries, "folder:created", "reuniao")).toEqual([]);
+	});
+
+	it("entrada sem path busca só no message e nunca quebra", () => {
+		const semPath: HistoryEntryRecord[] = [makeEntry({ id: "x", message: "Servidor MCP iniciado na porta 8765" })];
+		expect(filterHistoryEntries(semPath, "", "8765")).toHaveLength(1);
+		expect(filterHistoryEntries(semPath, "", "porta")).toHaveLength(1);
+	});
+});
+
+/**
+ * O log dedicado do MCP só vale com consumidor real: o Histórico escuta
+ * mcp:action-logged (TRACKED_EVENTS) e registra cada ação com o DESFECHO —
+ * inclusive falhas (auditoria não é lista de acertos).
+ */
+describe("Histórico — consumidor do log dedicado do MCP", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("mcp:action-logged vira entrada com desfecho ok", async () => {
+		const { module, emit, slice } = setup();
+		module.onEnable();
+		emit(
+			"mcp:action-logged",
+			{ tool: "put_attachment", path: "Anexos/img.png", dryRun: false, isWrite: true, result: { ok: true } },
+			"mcp"
+		);
+		await vi.advanceTimersByTimeAsync(FLUSH_INTERVAL_MS);
+		expect(slice.entries).toHaveLength(1);
+		expect(slice.entries[0].event).toBe("mcp:action-logged");
+		expect(slice.entries[0].message).toContain("put_attachment");
+		expect(slice.entries[0].message).toContain("— ok");
+	});
+
+	it("falha da ação entra como FALHOU (com o motivo)", async () => {
+		const { module, emit, slice } = setup();
+		module.onEnable();
+		emit(
+			"mcp:action-logged",
+			{ tool: "put_attachment", path: "Anexos/x.png", dryRun: false, isWrite: true, error: "base64 inválido" },
+			"mcp"
+		);
+		await vi.advanceTimersByTimeAsync(FLUSH_INTERVAL_MS);
+		expect(slice.entries[0].message).toContain("FALHOU");
+		expect(slice.entries[0].message).toContain("base64 inválido");
+	});
+
+	it("dry-run aparece como simulado, não como escrito", async () => {
+		const { module, emit, slice } = setup();
+		module.onEnable();
+		emit("mcp:action-logged", { tool: "edit_note", path: "a.md", dryRun: true, isWrite: true, result: { simulated: true } }, "mcp");
+		await vi.advanceTimersByTimeAsync(FLUSH_INTERVAL_MS);
+		expect(slice.entries[0].message).toContain("simulado (dry-run)");
 	});
 });

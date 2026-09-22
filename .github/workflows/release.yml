@@ -74,6 +74,28 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      # Assinatura GPG dos assets (opcional). O módulo Auto-update pode
+      # verificar .sig/.asc (SignatureUtils) — sem este passo o recurso não
+      # teria o que verificar em produção. Chave privada + passphrase entram
+      # como secrets (GPG_PRIVATE_KEY, GPG_PASSPHRASE); SEM eles o passo é
+      # PULADO e o release sai igual a hoje (só checksums) — configurar os
+      # secrets é o que liga a assinatura, sem quebrar releases antigos.
+      - name: Assinar assets (GPG)
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        run: |
+          export GNUPGHOME=$(mktemp -d)
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          for f in main.js manifest.json styles.css; do
+            if [ -n "$GPG_PASSPHRASE" ]; then
+              echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --detach-sign --armor --output "$f.sig.asc" "$f"
+            else
+              gpg --batch --yes --detach-sign --armor --output "$f.sig.asc" "$f"
+            fi
+          done
+
       - name: Create GitHub Release com os artefatos do plugin
         uses: softprops/action-gh-release@v2
         with:
@@ -91,4 +113,17 @@ jobs:
           # Os 3 arquivos são o contrato de instalação de um plugin do
           # Obsidian: faltou um, o release é inútil — falhe em vez de
           # publicar pela metade.
+          fail_on_unmatched_files: true
+
+      # Assinaturas publicadas num segundo passo, SÓ quando foram geradas:
+      # assim o fail_on_unmatched_files acima continua valendo para os 3
+      # arquivos essenciais sem quebrar o release sem secrets configurados.
+      - name: Anexar assinaturas ao release
+        uses: softprops/action-gh-release@v2
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        with:
+          files: |
+            main.js.sig.asc
+            manifest.json.sig.asc
+            styles.css.sig.asc
           fail_on_unmatched_files: true

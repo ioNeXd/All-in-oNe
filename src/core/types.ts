@@ -51,6 +51,13 @@ export interface HubSettings {
 	lobby: {
 		openMode: "tab" | "modal" | "ask-each-time";
 		theme: "match-obsidian" | "custom";
+		/**
+		 * Ordem dos módulos na barra lateral do Lobby (ids). Opcional e
+		 * tolerante: módulos não citados entram no fim; ids que não existem
+		 * mais são ignorados (regras em src/ui/lobbyOrder.ts). Reordenar NÃO
+		 * muda enabledModules — ordem é apresentação, ligado/desligado é estado.
+		 */
+		moduleOrder?: string[];
 	};
 
 	/** Caminhos globais que módulos podem referenciar — todos reconfiguráveis. */

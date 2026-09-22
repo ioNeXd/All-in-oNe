@@ -39,7 +39,7 @@ contribuições que sigam a arquitetura existente são bem-vindas.
 ```bash
 npm install
 npm run dev      # build com watch
-npm test         # 120 testes em 16 arquivos (vitest)
+npm test         # 252 testes em 23 arquivos (vitest)
 ```
 
 Os testes importam o **código real** do plugin: o pacote `obsidian` é

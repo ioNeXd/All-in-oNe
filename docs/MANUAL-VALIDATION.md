@@ -1,6 +1,6 @@
-# Checklist de validação manual — v0.1.0
+# Checklist de validação manual — v0.2.0
 
-O que os **103 testes automatizados** não cobrem é o runtime de verdade
+O que os **252 testes automatizados** não cobrem é o runtime de verdade
 dentro do Obsidian: ciclo de vida do plugin, interações de UI, portas,
 arquivos e o comportamento sob uso real. Este checklist guia essa validação
 no vault. Marque cada item só depois de ver o resultado com os próprios
@@ -33,6 +33,15 @@ olhos — o objetivo é gerar confiança para o primeiro bump de versão
 - [ ] **Clicar em qualquer parte da linha** de um módulo abre o painel dele
       (não só no nome — regressão antiga);
 - [ ] Busca filtra módulos pelo nome;
+- [ ] **Navegação por teclado**: Tab alcança busca, ações rápidas, linhas de
+      módulos, seções fixas e "Restaurar tudo"; Enter/Espaço abre o painel;
+      ←/→ entre as abas internas (Calendário/Estilos); linhas da Central de
+      Eventos copiam o evento como JSON; dias do calendário anunciam
+      dia/nota/eventos e abrem com Enter;
+- [ ] **Reordenação**: arrastar um módulo pela alça ⠿ sobre outro move (linha
+      de destino mostra traço de inserção); Alt+↑/Alt+↓ com a alça focada faz
+      o mesmo por teclado; a ordem sobrevive a reabrir o Lobby e recarregar o
+      plugin; desligar/ligar módulos não perde a ordem;
 - [ ] **Desligar um módulo** pelo toggle: aviso de "desligado" no painel;
       **religar**: volta a funcionar (e sem duplicar seus comandos na
       Paleta — verificar buscando "MCP:" duas vezes);
@@ -81,7 +90,15 @@ olhos — o objetivo é gerar confiança para o primeiro bump de versão
 - [ ] `rename_note` movendo nota de pasta permitida para bloqueada: recusado
       (destino também é verificado);
 - [ ] **Modo dry-run**: com o toggle ligado, `create_note` responde
-      `simulated: true` e **nada é criado**;
+      `simulated: true` e **nada é criado**; o mesmo vale para
+      `put_attachment`/`delete_attachment`;
+- [ ] **Anexos**: `put_attachment` cria/sobrescreve um anexo (payload em
+      base64; base64 inválido é recusado ANTES de tocar o vault);
+      `get_attachment` devolve o conteúdo; `delete_attachment` manda para
+      a lixeira (conferir na lixeira do SO) e recusa `.md` apontando para
+      `delete_note`; todos respeitam readOnly, dry-run e permissões por
+      pasta;
+- [ ] `get_server_info` responde com versão do plugin e `toolsApiVersion`;
 - [ ] **Liberação temporária**: "15 minutos" habilita escrita com contador;
       "Revogar" volta a bloquear na hora;
 - [ ] **Split/combine**: `split_note` divide uma nota grande por headings
@@ -115,7 +132,29 @@ olhos — o objetivo é gerar confiança para o primeiro bump de versão
       nas configurações do módulo);
 - [ ] Renomear a nota vinculada a um evento: vínculo **não quebra** (é por
       metadado `origem_evento`, não por caminho);
-- [ ] **Visões** semana/agenda: alternam e mostram conteúdo coerente.
+- [ ] **Visões** semana/agenda: alternam e mostram conteúdo coerente;
+- [ ] **Reset → Data** (seção 8) com eventos importados de .ics presentes:
+      apenas os importados são removidos — eventos criados à mão continuam
+      lá, e reimportar o arquivo os traz de volta.
+
+### Importação de .ics
+
+> Requer um arquivo .ics de verdade (exporte do Google Calendar:
+> Configurações → Importar e exportar → Exportar). Arquivos de outros
+> provedores também valem — o parser precisa aguentar o mundo real.
+
+- [ ] Aba 🔔 Eventos → **"Importar .ics"** → escolher o arquivo: eventos
+      aparecem na lista e no calendário (ponto no dia), com data/hora
+      corretos;
+- [ ] **Reimportar o MESMO arquivo** após editar um evento no painel: o
+      evento editado volta ao estado do arquivo, **sem duplicar** (dedupe
+      por UID), e eventos criados à mão não são tocados;
+- [ ] **RRULE anual** (ex.: aniversário no Google) chega como recorrente
+      "anual"; RRULE mensal/semanal chega como evento **único** e o Notice
+      lista o aviso — nunca aproximação silenciosa;
+- [ ] **Arquivo malformado** (renomeie um .txt para .ics): Notice com o
+      motivo e painel intacto — nada é gravado;
+- [ ] Cancelar o seletor de arquivo: nada acontece, sem erro.
 
 ## 5. Templates — fluxo Pendente de ponta a ponta
 
@@ -146,6 +185,19 @@ olhos — o objetivo é gerar confiança para o primeiro bump de versão
       **Editor livre** e painel visual **concordam** (aplicar tema atualiza
       os seletores do painel — regressão antiga);
 - [ ] Undo desfaz; export copia JSON; import lê de volta;
+- [ ] **Realce de sintaxe no editor livre**: abrir a aba ⌨️ Editor livre →
+      seletores em amarelo, propriedades em ciano, valores em verde,
+      variáveis em azul e negrito, comentários apagados em itálico;
+- [ ] **Alinhamento overlay × caret** (o risco desta feature): digitar na
+      frente do meio do texto, selecionar com o mouse, rolar conteúdo maior
+      que a caixa e redimensionar o editor (arrastar o canto) — as cores
+      NÃO desalinham do texto; casos traiçoeiros: string com `{ : ; }` e
+      `url("http://x/*y")` (a barra não pode abrir comentário colorido);
+- [ ] **Botão "Realce: ligado/desligado"**: alterna a cor na hora, sem
+      recarregar o painel; desligado, o texto fica na cor normal e segue
+      editável; religar restaura;
+- [ ] Autocomplete (Ctrl+Espaço) e clique nos itens da referência INSEREM
+      no editor e o realce acompanha o texto inserido na hora;
 - [ ] Aplicar CSS quebrado → erro tratado, sem derrubar o plugin;
 - [ ] **Restaurar tudo (nível "all")** → o `<style>` injetado é removido
       (nenhum CSS órfão).
@@ -171,6 +223,27 @@ olhos — o objetivo é gerar confiança para o primeiro bump de versão
 - [ ] Comparação de versão: release `v0.2.0` é considerado mais novo que
       `v0.10.0` (SemVer real — não lexicográfico).
 
+### Assinatura GPG (opt-in)
+
+> Precisa de um release com assets `.sig`/`.asc` publicados pelo workflow
+> (seção 7b abaixo) e do binário `gpg` instalado. Sem release assinado,
+> valide só o caminho "sem assinatura no release".
+
+- [ ] Ligar "Verificar assinatura GPG" SEM chave configurada → tentar
+      atualizar: **aborta** com Notice claro (falha fechada — habilitar cria
+      a obrigação);
+- [ ] Chave configurada + gpg ausente (máquina sem gpg): **aborta** com
+      Notice — "não consegui verificar" nunca vira "verificado";
+- [ ] Com release assinado e chave certa: atualização instala e o
+      Diagnóstico/histórico não mostram falha de assinatura;
+- [ ] Com chave ERRADA (outra chave pública): **aborta** — assinatura
+      inválida bloqueia a instalação;
+- [ ] **BRAT**: instalar este plugin pelo BRAT num vault de teste → painel
+      do Auto-update mostra o aviso de cedência, sem checagem automática e
+      sem comando do módulo; remover do BRAT volta ao controle próprio;
+- [ ] Desligar a opção (default): fluxo de update idêntico ao de antes
+      (checksum apenas).
+
 ## 8. Reset em 3 níveis (modal "Restaurar tudo")
 
 > Use após os testes acima, quando houver config custom e dados gerados —
@@ -186,7 +259,8 @@ olhos — o objetivo é gerar confiança para o primeiro bump de versão
 - [ ] **All**: config padrão + dados limpos; CSS injetado some; estado do
       Lobby coerente na hora;
 - [ ] Desligar um módulo, resetar "config", religar: nada de estado fantasma
-      (era o furo da divergência Set × disco);
+      (era o furo da divergência Set × disco); a **ordem customizada** dos
+      módulos é apresentação e NÃO é afetada pelo reset de config;
 - [ ] Nenhum nível fecha o modal silenciosamente se a gravação falhar.
 
 ## 9. Notificações e Histórico (módulos)
@@ -195,11 +269,21 @@ olhos — o objetivo é gerar confiança para o primeiro bump de versão
       `AudioContext` precisa de interação prévia na página (clicar no
       Obsidian antes resolve; regressão antiga);
 - [ ] Não-perturbe no horário atual: pop-ups silenciados (som desligado);
+- [ ] **Filtro por tipo** na central: dropdown com contagens; escolher um
+      tipo mostra só aquele gatilho; a preferência sobrevive a reabrir o
+      Lobby; gatilho salvo no filtro mas sem ocorrências continua listado;
+- [ ] **Agrupar por dia**: Hoje/Ontem/data por extenso em pt-BR; toggle
+      volta à lista cronológica; preferência persistida;
 - [ ] "Marcar tudo como lido" e "Limpar histórico" funcionam; IDs de
       notificação não colidem (duas ações rápidas seguidas ficam **duas**
       entradas no histórico);
 - [ ] Histórico do módulo: filtro por tipo com autocomplete em português;
-      persiste entre recargas do plugin (desabilitar/habilitar o Obsidian);
+      **busca por texto** (substring em message/path) case-insensitive e sem
+      acento ("reuniao" acha "Reunião"), combinável com o filtro de tipo;
+      digitar não tira o foco do campo (re-render só da lista, com debounce);
+      sem correspondência mostra "Nenhuma entrada corresponde aos filtros
+      ativos" (diferente de "Nada registrado ainda"); persiste entre recargas
+      do plugin (desabilitar/habilitar o Obsidian);
 - [ ] **Rajada de criação** (selecionar 20+ notas e criar): o Histórico do
       módulo registra **todas** as ocorrências (throttle do bus agrupa, não
       descarta); Notificações toca popup/som apenas no 1º item da rajada;
@@ -225,5 +309,5 @@ olhos — o objetivo é gerar confiança para o primeiro bump de versão
 Tudo marcado = baseline validada em runtime. Bugs achados: registrar em
 issue com passo a passo e console anexado, corrigir, e reexecutar **só** a
 seção afetada + a seção 10 (estabilidade). Com isso, o projeto está pronto
-para o primeiro bump `0.1.1` e para usar o fluxo `npm version` + tag do
-`release.yml` com confiança.
+para o bump `0.2.0` e para usar o fluxo `npm version` + tag do `release.yml`
+com confiança.

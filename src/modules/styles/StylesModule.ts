@@ -1,5 +1,7 @@
 import { Notice, Setting, Modal, App } from "obsidian";
 import { BUILTIN_PRESETS, type ThemePreset } from "./presets";
+import { tokenizeCss, cssTokenTypeClass } from "./CssHighlight";
+import { makeInteractiveRow, focusSiblingTab } from "../../ui/interactiveRows";
 export type { ThemePreset } from "./presets";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
 
@@ -39,7 +41,7 @@ export class StylesModule implements HubModule {
 		displayName: "Estilos",
 		description: "Editor de CSS livre + temas prontos para o Obsidian e para os demais módulos.",
 		icon: "palette",
-		version: "0.1.0",
+		version: "0.2.0",
 		contractVersion: "2.0.0",
 		desktopOnly: false,
 		emits: ["styles:applied"],
@@ -96,6 +98,8 @@ export class StylesModule implements HubModule {
 			const tab = tabs.createDiv({ cls: "ione-hub-tabs__tab", text: label });
 			if (this.activeTab === id) tab.addClass("is-active");
 			tab.tabIndex = 0;
+			tab.setAttr("role", "tab");
+			tab.setAttr("aria-selected", this.activeTab === id ? "true" : "false");
 			const activate = () => {
 				this.activeTab = id;
 				this.refreshPanel();
@@ -105,6 +109,8 @@ export class StylesModule implements HubModule {
 				if (evt.key === "Enter" || evt.key === " ") {
 					evt.preventDefault();
 					activate();
+				} else {
+					focusSiblingTab(evt, tabs, tab);
 				}
 			};
 		}
@@ -282,11 +288,17 @@ export class StylesModule implements HubModule {
 				"a mudança entra em vigor na hora. Ctrl+Espaço abre a lista de variáveis.",
 		});
 
-		const textarea = container.createEl("textarea", { cls: "ione-hub-styles__editor" });
+		const textarea = container.createEl("textarea", { cls: "ione-hub-styles__editor ione-hub-styles__editor-input" });
 		textarea.spellcheck = false;
 		// Começa com o CSS ativo; se não houver nada, um esqueleto comentado
 		// explicando as duas famílias de variáveis, para não abrir em branco.
 		textarea.value = settings.activeCss.trim() || STARTER_CSS;
+
+		// Realce de sintaxe por overlay: o <textarea> continua sendo a fonte do
+		// valor (seleção, autocomplete e referência funcionam nele), mas o texto
+		// fica transparente e a cor vem do <pre> atrás, token a token — técnica
+		// clássica sem CodeMirror, sem dependência nova e sem quebrar undo/preview.
+		const overlay = attachCssHighlight(textarea, container);
 
 		const suggestionBox = container.createDiv({ cls: "ione-hub-styles__suggestions" });
 		suggestionBox.style.display = "none";
@@ -301,6 +313,13 @@ export class StylesModule implements HubModule {
 						await this.setCss(textarea.value);
 						new Notice("Estilo aplicado.");
 					})
+			)
+			.addButton((btn) =>
+				btn.setButtonText("Realce: ligado").onClick(() => {
+					// Preferência de runtime: o overlay some/volta sem recarregar.
+					const next = overlay.classList.toggle("ione-hub-styles__overlay--off");
+					btn.setButtonText(next ? "Realce: desligado" : "Realce: ligado");
+				})
 			)
 			.addButton((btn) =>
 				btn
@@ -342,10 +361,14 @@ export class StylesModule implements HubModule {
 				const row = ref.createDiv({ cls: "ione-hub-styles__reference-row" });
 				row.createEl("code", { text: entry.name });
 				row.createSpan({ text: ` — ${entry.description}` });
-				row.onclick = () => {
-					insertAtCursor(textarea, `  ${entry.name}: ${entry.example};\n`);
-					textarea.focus();
-				};
+				makeInteractiveRow(
+					row,
+					{ ariaLabel: `Inserir ${entry.name} no editor` },
+					() => {
+						insertAtCursor(textarea, `  ${entry.name}: ${entry.example};\n`);
+						textarea.focus();
+					}
+				);
 			}
 		}
 
@@ -721,6 +744,59 @@ const CSS_REFERENCE: {
 		],
 	},
 ];
+
+/**
+ * Realce de sintaxe do editor livre: envolve o textarea num wrapper e coloca
+ * o <pre> colorizado ATRÁS dele (absoluto, preenchendo o mesmo retângulo),
+ * pintando os tokens devolvidos pelo tokenizador puro (CssHighlight.ts).
+ * Sincroniza input, scroll e redimensionamento. O retorno é o overlay, para
+ * a UI poder ligar/desligar o realce sem recarregar.
+ */
+function attachCssHighlight(textarea: HTMLTextAreaElement, container: HTMLElement): HTMLElement {
+	const wrapper = document.createElement("div");
+	wrapper.className = "ione-hub-styles__editor-wrap";
+	textarea.replaceWith(wrapper);
+	wrapper.appendChild(textarea);
+
+	const overlay = document.createElement("pre");
+	overlay.className = "ione-hub-styles__overlay ione-hub-styles__editor";
+	overlay.setAttribute("aria-hidden", "true");
+	wrapper.insertBefore(overlay, textarea);
+
+	const render = () => {
+		const lines = tokenizeCss(textarea.value);
+		overlay.replaceChildren(
+			...lines.map((line) => {
+				const el = document.createElement("span");
+				el.className = "ione-hub-styles__line";
+				// Nunca innerHTML com conteúdo do usuário — textContent por token.
+				for (const token of line) {
+					const span = document.createElement("span");
+					span.className = cssTokenTypeClass(token.kind);
+					span.textContent = token.text;
+					el.appendChild(span);
+				}
+				return el;
+			})
+		);
+	};
+
+	const sync = () => {
+		overlay.scrollTop = textarea.scrollTop;
+		overlay.scrollLeft = textarea.scrollLeft;
+	};
+
+	textarea.addEventListener("input", render);
+	textarea.addEventListener("scroll", sync);
+	// O painel do Lobby pode redimensionar sem input do textarea:
+	const resizeObserver = new ResizeObserver(() => {
+		sync();
+	});
+	resizeObserver.observe(textarea);
+
+	render();
+	return overlay;
+}
 
 /** Insere texto na posição do cursor do textarea. */
 function insertAtCursor(textarea: HTMLTextAreaElement, text: string): void {

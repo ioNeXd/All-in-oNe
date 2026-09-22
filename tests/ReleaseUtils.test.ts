@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { compareVersions, isNewerVersion, parseChecksums } from "../src/modules/autoupdate/ReleaseUtils";
+import {
+	decideSignatureVerification,
+	findSignatureAsset,
+	detectBratInstallation,
+	shouldYieldToBrat,
+} from "../src/modules/autoupdate/SignatureUtils";
 
 /**
  * IMPORTA O CÓDIGO REAL de versionamento do AutoUpdateModule. O caso
@@ -99,5 +105,109 @@ describe("parseChecksums — checksums declarados no corpo do release", () => {
 	it("body vazio ou undefined-like retorna objeto vazio", () => {
 		expect(parseChecksums("")).toEqual({});
 		expect(parseChecksums(undefined as unknown as string)).toEqual({});
+	});
+});
+
+describe("findSignatureAsset — localiza o asset de assinatura", () => {
+	const assets = [
+		{ name: "main.js", browser_download_url: "https://x/main.js" },
+		{ name: "main.js.sig", browser_download_url: "https://x/main.js.sig" },
+		{ name: "manifest.json", browser_download_url: "https://x/manifest.json" },
+	];
+
+	it("encontra main.js.sig", () => {
+		const sig = findSignatureAsset(assets, "main.js");
+		expect(sig?.name).toBe("main.js.sig");
+	});
+
+	it("retorna undefined quando não há assinatura (manifest.json)", () => {
+		expect(findSignatureAsset(assets, "manifest.json")).toBeUndefined();
+	});
+
+	it("aceita as convenções .sig.asc e .asc", () => {
+		const alt = [{ name: "main.js.asc", browser_download_url: "https://x/main.js.asc" }];
+		expect(findSignatureAsset(alt, "main.js")?.name).toBe("main.js.asc");
+		const armored = [{ name: "main.js.sig.asc", browser_download_url: "https://x/main.js.sig.asc" }];
+		expect(findSignatureAsset(armored, "main.js")?.name).toBe("main.js.sig.asc");
+	});
+
+	it("formato de outro projeto (.minisig) NÃO conta como assinatura gpg", () => {
+		const minisign = [{ name: "main.js.minisig", browser_download_url: "https://x" }];
+		expect(findSignatureAsset(minisign, "main.js")).toBeUndefined();
+	});
+});
+
+describe("decideSignatureVerification — opt-in com falha fechada", () => {
+	const base = { verificationAvailable: true, assetName: "main.js" };
+
+	it("desligada → skip (comportamento de hoje, checksum cuida)", () => {
+		expect(decideSignatureVerification({ ...base, enabled: false, signaturePresent: false })).toEqual({ action: "skip" });
+		expect(decideSignatureVerification({ ...base, enabled: false, signaturePresent: true })).toEqual({ action: "skip" });
+	});
+
+	it("ligada + assinatura presente + gpg ok → segue", () => {
+		expect(decideSignatureVerification({ ...base, enabled: true, signaturePresent: true })).toEqual({ action: "skip" });
+	});
+
+	it("ligada + assinatura AUSENTE → aborta com motivo claro (não é 'pular por falta de assinatura')", () => {
+		const d = decideSignatureVerification({ ...base, enabled: true, signaturePresent: false });
+		expect(d.action).toBe("abort");
+		if (d.action === "abort") {
+			expect(d.reason).toContain("main.js");
+			expect(d.reason).toContain("LIGADA");
+		}
+	});
+
+	it("ligada + gpg indisponível → aborta (habilitar cria a obrigação de cumprir)", () => {
+		const d = decideSignatureVerification({
+			...base,
+			enabled: true,
+			signaturePresent: true,
+			verificationAvailable: false,
+			verificationProblem: "gpg não encontrado",
+		});
+		expect(d.action).toBe("abort");
+		if (d.action === "abort") expect(d.reason).toContain("gpg não encontrado");
+	});
+});
+
+describe("detectBratInstallation — leitura do data.json do BRAT", () => {
+	const repo = "ioNeXd/All-in-oNe";
+
+	it("sem BRAT instalado (undefined) → não gerencia", () => {
+		expect(detectBratInstallation(undefined, repo).managedByBrat).toBe(false);
+	});
+
+	it("repo na pluginList → gerenciado", () => {
+		const json = JSON.stringify({ pluginList: ["ioNeXd/All-in-oNe", "outro/repo"] });
+		expect(detectBratInstallation(json, repo).managedByBrat).toBe(true);
+	});
+
+	it("aceita variações de escrita do repo (https, .git, maiúsculas)", () => {
+		const json = JSON.stringify({ pluginList: ["https://github.com/ioneXd/All-in-oNe.git"] });
+		expect(detectBratInstallation(json, repo).managedByBrat).toBe(true);
+	});
+
+	it("BRAT instalado mas SEM este plugin na lista → não gerencia", () => {
+		const json = JSON.stringify({ pluginList: ["outro/repo"] });
+		expect(detectBratInstallation(json, repo).managedByBrat).toBe(false);
+	});
+
+	it("data.json corrompido → não gerencia, mas devolve motivo para alguém olhar", () => {
+		const d = detectBratInstallation("{{{ não é json", repo);
+		expect(d.managedByBrat).toBe(false);
+		expect(d.reason).toContain("ilegível");
+	});
+
+	it("pluginList ausente (BRAT sem plugins) → não gerencia", () =>{
+		expect(detectBratInstallation(JSON.stringify({}), repo).managedByBrat).toBe(false);
+	});
+});
+
+describe("shouldYieldToBrat — ceder só quando BRAT instalado E gerenciando", () => {
+	it("ceder exige as duas condições", () => {
+		expect(shouldYieldToBrat(false, { managedByBrat: true })).toBe(false);
+		expect(shouldYieldToBrat(true, { managedByBrat: false })).toBe(false);
+		expect(shouldYieldToBrat(true, { managedByBrat: true })).toBe(true);
 	});
 });

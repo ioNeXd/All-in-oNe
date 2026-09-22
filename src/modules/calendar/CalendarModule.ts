@@ -2,9 +2,11 @@ import { TFile, TFolder, normalizePath, Setting, Notice, Modal, App } from "obsi
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
 import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
 import { type CalendarEvent, monthFolderName, describeEvent, shouldFire, MONTH_NAMES } from "./EventTypes";
+import { parseIcs, mergeIcsEvents, type IcsParseResult } from "./IcsParser";
 import { ReminderModal, playReminderChime } from "./ReminderModal";
 import { attachFilterSuggest } from "../../ui/FilterSuggest";
 import { isPendingStatus } from "../templates/NoteStatus";
+import { makeInteractiveRow, focusSiblingTab } from "../../ui/interactiveRows";
 export type { CalendarEvent } from "./EventTypes";
 
 export interface CalendarModuleSettings {
@@ -74,6 +76,8 @@ export class CalendarModule implements HubModule {
 
 	private context?: ModuleContext;
 	private dailyCheckInterval?: number;
+	/** Estado da ÚLTIMA importação .ics — alimenta o Diagnóstico. */
+	private lastIcsImport: { ok: boolean; detail: string } | undefined;
 	/** Mês exibido na grade (independente do mês atual) — controlado pela navegação. */
 	private displayedMonth = new Date();
 	/**
@@ -122,6 +126,8 @@ export class CalendarModule implements HubModule {
 			const tab = tabs.createDiv({ cls: "ione-hub-tabs__tab", text: label });
 			if (this.activeTab === id) tab.addClass("is-active");
 			tab.tabIndex = 0;
+			tab.setAttr("role", "tab");
+			tab.setAttr("aria-selected", this.activeTab === id ? "true" : "false");
 			const activate = () => {
 				this.activeTab = id;
 				this.refreshPanel();
@@ -131,6 +137,8 @@ export class CalendarModule implements HubModule {
 				if (evt.key === "Enter" || evt.key === " ") {
 					evt.preventDefault();
 					activate();
+				} else {
+					focusSiblingTab(evt, tabs, tab);
 				}
 			};
 		}
@@ -243,6 +251,7 @@ export class CalendarModule implements HubModule {
 					.setCta()
 					.onClick(() => this.openEventEditor(new Date()))
 			)
+			.addButton((btn) => btn.setButtonText("Importar .ics").onClick(() => this.importIcsFile()))
 			.addButton((btn) =>
 				btn.setButtonText("Testar lembrete genérico").onClick(() => this.testGenericReminder())
 			);
@@ -437,7 +446,20 @@ export class CalendarModule implements HubModule {
 			}
 			if (this.isToday(year, month, day)) cell.addClass("ione-hub-calendar__day--today");
 
+			cell.tabIndex = 0;
+			cell.addClass("ione-hub-focusable");
+			cell.setAttr("role", "button");
+			cell.setAttr(
+				"aria-label",
+				`Dia ${day}: ${status.hasNote ? "tem nota" : "sem nota"}${status.events.length > 0 ? `, ${status.events.length} evento(s)` : ""}`
+			);
 			cell.onclick = () => void this.handleDayClick(new Date(year, month, day));
+			cell.onkeydown = (evt) => {
+				if (evt.key === "Enter" || evt.key === " ") {
+					evt.preventDefault();
+					void this.handleDayClick(new Date(year, month, day));
+				}
+			};
 		}
 
 		container.createEl("p", {
@@ -469,7 +491,11 @@ export class CalendarModule implements HubModule {
 			const events = this.eventsForDate(date);
 			if (events.length > 0) row.createSpan({ text: ` — ${events.map((e) => e.title).join(", ")}` });
 			if (hasNote) row.addClass("ione-hub-calendar__day--has-note");
-			row.onclick = () => void this.handleDayClick(date);
+			makeInteractiveRow(
+				row,
+				{ ariaLabel: `Abrir dia ${date.toLocaleDateString("pt-BR")} (semana)` },
+				() => void this.handleDayClick(date)
+			);
 		}
 	}
 
@@ -494,7 +520,11 @@ export class CalendarModule implements HubModule {
 			if (events.length > 0) parts.push(events.map((e) => e.title).join(", "));
 			if (note) parts.push("nota criada");
 			row.createSpan({ text: parts.join(" · ") });
-			row.onclick = () => void this.handleDayClick(date);
+			makeInteractiveRow(
+				row,
+				{ ariaLabel: `Abrir dia ${date.toLocaleDateString("pt-BR")} (agenda)` },
+				() => void this.handleDayClick(date)
+			);
 		}
 
 		if (found === 0) {
@@ -520,7 +550,11 @@ export class CalendarModule implements HubModule {
 		for (const file of pending.slice(0, 50)) {
 			const row = list.createDiv({ cls: "ione-hub-calendar__week-row" });
 			row.setText(file.path);
-			row.onclick = () => void this.context!.app.workspace.getLeaf(false).openFile(file);
+			makeInteractiveRow(
+				row,
+				{ ariaLabel: `Abrir nota pendente ${file.path}` },
+				() => void this.context!.app.workspace.getLeaf(false).openFile(file)
+			);
 		}
 	}
 
@@ -738,6 +772,50 @@ export class CalendarModule implements HubModule {
 		await this.context?.updateSettings({ events: [...settings.events, full] });
 	}
 
+	/**
+	 * IMPORTAR .ics: abre o seletor de arquivos, lê o texto, converte com o
+	 * parser puro (IcsParser.ts) e mescla na fatia de eventos via
+	 * updateSettings. Dedupe por UID do iCalendar: importar o mesmo arquivo
+	 * de novo SUBSTITUI os eventos anteriores em vez de duplicar — eventos
+	 * criados à mão nunca são tocados.
+	 *
+	 * Regra do projeto: falha de leitura/validação NÃO fica silenciosa —
+	 * Notice com o motivo e o painel segue aberto, do jeito que estava.
+	 */
+	importIcsFile(): void {
+		const input = document.createElement("input");
+		input.type = "file";
+		input.accept = ".ics,text/calendar";
+		input.onchange = async () => {
+			const file = input.files?.[0];
+			if (!file) return;
+
+			let parsed: IcsParseResult;
+			try {
+				parsed = parseIcs(await file.text());
+			} catch (err) {
+				this.lastIcsImport = {
+					ok: false,
+					detail: err instanceof Error ? err.message.slice(0, 140) : String(err).slice(0, 140),
+				};
+				new Notice(err instanceof Error ? err.message : String(err), 8000);
+				return;
+			}
+
+			const settings = this.readSettings();
+			await this.context?.updateSettings({
+				events: mergeIcsEvents(settings.events, parsed.events),
+			});
+
+			const message = [`${parsed.events.length} evento(s) importado(s) de "${file.name}".`];
+			if (parsed.warnings.length > 0) message.push("", ...parsed.warnings);
+			new Notice(message.join("\n"), 8000);
+			this.context?.log(`Eventos importados do .ics: ${file.name}`, { count: parsed.events.length });
+			this.refreshPanel();
+		};
+		input.click();
+	}
+
 	async removeEvent(id: string): Promise<void> {
 		const settings = this.readSettings();
 		await this.context?.updateSettings({ events: settings.events.filter((e) => e.id !== id) });
@@ -816,7 +894,33 @@ export class CalendarModule implements HubModule {
 
 	getHealthStatus() {
 		const settings = this.readSettings();
+		// Falha da última importação aparece no Diagnóstico — ok nunca esconde
+		// uma importação que reprovou (fica visível até a próxima boa).
+		if (this.lastIcsImport) {
+			return {
+				ok: this.lastIcsImport.ok,
+				summary: this.lastIcsImport.ok
+					? `${settings.events.length} evento(s) configurado(s); última importação: ${this.lastIcsImport.detail}`
+					: `última importação .ics FALHOU: ${this.lastIcsImport.detail}`,
+			};
+		}
 		return { ok: true, summary: `${settings.events.length} evento(s) configurado(s)` };
+	}
+
+	/**
+	 * Reset nível "data"/"all": limpa APENAS os dados gerados. Dois níveis,
+	 * com rótulo por origem: os eventos criados à mão (evt-*) são considerados
+	 * configuração do usuário e FICAM; os importados de .ics (ics:<uid>) são
+	 * considerados dados derivados e SAEM — o comentário do "Restaurar tudo"
+	 * promete que notas nunca são apagadas; eventos importados seguem essa
+	 * filosofia (refazer é um clique: reimportar o arquivo).
+	 */
+	onResetData(): Promise<void> {
+		const settings = this.readSettings();
+		const manual = settings.events.filter((e) => !e.id.startsWith("ics:"));
+		return (this.context?.updateSettings({ events: manual }) ?? Promise.resolve([])).then(
+			() => void 0
+		);
 	}
 }
 

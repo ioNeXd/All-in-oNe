@@ -1,6 +1,13 @@
 import { Notice, Setting } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
 import { cryptoRandomId } from "../../core/types";
+import {
+	buildFilterOptions,
+	countByTrigger,
+	filterNotifications,
+	groupNotificationsByDay,
+	type NotificationListFilter,
+} from "./NotificationList";
 
 export type NotifiableTrigger =
 	| "file:created"
@@ -49,6 +56,14 @@ export interface NotificationsModuleSettings {
 	rules: NotificationRule[];
 	history: StoredNotification[];
 	doNotDisturb: { enabled: boolean; startHour: number; endHour: number };
+	/**
+	 * Preferência de filtro da central (persistida na fatia). "all" para
+	 * config antiga que não tinha o campo — o spread dos defaults cobre
+	 * sem migração (não há transformação de dados antigos, só um default).
+	 */
+	viewFilter: NotificationListFilter;
+	/** Agrupar a central por dia (cabeçalhos Hoje/Ontem/data) — também persistida. */
+	groupByDay: boolean;
 }
 
 const DEFAULT_RULES: NotificationRule[] = [
@@ -74,6 +89,8 @@ export const NOTIFICATIONS_DEFAULTS: NotificationsModuleSettings = {
 	rules: DEFAULT_RULES,
 	history: [],
 	doNotDisturb: { enabled: false, startHour: 22, endHour: 8 },
+	viewFilter: "all",
+	groupByDay: true,
 };
 
 const MAX_HISTORY = 100;
@@ -105,7 +122,7 @@ export class NotificationsModule implements HubModule {
 		displayName: "Notificações",
 		description: "Pop-up com som para eventos do plugin, configurável por tipo de evento.",
 		icon: "bell",
-		version: "0.1.0",
+		version: "0.2.0",
 		contractVersion: "2.0.0",
 		desktopOnly: false,
 		emits: [],
@@ -274,17 +291,71 @@ export class NotificationsModule implements HubModule {
 				cls: "ione-hub-lobby__description",
 			});
 		} else {
-			const list = container.createDiv({ cls: "ione-hub-notification-list" });
-			for (const entry of settings.history.slice(0, 50)) {
-				const row = list.createDiv({ cls: "ione-hub-notification-list__row" });
-				if (!entry.read) row.addClass("is-unread");
-				row.createSpan({
-					text: new Date(entry.timestamp).toLocaleString("pt-BR"),
-					cls: "ione-hub-lobby__history-time",
+			// ---- Filtro + agrupamento (regras puras em NotificationList.ts) ----
+			const knownTriggers = Object.keys(TRIGGER_LABELS) as NotifiableTrigger[];
+			const filtered = filterNotifications(settings.history, settings.viewFilter, knownTriggers);
+
+			new Setting(container)
+				.setName("Filtrar por tipo de evento")
+				.setDesc(
+					settings.groupByDay
+						? "Agrupado por dia. A preferência fica salva."
+						: "Lista cronológica simples. A preferência fica salva."
+				)
+				.addDropdown((dd) => {
+					for (const option of buildFilterOptions(
+						countByTrigger(settings.history),
+						knownTriggers,
+						TRIGGER_LABELS,
+						settings.viewFilter
+					)) {
+						dd.addOption(option.value, option.label);
+					}
+					dd.setValue(settings.viewFilter);
+					dd.onChange(async (value) => {
+						await this.context?.updateSettings({ viewFilter: value as NotificationListFilter });
+						container.empty();
+						this.renderSettingsPanel(container);
+					});
+				})
+				.addToggle((toggle) =>
+					toggle.setValue(settings.groupByDay).setTooltip("Agrupar por dia").onChange(async (value) => {
+						await this.context?.updateSettings({ groupByDay: value });
+						container.empty();
+						this.renderSettingsPanel(container);
+					})
+				);
+
+			if (filtered.length === 0) {
+				container.createEl("p", {
+					text: "Nenhuma notificação desse tipo.",
+					cls: "ione-hub-lobby__description",
 				});
-				row.createSpan({ text: ` ${entry.message}` });
+			} else if (settings.groupByDay) {
+				const list = container.createDiv({ cls: "ione-hub-notification-list" });
+				for (const group of groupNotificationsByDay(filtered, new Date())) {
+					list.createEl("h4", { text: group.label, cls: "ione-hub-notification-list__day" });
+					for (const entry of group.items) this.renderNotificationRow(list, entry);
+				}
+			} else {
+				const list = container.createDiv({ cls: "ione-hub-notification-list" });
+				for (const entry of filtered.slice(0, 50)) this.renderNotificationRow(list, entry);
 			}
 		}
+	}
+
+	/** Linha da central — extraída para filtro/agrupamento renderizarem igual. */
+	private renderNotificationRow(list: HTMLElement, entry: StoredNotification): void {
+		const row = list.createDiv({ cls: "ione-hub-notification-list__row" });
+		if (!entry.read) row.addClass("is-unread");
+		row.createSpan({
+			text: new Date(entry.timestamp).toLocaleString("pt-BR", {
+				hour: "2-digit",
+				minute: "2-digit",
+			}),
+			cls: "ione-hub-lobby__history-time",
+		});
+		row.createSpan({ text: ` ${entry.message}` });
 	}
 
 	private async updateRule(trigger: NotifiableTrigger, patch: Partial<NotificationRule>): Promise<void> {

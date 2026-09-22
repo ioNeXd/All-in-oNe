@@ -8,6 +8,12 @@
  * runtime. Classes aqui são inertes — nada de lógica do plugin.
  */
 
+/** Normalização real do Obsidian (barras invertidas → barras, trim, sem leading "/"). */
+export function normalizePath(path: string): string {
+	const normalized = path.replace(/([\\/])+/g, "/").replace(/(^|\s|:)(\.)(\/|$)/g, "$1$3").trim();
+	return normalized.replace(/^\//, "");
+}
+
 /** Notificações exibidas durante os testes — os testes importam isto direto. */
 export const capturedNotices: { message: string; timeout?: number }[] = [];
 

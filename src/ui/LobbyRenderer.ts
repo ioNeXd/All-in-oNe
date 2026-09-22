@@ -2,6 +2,8 @@ import { App, Notice, Setting, TFile, Modal } from "obsidian";
 import type { HubCore } from "../core/HubCore";
 import type { HubModule } from "../core/ModuleContract";
 import { isPendingStatus } from "../modules/templates/NoteStatus";
+import { makeInteractiveRow } from "./interactiveRows";
+import { moveBefore, moveModuleId, orderedModules } from "./lobbyOrder";
 
 /** Rótulos amigáveis para as chaves de `settings.paths`. */
 const PATH_LABELS: Record<string, string> = {
@@ -12,6 +14,14 @@ const PATH_LABELS: Record<string, string> = {
 const BRAND = "All i\u2099 oNe";
 
 type Section = "geral" | "diagnostico" | "eventos" | "ajuda" | string;
+
+/** Estado do drag-and-drop da lista de módulos (só é relevante durante o arrasto). */
+interface DragState {
+	/** Módulo sendo arrastado. */
+	sourceId: string;
+	/** Linha de destino do drop (outra que recebeu dragover por último). */
+	targetId: string | null;
+}
 
 /**
  * RENDERIZADOR DO LOBBY
@@ -29,6 +39,8 @@ type Section = "geral" | "diagnostico" | "eventos" | "ajuda" | string;
 export class LobbyRenderer {
 	private activeSection: Section = "geral";
 	private searchQuery = "";
+	/** Drag-and-drop da lista de módulos: nulo fora de um arrasto. */
+	private drag: DragState | null = null;
 
 	constructor(private app: App, private core: HubCore, private containerEl: HTMLElement) {}
 
@@ -40,6 +52,19 @@ export class LobbyRenderer {
 		const layout = container.createDiv({ cls: "ione-hub-lobby__layout" });
 		this.renderSidebar(layout.createDiv({ cls: "ione-hub-lobby__sidebar" }));
 		this.renderContent(layout.createDiv({ cls: "ione-hub-lobby__content" }));
+	}
+
+	/** Módulos na ordem salva (settings.lobby.moduleOrder), tolerante a defasagens. */
+	private modulesInOrder(): HubModule[] {
+		const order = this.core.settings.get().lobby.moduleOrder;
+		return orderedModules(this.core.getModules(), order);
+	}
+
+	/** Grava a ordem nova (a gravação pode falhar — falha não vira estado falso). */
+	private async saveModuleOrder(order: string[]): Promise<void> {
+		const current = this.core.settings.get();
+		await this.core.settings.save({ ...current, lobby: { ...current.lobby, moduleOrder: order } });
+		this.render();
 	}
 
 	private renderSidebar(sidebar: HTMLElement): void {
@@ -62,7 +87,7 @@ export class LobbyRenderer {
 		const nav = sidebar.createDiv({ cls: "ione-hub-lobby__nav" });
 		nav.createEl("div", { text: "Módulos", cls: "ione-hub-lobby__section-title" });
 
-		for (const module of this.core.getModules()) {
+		for (const module of this.modulesInOrder()) {
 			const matches =
 				!this.searchQuery ||
 				module.manifest.displayName.toLowerCase().includes(this.searchQuery.toLowerCase());
@@ -89,24 +114,48 @@ export class LobbyRenderer {
 	}
 
 	private renderModuleNavItem(nav: HTMLElement, module: HubModule): void {
+		const id = module.manifest.id;
 		const item = nav.createDiv({ cls: "ione-hub-lobby__nav-item" });
-		if (this.activeSection === module.manifest.id) item.addClass("is-active");
+		if (this.activeSection === id) item.addClass("is-active");
+		item.setAttr("role", "listitem");
+
+		// Alça de arrasto (⠿): também focável — Alt+↑/↓ reordena por teclado,
+		// o mesmo efeito do drag-and-drop do mouse.
+		const handle = item.createSpan({
+			text: "⠿ ",
+			cls: "ione-hub-lobby__drag-handle",
+		});
+		handle.tabIndex = 0;
+		handle.addClass("ione-hub-focusable");
+		handle.setAttr("role", "button");
+		handle.setAttr("aria-label", `Reordenar ${module.manifest.displayName} (Alt+cima/Alt+baixo)`);
+		handle.onkeydown = (evt) => {
+			if (evt.altKey && (evt.key === "ArrowUp" || evt.key === "ArrowDown")) {
+				evt.preventDefault();
+				const current = this.core.settings.get().lobby.moduleOrder;
+				const next = moveModuleId(current, id, evt.key === "ArrowUp" ? -1 : 1, this.core.getModules().map((m) => m.manifest.id));
+				if (JSON.stringify(next) !== JSON.stringify(current)) {
+					void this.saveModuleOrder(next);
+				}
+			}
+		};
 
 		item.createSpan({ text: module.manifest.displayName });
 
 		const toggle = item.createEl("input", { type: "checkbox" });
-		toggle.checked = this.core.isModuleEnabled(module.manifest.id);
+		toggle.checked = this.core.isModuleEnabled(id);
 		toggle.setAttr("aria-label", `Ligar/desligar ${module.manifest.displayName}`);
+		toggle.setAttr("aria-pressed", String(this.core.isModuleEnabled(id)));
 		// O checkbox tem seu próprio foco; tirá-lo da ordem de tabulação evita
 		// o "quadrado duplo" ao navegar por teclado — a linha inteira já é focável.
 		toggle.tabIndex = -1;
 		toggle.onclick = (evt) => {
 			evt.stopPropagation();
-			void this.toggleModule(module.manifest.id, toggle.checked);
+			void this.toggleModule(id, toggle.checked);
 		};
 
 		const activate = () => {
-			this.activeSection = module.manifest.id;
+			this.activeSection = id;
 			this.render();
 		};
 		item.tabIndex = 0;
@@ -117,6 +166,38 @@ export class LobbyRenderer {
 				activate();
 			}
 		};
+
+		// ---- Drag-and-drop (HTML5 nativo): soltar sobre outra linha move o
+		// arrastado para ANTES do alvo — a regra pura vive em lobbyOrder.ts.
+		item.draggable = true;
+		item.ondragstart = (evt) => {
+			this.drag = { sourceId: id, targetId: null };
+			evt.dataTransfer?.setData("text/plain", id);
+			item.addClass("is-dragging");
+		};
+		item.ondragover = (evt) => {
+			if (!this.drag || this.drag.sourceId === id) return;
+			evt.preventDefault(); // necessário para permitir o drop
+			this.drag.targetId = id;
+			item.addClass("is-drop-target");
+		};
+		item.ondragleave = () => {
+			if (this.drag?.targetId === id) item.removeClass("is-drop-target");
+			if (this.drag) this.drag.targetId = null;
+		};
+		item.ondrop = (evt) => {
+			evt.preventDefault();
+			const source = this.drag?.sourceId ?? evt.dataTransfer?.getData("text/plain");
+			this.drag = null;
+			if (!source || source === id) return;
+			const current = this.core.settings.get().lobby.moduleOrder ?? [];
+			void this.saveModuleOrder(moveBefore(current, source, id));
+		};
+		item.ondragend = () => {
+			this.drag = null;
+			item.removeClass("is-dragging");
+			item.removeClass("is-drop-target");
+		};
 	}
 
 	private navItem(parent: HTMLElement, label: string, id: Section): void {
@@ -124,6 +205,9 @@ export class LobbyRenderer {
 		if (this.activeSection === id) item.addClass("is-active");
 		item.setText(label);
 		item.tabIndex = 0;
+		item.setAttr("role", "listitem");
+		item.setAttr("aria-label", label);
+		item.setAttr("aria-current", this.activeSection === id ? "true" : "false");
 		const activate = () => {
 			this.activeSection = id;
 			this.render();
@@ -140,6 +224,12 @@ export class LobbyRenderer {
 	private quickButton(container: HTMLElement, label: string, onClick: () => void): void {
 		const btn = container.createEl("button", { text: label, cls: "ione-hub-lobby__quick-btn" });
 		btn.onclick = onClick;
+		btn.onkeydown = (evt) => {
+			if (evt.key === "Enter" || evt.key === " ") {
+				evt.preventDefault();
+				onClick();
+			}
+		};
 	}
 
 	private async toggleModule(id: string, enable: boolean): Promise<void> {
@@ -263,6 +353,7 @@ export class LobbyRenderer {
 			const module = this.core.getModules().find((m) => m.manifest.id === status.moduleId);
 			const enabled = this.core.isModuleEnabled(status.moduleId);
 			const row = list.createDiv({ cls: "ione-hub-lobby__diagnostic-row" });
+			row.setAttr("role", "listitem");
 			// Um módulo desligado não é "saudável" — é desligado. Antes ficava
 			// verde, o que dava a impressão errada de que estava funcionando.
 			row.createSpan({ text: !enabled ? "🔴 " : status.ok ? "🟢 " : "🟠 " });
@@ -314,6 +405,12 @@ export class LobbyRenderer {
 			});
 
 		const events = this.core.bus.getHistory().slice().reverse().slice(0, 100);
+		if (this.core.bus.getHistory().length > 100) {
+			content.createEl("p", {
+				cls: "ione-hub-lobby__description",
+				text: "Mostrando os 100 eventos mais recentes da sessão.",
+			});
+		}
 		if (events.length === 0) {
 			content.createEl("p", {
 				text: "Nenhum evento nesta sessão ainda.",
@@ -322,7 +419,11 @@ export class LobbyRenderer {
 		}
 		const list = content.createDiv({ cls: "ione-hub-lobby__history" });
 		for (const event of events) {
-			const row = list.createDiv({ cls: "ione-hub-lobby__history-row" });
+			const row = makeInteractiveRow(
+				list.createDiv({ cls: "ione-hub-lobby__history-row" }),
+				{ ariaLabel: `Evento ${event.name} emitido por ${event.source}` },
+				() => void navigator.clipboard.writeText(JSON.stringify(event)).then(() => new Notice("Evento copiado como JSON."))
+			);
 			row.createSpan({
 				text: `[${new Date(event.timestamp).toLocaleTimeString("pt-BR")}] `,
 				cls: "ione-hub-lobby__history-time",
@@ -440,13 +541,19 @@ class PendingNotesModal extends Modal {
 			const row = this.contentEl.createDiv({ cls: "ione-hub-lobby__history-row" });
 			row.setText(file.path);
 			row.tabIndex = 0;
+			row.addClass("ione-hub-focusable");
+			row.setAttr("role", "button");
+			row.setAttr("aria-label", `Abrir nota ${file.path}`);
 			const open = async () => {
 				await this.app.workspace.getLeaf(false).openFile(file);
 				this.close();
 			};
 			row.onclick = () => void open();
 			row.onkeydown = (evt) => {
-				if (evt.key === "Enter") void open();
+				if (evt.key === "Enter" || evt.key === " ") {
+					evt.preventDefault();
+					void open();
+				}
 			};
 		}
 	}

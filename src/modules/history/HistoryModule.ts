@@ -1,6 +1,7 @@
 import { Setting, Notice } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
 import { cryptoRandomId } from "../../core/types";
+import { filterHistoryEntries } from "./HistoryFilter";
 
 /**
  * Janela de coalescência das gravações (write-behind). O Histórico recebe
@@ -43,6 +44,7 @@ const TRACKED_EVENTS = [
 	"folder:created",
 	"folder:deleted",
 	"mcp:action",
+	"mcp:action-logged",
 	"mcp:server-started",
 	"mcp:server-stopped",
 	"templates:note-pending",
@@ -75,7 +77,7 @@ export class HistoryModule implements HubModule {
 		description:
 			"Registra criação, alteração e exclusão de arquivos e pastas, além das ações dos outros módulos.",
 		icon: "history",
-		version: "0.1.0",
+		version: "0.2.0",
 		contractVersion: "2.0.0",
 		desktopOnly: false,
 		emits: [],
@@ -93,6 +95,8 @@ export class HistoryModule implements HubModule {
 	private context?: ModuleContext;
 	private unsubscribers: (() => void)[] = [];
 	private filter = "";
+	/** Busca por texto livre (message/path), combinável com o filtro de tipo. */
+	private searchQuery = "";
 	/** Entradas ainda não persistidas (dreno no flush). */
 	private pendingEntries: HistoryEntryRecord[] = [];
 	private flushTimer?: ReturnType<typeof setTimeout>;
@@ -262,8 +266,9 @@ export class HistoryModule implements HubModule {
 				})
 			);
 
-		// ---- Filtro + lista ----
+		// ---- Filtros + lista ----
 		container.createEl("h3", { text: "Registro de atividade" });
+
 		const filterRow = container.createDiv({ cls: "ione-hub-lobby__quick-actions" });
 		filterRow.createSpan({ text: "Mostrar apenas: " });
 		const select = filterRow.createEl("select");
@@ -272,42 +277,72 @@ export class HistoryModule implements HubModule {
 			select.createEl("option", { text: EVENT_LABELS[eventName] ?? eventName, value: eventName });
 		}
 		select.value = this.filter;
-		select.onchange = () => {
-			this.filter = select.value;
-			this.refresh(container);
+
+		// Busca por texto livre em message/path, COMBINÁVEL com o filtro de
+		// tipo (a regra vive em HistoryFilter.ts, pura e testada). Re-renderiza
+		// SÓ a lista, com debounce: recarregar o painel inteiro a cada tecla
+		// roubaria o foco do campo no meio da digitação.
+		const searchRow = container.createDiv({ cls: "ione-hub-lobby__quick-actions" });
+		const search = searchRow.createEl("input", {
+			cls: "ione-hub-lobby__search",
+			type: "text",
+		});
+		search.placeholder = "Buscar por trecho do caminho ou da mensagem…";
+		search.value = this.searchQuery;
+
+		const helpEl = container.createEl("p", { cls: "ione-hub-lobby__description" });
+		const listHost = container.createDiv();
+
+		const renderHelp = () => {
+			helpEl.setText(
+				this.filter
+					? `Mostrando apenas: ${EVENT_LABELS[this.filter] ?? this.filter}. ` +
+						`${FILTER_HELP[this.filter] ?? ""}`
+					: "Mostrando todos os tipos de atividade registrados pelo plugin. " +
+						"Use o seletor acima para ver só um tipo (por exemplo, apenas exclusões " +
+						"de arquivo) e o campo abaixo para procurar um trecho do caminho ou da mensagem.",
+			);
 		};
 
-		// Explica em português o que o filtro selecionado faz.
-		container.createEl("p", {
-			cls: "ione-hub-lobby__description",
-			text: this.filter
-				? `Mostrando apenas: ${EVENT_LABELS[this.filter] ?? this.filter}. ` +
-					`${FILTER_HELP[this.filter] ?? ""}`
-				: "Mostrando todos os tipos de atividade registrados pelo plugin. " +
-					"Use o seletor acima para ver só um tipo (por exemplo, apenas exclusões de arquivo).",
-		});
+		const renderList = () => {
+			listHost.empty();
+			const entries = filterHistoryEntries(settings.entries, this.filter, this.searchQuery);
+			if (entries.length === 0) {
+				listHost.createEl("p", {
+					text:
+						settings.entries.length === 0
+							? "Nada registrado ainda."
+							: "Nenhuma entrada corresponde aos filtros ativos.",
+						cls: "ione-hub-lobby__description",
+				});
+				return;
+			}
+			const list = listHost.createDiv({ cls: "ione-hub-lobby__history" });
+			for (const entry of entries.slice(0, 200)) {
+				const row = list.createDiv({ cls: "ione-hub-lobby__history-row" });
+				row.createSpan({
+					text: `[${new Date(entry.timestamp).toLocaleString("pt-BR")}] `,
+					cls: "ione-hub-lobby__history-time",
+				});
+				row.createSpan({ text: entry.message });
+			}
+		};
 
-		const entries = this.filter
-			? settings.entries.filter((e) => e.event === this.filter)
-			: settings.entries;
+		select.onchange = () => {
+			this.filter = select.value;
+			renderHelp();
+			renderList();
+		};
 
-		if (entries.length === 0) {
-			container.createEl("p", {
-				text: "Nada registrado ainda.",
-				cls: "ione-hub-lobby__description",
-			});
-			return;
-		}
+		let searchTimer: ReturnType<typeof setTimeout> | undefined;
+		search.oninput = () => {
+			this.searchQuery = search.value;
+			if (searchTimer) clearTimeout(searchTimer);
+			searchTimer = setTimeout(renderList, 200);
+		};
 
-		const list = container.createDiv({ cls: "ione-hub-lobby__history" });
-		for (const entry of entries.slice(0, 200)) {
-			const row = list.createDiv({ cls: "ione-hub-lobby__history-row" });
-			row.createSpan({
-				text: `[${new Date(entry.timestamp).toLocaleString("pt-BR")}] `,
-				cls: "ione-hub-lobby__history-time",
-			});
-			row.createSpan({ text: entry.message });
-		}
+		renderHelp();
+		renderList();
 	}
 
 	private refresh(container: HTMLElement): void {
@@ -325,6 +360,7 @@ export const EVENT_LABELS: Record<string, string> = {
 	"folder:created": "Pasta criada",
 	"folder:deleted": "Pasta excluída",
 	"mcp:action": "Ação do servidor MCP",
+	"mcp:action-logged": "Log de atividade do MCP",
 	"mcp:server-started": "Servidor MCP iniciado",
 	"mcp:server-stopped": "Servidor MCP parado",
 	"templates:note-pending": "Nota marcada como pendente",
@@ -345,6 +381,7 @@ const FILTER_HELP: Record<string, string> = {
 	"file:deleted": "Toda vez que um arquivo é mandado para a lixeira.",
 	"file:renamed": "Inclui mover um arquivo de pasta, não só trocar o nome.",
 	"mcp:action": "Cada ferramenta que uma IA externa executou no seu vault.",
+	"mcp:action-logged": "Mesma informação, com resultado (ou erro) de cada ação — para auditoria.",
 	"templates:note-pending": "Notas que ficaram incompletas e foram para a pasta Pendente.",
 	"templates:note-restored": "Notas que você terminou e voltaram para a pasta de origem.",
 };
@@ -367,6 +404,17 @@ function describeEvent(eventName: string, payload: Record<string, unknown>): str
 			return `Pasta excluída: ${path}`;
 		case "mcp:action":
 			return `MCP executou "${payload.toolName}"${path ? ` em ${path}` : ""}`;
+		case "mcp:action-logged": {
+			// O log dedicado carrega o RESULTADO (ou o erro) — a mensagem mostra
+			// o desfecho, que é o que distingue uma auditoria de uma lista.
+			const outcome =
+				payload.error !== undefined
+					? ` — FALHOU: ${payload.error}`
+					: payload.dryRun
+						? " — simulado (dry-run)"
+						: " — ok";
+			return `MCP executou "${payload.tool}"${path ? ` em ${path}` : ""}${outcome}`;
+		}
 		case "mcp:server-started":
 			return `Servidor MCP iniciado na porta ${payload.port}`;
 		case "mcp:server-stopped":

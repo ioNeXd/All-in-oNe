@@ -1,4 +1,5 @@
 import * as http from "http";
+import { negotiateToolsApiVersion } from "./ToolsApiVersion";
 
 /**
  * TRANSPORTE: STREAMABLE HTTP
@@ -23,6 +24,8 @@ export interface McpServerOptions {
 	getToken: () => string;
 	/** Identidade devolvida no handshake initialize (JSON-RPC serverInfo). */
 	serverInfo: { name: string; version: string };
+	/** Versão da API de ferramentas que este servidor suporta (negociada no initialize). */
+	getToolsApiVersion: () => string;
 	handleToolCall: (
 		toolName: string,
 		args: Record<string, unknown>
@@ -37,6 +40,9 @@ export interface McpServerHandle {
 
 /** Versão mais recente do protocolo MCP que este servidor entende. */
 const LATEST_PROTOCOL_VERSION = "2025-06-18";
+
+/** Erro enviado ao cliente quando a negociação de versão da API rejeita o pedido. */
+export const TOOLS_API_INCOMPATIBLE = "TOOLS_API_INCOMPATIBLE";
 
 const TOOL_DEFINITIONS = [
 	{ name: "read_note", description: "Lê o conteúdo de uma nota." },
@@ -56,6 +62,9 @@ const TOOL_DEFINITIONS = [
 	{ name: "search_by_tag", description: "Notas que possuem uma tag." },
 	{ name: "list_attachments", description: "Lista os arquivos não-markdown do vault." },
 	{ name: "get_attachment", description: "Lê um anexo (retorna base64)." },
+	{ name: "put_attachment", description: "Cria ou sobrescreve um anexo (conteúdo em base64)." },
+	{ name: "delete_attachment", description: "Move um anexo para a lixeira." },
+	{ name: "get_server_info", description: "Versão do plugin, da API de ferramentas e contagens do vault." },
 	{ name: "split_note", description: "Divide uma nota em várias, quebrando nos headings." },
 	{ name: "combine_notes", description: "Junta várias notas em uma só." },
 	{ name: "dataview_query", description: "Executa uma query Dataview (exige o plugin Dataview)." },
@@ -154,14 +163,29 @@ async function handleRequest(
 	switch (message.method) {
 		case "initialize": {
 			// Handshake MCP: clientes reais enviam isto ANTES de tools/list — sem
-			// responder, a conexão morre no primeiro passo. A versão pedida é
-			// ecoada (nosso conjunto tools/* é estável entre versões do
+			// responder, a conexão morre no primeiro passo. A versão do PROTOCOLO
+			// pedida é ecoada (nosso conjunto tools/* é estável entre versões do
 			// protocolo); sem pedido, a mais recente que este servidor fala.
+			// Em paralelo, a versão da API DE FERRAMENTAS é negociada: cliente
+			// pedindo major além do suportado é rejeitado aqui, no handshake,
+			// com erro claro — nunca no meio de uma chamada de ferramenta.
 			const requested = message.params?.protocolVersion;
+			const requestedToolsApi =
+				typeof message.params?.toolsApiVersion === "string"
+					? (message.params.toolsApiVersion as string)
+					: undefined;
+			const negotiation = negotiateToolsApiVersion(requestedToolsApi, options.getToolsApiVersion());
+			if (!negotiation.compatible) {
+				respondError(res, message.id, negotiation.reason ?? "Versão da API de ferramentas incompatível.", {
+					code: TOOLS_API_INCOMPATIBLE,
+				});
+				return;
+			}
 			respond(res, message.id, {
 				protocolVersion: typeof requested === "string" && requested ? requested : LATEST_PROTOCOL_VERSION,
 				capabilities: { tools: { listChanged: false } },
 				serverInfo: options.serverInfo,
+				toolsApiVersion: negotiation.version,
 			});
 			return;
 		}
@@ -189,8 +213,15 @@ function respond(res: http.ServerResponse, id: unknown, result: unknown): void {
 	res.writeHead(200).end(JSON.stringify({ jsonrpc: "2.0", id, result }));
 }
 
-function respondError(res: http.ServerResponse, id: unknown, error: string): void {
-	res.writeHead(200).end(JSON.stringify({ jsonrpc: "2.0", id, error: { message: error } }));
+function respondError(
+	res: http.ServerResponse,
+	id: unknown,
+	error: string,
+	opts?: { code?: string }
+): void {
+	res.writeHead(200).end(
+		JSON.stringify({ jsonrpc: "2.0", id, error: { message: error, ...(opts?.code ? { code: opts.code } : {}) } })
+	);
 }
 
 function readBody(req: http.IncomingMessage, maxBytes: number): Promise<string> {

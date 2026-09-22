@@ -1,6 +1,18 @@
 import { Notice, requestUrl, Setting } from "obsidian";
-import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
+import type { HubModule, ModuleContext, ModuleManifest, ConfigValidationIssue } from "../../core/ModuleContract";
+import type { HubSettings } from "../../core/types";
 import { isNewerVersion, parseChecksums } from "./ReleaseUtils";
+import {
+	decideSignatureVerification,
+	detectBratInstallation,
+	findSignatureAsset,
+	interpretGpgStatusOutput,
+	runGpgCommand,
+	shouldYieldToBrat,
+} from "./SignatureUtils";
 
 export interface AutoUpdateSettings {
 	repo: string; // formato "usuario/repositorio" — hardcoded no manifesto do plugin, não editável por terceiros
@@ -9,6 +21,14 @@ export interface AutoUpdateSettings {
 	checkIntervalMs: number;
 	lastKnownVersion?: string;
 	previousVersionBackup?: { version: string; files: Record<string, string> };
+	/**
+	 * Opt-in: verificar a assinatura GPG dos assets antes de instalar.
+	 * Ligada, a ausência de assinatura no release (ou do binário gpg) ABORTA
+	 * a instalação — habilitar cria a obrigação de cumpri-la.
+	 */
+	verifySignature: boolean;
+	/** Chave pública (armadura ASCII) confiada pelo usuário para a verificação. */
+	signingPublicKey?: string;
 }
 
 export const AUTOUPDATE_DEFAULTS: AutoUpdateSettings = {
@@ -19,6 +39,7 @@ export const AUTOUPDATE_DEFAULTS: AutoUpdateSettings = {
 	channel: "stable",
 	lastCheckedAt: 0,
 	checkIntervalMs: 1000 * 60 * 60 * 6, // checa no máximo a cada 6h automaticamente
+	verifySignature: false, // opt-in — sem isso, proteção = checksum do release
 };
 
 interface GitHubRelease {
@@ -46,7 +67,7 @@ export class AutoUpdateModule implements HubModule {
 		displayName: "Auto-update",
 		description: "Verifica e aplica atualizações do plugin a partir do GitHub Releases.",
 		icon: "refresh-cw",
-		version: "0.1.0",
+		version: "0.2.0",
 		contractVersion: "2.0.0",
 		desktopOnly: false,
 		emits: ["autoupdate:available", "autoupdate:applied"],
@@ -67,12 +88,29 @@ export class AutoUpdateModule implements HubModule {
 
 	private context?: ModuleContext;
 	private currentVersion = ""; // preenchido pelo main.ts a partir do manifest.json real
+	/** true quando o BRAT está instalado E gerencia este plugin — módulo cede o controle. */
+	private managedByBrat = false;
+	/** Motivo do yield ao BRAT, para o painel. */
+	private bratYieldReason?: string;
+	/** Estado da ÚLTIMA verificação de assinatura — alimenta o Diagnóstico. */
+	private lastSignatureStatus: { ok: boolean; detail: string } | undefined;
 
 	onRegister(context: ModuleContext): void {
 		this.context = context;
 	}
 
-	onEnable(): void {
+	async onEnable(): Promise<void> {
+		// Interoperabilidade com o BRAT: se o BRAT gerencia este plugin, ele é
+		// o dono do ciclo de atualização — duas mãos escrevendo main.js é
+		// corrida de escrita (e rollback de dois donos). O módulo CEDe: sem
+		// checagem automática, sem comando, sem notificação.
+		await this.refreshBratStatus();
+
+		if (this.managedByBrat) {
+			this.context?.log("Auto-update cedido ao BRAT", { reason: this.bratYieldReason });
+			return; // sem comando e sem checagem automática
+		}
+
 		this.context!.registerCommand(
 			"autoupdate-check-now",
 			"Auto-update: Verificar atualizações agora",
@@ -87,6 +125,31 @@ export class AutoUpdateModule implements HubModule {
 		}
 	}
 
+	/** Reavalia o BRAT a cada onEnable (o usuário pode ter instalado/desinstalado desde o load). */
+	private async refreshBratStatus(): Promise<void> {
+		const bratJson = await this.readBratDataJson();
+		const detection = detectBratInstallation(bratJson, this.readSettings().repo);
+		// A regra de ceder é a função pura testada — o módulo não re-decide.
+		this.managedByBrat = shouldYieldToBrat(bratJson !== undefined, detection);
+		this.bratYieldReason = detection.reason;
+	}
+
+	/**
+	 * Lê o data.json do BRAT (plugins/.obsidian42-brat), se ele existir.
+	 * Qualquer falha de leitura devolve undefined — a checagem de update
+	 * própria nunca pode quebrar por causa de um plugin de terceiros.
+	 */
+	private async readBratDataJson(): Promise<string | undefined> {
+		try {
+			const adapter = this.context!.app.vault.adapter;
+			const path = `${this.context!.app.vault.configDir}/plugins/obsidian42-brat/data.json`;
+			if (!(await adapter.exists(path))) return undefined;
+			return await adapter.read(path);
+		} catch {
+			return undefined;
+		}
+	}
+
 	onDisable(): void {
 		/* nada para limpar — sem timers persistentes além do check no onEnable */
 	}
@@ -97,14 +160,56 @@ export class AutoUpdateModule implements HubModule {
 
 	getHealthStatus() {
 		const settings = this.readSettings();
+		if (this.managedByBrat) {
+			return { ok: true, summary: "Atualização controlada pelo BRAT (módulo em espera)" };
+		}
 		const lastCheck = settings.lastCheckedAt
 			? new Date(settings.lastCheckedAt).toLocaleString("pt-BR")
 			: "nunca";
-		return { ok: true, summary: `Última verificação: ${lastCheck}` };
+		const signature = settings.verifySignature ? " · verificação de assinatura ligada" : "";
+		const sigStatus = this.lastSignatureStatus
+			? ` · assinatura: ${this.lastSignatureStatus.detail}`
+			: "";
+		return {
+			ok: this.lastSignatureStatus ? this.lastSignatureStatus.ok : true,
+			summary: `Última verificação: ${lastCheck}${signature}${sigStatus}`,
+		};
+	}
+
+	/**
+	 * A chave pública colada pelo usuário tem de parecer uma armadura OpenPGP;
+	 * qualquer outra coisa é quase sempre erro de colagem (CSS, log, texto).
+	 * Síncrono e barato — só o cabeçalho é inspecionado, sem I/O.
+	 */
+	validateSettings(settings: HubSettings): ConfigValidationIssue[] {
+		const mod = settings.modules.autoupdate as { signingPublicKey?: string } | undefined;
+		const key = mod?.signingPublicKey;
+		if (key && !key.includes("-----BEGIN PGP PUBLIC KEY BLOCK-----")) {
+			return [
+				{
+					field: "signingPublicKey",
+					level: "error",
+					message:
+						"A chave pública deve começar com '-----BEGIN PGP PUBLIC KEY BLOCK-----' (armadura ASCII exportada pelo gpg).",
+					},
+			];
+		}
+		return [];
 	}
 
 	renderSettingsPanel(container: HTMLElement): void {
 		const settings = this.readSettings();
+
+		if (this.managedByBrat) {
+			container.createEl("p", {
+				cls: "ione-hub-lobby__warning",
+				text:
+					`⚠️ O plugin BRAT está gerenciando este plugin (${this.bratYieldReason ?? "repo na lista do BRAT"}). ` +
+					"As atualizações são controladas por ele — este módulo fica em espera para não competir " +
+					"com o BRAT (duas ferramentas escrevendo os mesmos arquivos causaria corrupção). " +
+					"Remova o plugin da lista do BRAT se quiser usar o auto-update próprio.",
+			});
+		}
 
 		new Setting(container).setName("Repositório (fixo)").setDesc(settings.repo);
 
@@ -121,6 +226,37 @@ export class AutoUpdateModule implements HubModule {
 						await this.context?.updateSettings({ channel: value as "stable" | "beta" });
 					})
 			);
+
+		new Setting(container)
+			.setName("Verificar assinatura GPG dos assets (experimental)")
+			.setDesc(
+				"Opt-in. Exige o programa 'gpg' instalado no computador. Ligada, um release SEM assinatura " +
+					"(ou com assinatura que não bate com a chave abaixo) ABORTA a instalação — igual ao checksum. " +
+					"Desligada, a proteção é o checksum SHA-256 publicado no corpo do release."
+			)
+			.addToggle((toggle) =>
+				toggle.setValue(settings.verifySignature).onChange(async (value) => {
+					await this.context?.updateSettings({ verifySignature: value });
+				})
+			);
+
+		if (settings.verifySignature) {
+			new Setting(container)
+				.setName("Chave pública confiada (armadura ASCII)")
+				.setDesc(
+					"Cole aqui a chave pública de quem assina os releases (-----BEGIN PGP PUBLIC KEY BLOCK----- ...). " +
+					"Fica no data.json local do vault, nunca sai da máquina."
+				)
+				.addTextArea((area) =>
+					area.setValue(settings.signingPublicKey ?? "").onChange((v) => {
+						// sem salvamento a cada tecla (armadura é grande); salvamento no blur:
+						area.inputEl.onblur = async () => {
+							await this.context?.updateSettings({ signingPublicKey: area.getValue().trim() || undefined });
+							new Notice("Chave pública salva.");
+						};
+					})
+				);
+		}
 
 		new Setting(container)
 			.setName("Verificar atualizações agora")
@@ -155,6 +291,16 @@ export class AutoUpdateModule implements HubModule {
 	}
 
 	async checkForUpdates(opts: { manual: boolean }): Promise<GitHubRelease | null> {
+		if (this.managedByBrat) {
+			if (opts.manual) {
+				new Notice(
+					"All iₙ oNe: o BRAT está gerenciando este plugin — as atualizações são controladas por ele. " +
+						"Este módulo não compete com o BRAT.",
+					8000
+				);
+			}
+			return null;
+		}
 		const settings = this.readSettings();
 		try {
 			const response = await requestUrl({
@@ -222,11 +368,30 @@ export class AutoUpdateModule implements HubModule {
 
 	async applyUpdate(release: GitHubRelease): Promise<void> {
 		try {
+			const settings = this.readSettings();
+			const assetNames = ["main.js", "manifest.json", "styles.css"];
+			const downloaded: Record<string, string> = {};
+
+			// Assinatura (opt-in): decide por asset se a verificação é obrigatória
+			// e, quando é, verifica ANTES de escrever qualquer arquivo — mesmo
+			// esqueleto do checksum: tudo validado antes da primeira escrita, para
+			// não deixar instalação pela metade.
+			if (settings.verifySignature) {
+				const hasAnySignature = assetNames.some((n) => !!findSignatureAsset(release.assets, n));
+				if (!hasAnySignature) {
+					const decision = decideSignatureVerification({
+						enabled: true,
+						signaturePresent: false,
+						verificationAvailable: true,
+						assetName: assetNames[0],
+					});
+					throw new Error(decision.reason ?? "Assinatura ausente.");
+				}
+			}
+
 			await this.backupCurrentVersion();
 
 			const expected = parseChecksums(release.body);
-			const assetNames = ["main.js", "manifest.json", "styles.css"];
-			const downloaded: Record<string, string> = {};
 
 			// Baixa TUDO e verifica ANTES de escrever qualquer arquivo — assim um
 			// checksum ruim no meio do caminho não deixa a instalação pela metade.
@@ -234,6 +399,27 @@ export class AutoUpdateModule implements HubModule {
 				const asset = release.assets.find((a) => a.name === name);
 				if (!asset) continue; // styles.css é opcional
 				const content = await requestUrl({ url: asset.browser_download_url, method: "GET" });
+
+				if (settings.verifySignature) {
+					const sigAsset = findSignatureAsset(release.assets, name);
+					const decision = decideSignatureVerification({
+						enabled: true,
+						signaturePresent: !!sigAsset,
+						verificationAvailable: true,
+						assetName: name,
+					});
+					if (decision.action === "abort") throw new Error(decision.reason);
+					const check = await this.verifyAssetSignature(name, sigAsset!.url, content.text);
+					// Guarda o desfecho para o Diagnóstico: ok nunca esconde uma
+					// verificação que reprovou; reprovada mantém o resumo honesto
+					// até a próxima verificação bem-sucedida.
+					this.lastSignatureStatus = check.valid
+						? { ok: true, detail: `assinatura verificada (${name})` }
+						: { ok: false, detail: `assinatura de "${name}" reprovada: ${check.reason ?? "inválida"}` };
+					if (!check.valid) {
+						throw new Error(`Assinatura do arquivo "${name}" ${check.reason ?? "inválida"} — instalação abortada por segurança.`);
+					}
+				}
 
 				if (expected[name]) {
 					const actual = await sha256Hex(content.text);
@@ -260,12 +446,62 @@ export class AutoUpdateModule implements HubModule {
 		} catch (err) {
 			console.error("[All iₙ oNe] Falha ao aplicar atualização:", err);
 			// Honestidade: "nenhum arquivo foi corrompido" só vale para falha de
-			// checksum ANTES da escrita. Se a falha foi no meio da escrita (IO,
-			// disco cheio), o backup feito no início permite rollback.
+			// checksum/assinatura ANTES da escrita. Se a falha foi no meio da
+			// escrita (IO, disco cheio), o backup feito no início permite rollback.
 			new Notice(
-				"All iₙ oNe: falha ao aplicar a atualização. Se o plugin não carregar, use \"Reverter para a versão anterior\" no painel do módulo — o backup foi feito antes.",
+				`All iₙ oNe: falha ao aplicar a atualização: ${err instanceof Error ? err.message : String(err)} — nenhum arquivo foi escrito se a falha ocorreu antes da gravação. Se o plugin não carregar, use "Reverter para a versão anterior" no painel do módulo.`,
 				10000
 			);
+		}
+	}
+
+	/**
+	 * Verifica a assinatura de um asset num KEYRING TEMPORÁRIO isolado:
+	 * nunca toca no keyring do usuário — importa a chave pública configurada
+	 * para uma pasta de casa (GNUPGHOME própria), verifica e descarta.
+	 * Falha de execução (gpg ausente, permissão) propaga — o chamador decide
+	 * (decisão fechada: com a verificação ligada, não rodar = abortar).
+	 */
+	private async verifyAssetSignature(
+		assetName: string,
+		signatureUrl: string,
+		assetContent: string
+	): Promise<{ valid: boolean; reason?: string; keyFingerprint?: string }> {
+		const settings = this.readSettings();				if (!settings.signingPublicKey?.trim()) {
+					this.lastSignatureStatus = {
+						ok: false,
+						detail: "chave pública não configurada — verificação ligada não pôde rodar",
+					};
+			return {
+				valid: false,
+				reason: "nenhuma chave pública foi configurada no painel do módulo (cole a chave pública de quem assina os releases)",
+			};
+		}
+
+		const tempDir = await mkdtemp(path.join(tmpdir(), "all-in-one-gpg-"));
+		try {
+			const keyPath = path.join(tempDir, "trusted-key.asc");
+			const sigPath = path.join(tempDir, `${assetName}.sig`);
+			const dataPath = path.join(tempDir, assetName);
+			await writeFile(keyPath, settings.signingPublicKey);
+
+			// O .sig é BINÁRIO (formato OpenPGP) — lê como arrayBuffer, nunca como
+			// texto (a conversão para string corromperia os bytes da assinatura).
+			const sigResponse = await requestUrl({ url: signatureUrl, method: "GET" });
+			await writeFile(sigPath, new Uint8Array(sigResponse.arrayBuffer));
+			await writeFile(dataPath, assetContent);
+
+			const gnupghome = path.join(tempDir, "gnupg");
+			await mkdir(gnupghome, { recursive: true });
+			const env = { ...process.env, GNUPGHOME: gnupghome };
+			const importRun = await runGpgCommand(["--batch", "--import", keyPath], env);
+			if (importRun.code !== 0) {
+				return { valid: false, reason: `falha ao importar a chave pública no keyring temporário: ${importRun.stderr.slice(0, 200)}` };
+			}
+			const verifyRun = await runGpgCommand(["--batch", "--status-fd", "1", "--verify", sigPath, dataPath], env);
+			return interpretGpgStatusOutput(verifyRun.stdout);
+		} finally {
+			await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
 		}
 	}
 

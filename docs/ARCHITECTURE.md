@@ -19,14 +19,22 @@ src/
 
   modules/               ← cada pasta é um módulo independente
     mcp/                 ← servidor MCP (Streamable HTTP)
+      WriteRules.ts      ← regra pura: permissões de pasta (testada)
+      ToolsApiVersion.ts ← regra pura: negociação da versão da API (testada)
     filelifecycle/       ← ciclo de vida de arquivos (nome na criação, confirmações)
     styles/              ← editor de estilos e temas
+      CssHighlight.ts    ← tokenizador puro do realce do editor (testado)
     autoupdate/          ← auto-update via GitHub Releases
+      ReleaseUtils.ts    ← regra pura: SemVer/assets/checksums (testada)
+      SignatureUtils.ts  ← regra pura: decisão/parse da verificação GPG (testada)
     templates/           ← templates por pasta + fluxo Pendente
       NoteStatus.ts      ← regra pura: pendente/completo (testada)
     calendar/            ← calendário, eventos recorrentes e lembretes
+      IcsParser.ts       ← parser puro de iCalendar (testado)
     notifications/       ← pop-ups com som e não-perturbe
-    history/             ← histórico persistente com filtro
+      NotificationList.ts← regras puras: filtro e agrupamento por dia (testadas)
+    history/             ← histórico persistente com filtro e busca
+      HistoryFilter.ts   ← regra pura: filtro combinado tipo + texto (testada)
 
   ui/
     LobbyRenderer.ts     ← toda a UI do Lobby (cascas finas: LobbyView/LobbyModal)
@@ -35,10 +43,12 @@ src/
     OpenModeModal.ts     ← aba/janela/perguntar sempre
     ThemePreviewModal.ts ← preview de tema do Estilos
     FilterSuggest.ts     ← campo de texto com sugestão filtrada (reutilizável)
+    interactiveRows.ts   ← linha clicável acessível (teclado/ARIA) reutilizável
+    lobbyOrder.ts        ← regras puras da ordem de módulos no Lobby (testadas)
 
   main.ts                ← cola com a API real do Obsidian (Plugin)
 
-tests/                   ← 14 suítes, 103 testes — todos importam código real
+tests/                   ← 23 suítes, 252 testes — todos importam código real
   mocks/obsidian.ts      ← stub do pacote "obsidian" (types-only), via alias no vitest
 ```
 
@@ -67,7 +77,12 @@ O contrato na linha de base v0.1.0:
   reinicia sozinho quando a porta configurada deixa de ser a em escuta).
 - `onResetData()` — limpa dados gerados; roda para **todos** os módulos
   registrados, inclusive desligados (dado de módulo desligado não
-  sobrevive ao reset).
+  sobrevive ao reset). A fronteira dado × configuração é decisão de
+  cada módulo: Histórico/Notificações limpam as listas e mantêm
+  preferências (máximo, filtro); o Calendário remove só os eventos
+  IMPORTADOS de .ics (ids `ics:<uid>`) e preserva os criados à mão
+  (`evt-*`) — refazer é um clique, reimportar o arquivo; o Auto-update
+  não expõe dado gerado a reset (a versão dispensada é preferência).
 - `getHealthStatus()` — alimenta a aba de Diagnóstico (o MCP reporta a
   porta **em escuta**, não a configurada).
 - `renderSettingsPanel()` — painel próprio no Lobby, usável mesmo com o
@@ -156,8 +171,11 @@ pastas-pai) e nome único com extensão preservada.
 
 O mesmo princípio gerou módulos puras ao lado dos módulos de vault:
 `NoteStatus.ts` (pendente/completo), `WriteRules.ts` (permissões de pasta
-do MCP) e `ReleaseUtils.ts` (SemVer). Regra de negócio sem I/O = testável
-sem mock.
+do MCP) e `ReleaseUtils.ts` (SemVer). Na v0.2.0 o padrão virou a norma:
+`ToolsApiVersion`, `SignatureUtils`, `IcsParser`, `NotificationList`,
+`HistoryFilter`, `CssHighlight` e `lobbyOrder` — toda regra de decisão
+nova nasce num arquivo puro com suíte própria. Regra de negócio sem I/O =
+testável sem mock.
 
 ## Por que "modo seguro" (safe mode)
 
@@ -201,8 +219,8 @@ comando funcional na Paleta — um caminho fora do ciclo de vida. A ponte
 O pacote `obsidian` é **types-only** (sem entry executável — só existe
 dentro do app). Um alias no `vitest.config.ts` aponta `obsidian` para um
 stub mínimo (`tests/mocks/obsidian.ts`) **apenas em runtime de teste**;
-o `tsc` continua nos tipos oficiais e a build não muda. Com isso, as 14
-suítes (103 testes) importam as implementações de verdade — regras como
+o `tsc` continua nos tipos oficiais e a build não muda. Com isso, as 23
+suítes (252 testes) importam as implementações de verdade — regras como
 `NoteStatus`, `WriteRules`, `pathMatchesFolder` e `validateMcpDraft` são
 testadas contra o código real, e mudanças de comportamento quebram o
 teste na hora, em vez de divergir em silêncio de uma cópia espelhada.
@@ -222,6 +240,54 @@ de propósito:
   atualizados para o contrato novo devem, na pior das hipóteses, logar um
   aviso (`HubCore.enableModule` já faz essa checagem), não quebrar
   silenciosamente.
+
+## Por que a verificação GPG do auto-update falha fechada
+
+O checksum SHA-256 confere integridade do download; a assinatura GPG
+confere **origem**. Como a verificação é opt-in (`verifySignature` nas
+settings do Auto-update), ela cria uma obrigação assim que é ligada:
+release sem asset `.sig`/`.asc`, `gpg` indisponível na máquina ou chave
+pública não configurada **abortam** a instalação com Notice — "não
+consegui verificar" nunca pode virar "verificado". O parse decide por
+linhas de status `[GNUPG:]` do gpg (a saída humana varia por locale),
+num **keyring temporário isolado** (`GNUPGHOME` efêmero) — o keyring do
+usuário nunca é tocado. A verificação roda junto do download, ANTES de
+escrever qualquer arquivo (mesma filosofia do checksum: falha no meio
+do caminho não deixa instalação pela metade). A regra de decisão é
+pura (`SignatureUtils.ts`); quem assina os assets em produção é o
+`release.yml` — com os secrets ausentes, o passo de assinatura é pulado
+e o release sai só com checksums (o recurso opt-in continua honesto:
+aborta, não finge que verificou).
+
+## Por que o parser de .ics é conservador
+
+`IcsParser.ts` (puro, sem I/O) prefere **sub-representar a importar mal**:
+`FREQ=YEARLY` mapeia para a recorrência anual do modelo de eventos;
+frequências que o modelo não representa (MONTHLY, WEEKLY, DAILY…)
+chegam como evento ÚNICO com aviso explícito — aproximar em silêncio
+mentiria sobre quando o lembrete dispara. VEVENT sem DTSTART é
+descartado com warning; arquivo truncado conta o evento aberto em vez
+de derrubar o resto; texto que nem é iCalendar lança erro com mensagem
+clara (a UI mantém o painel e mostra o Notice). A desdobra de linhas
+segue a semântica literal da RFC 5545 (o espaço do marcador fica no
+FIM da linha física anterior). A mescla é por UID determinístico
+(`ics:<uid>`): reimportar o mesmo arquivo substitui os eventos
+anteriores em vez de duplicar, e eventos criados à mão ficam intactos.
+
+## Por que o realce do editor de CSS é overlay (e não CodeMirror)
+
+CodeMirror com modo CSS real exigiria dependência nova
+(`@codemirror/lang-css`) e a substituição do textarea por um editor
+distinto — reescrevendo por cima o autocomplete, o undo e a integração
+com preview/export já existentes. Ficou na técnica clássica de overlay:
+um `<pre>` colorizado posicionado ATRÁS do `<textarea>`, cujo texto
+vira transparente (caret e seleção visíveis). O textarea permanece a
+fonte do valor, então autocomplete Ctrl+Espaço, inserção pela
+referência, undo, preview e export/import ficam intactos por
+construção. O tokenizador (`CssHighlight.ts`, puro, sem DOM) tem um
+invariante testado: a concatenação dos tokens reproduz o texto byte a
+byte — se um caractere se movesse, o overlay desalinha do caret.
+Rende via `textContent`, nunca `innerHTML` com conteúdo do usuário.
 
 ## O que fica de fora, deliberadamente
 

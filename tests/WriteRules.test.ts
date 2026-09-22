@@ -33,6 +33,22 @@ describe("pathMatchesFolder — fronteira de pasta por segmento", () => {
 	it("base vazia nunca casa (bloqueio/permissão vazios não liberam por engano)", () => {
 		expect(pathMatchesFolder("qualquer/nota.md", "")).toBe(false);
 		expect(pathMatchesFolder("qualquer/nota.md", "/")).toBe(false);
+	});	});
+
+describe("collectWriteTargets — alvos das ferramentas de anexo", () => {
+	it("put_attachment: o destino é args.path (o gate cobre o anexo)", () => {
+		expect(collectWriteTargets({ path: "Anexos/img.png", base64: "aGk=" })).toEqual(["Anexos/img.png"]);
+	});
+
+	it("delete_attachment: mesmo formato; chaves ausentes são filtradas", () => {
+		expect(collectWriteTargets({ path: "Anexos/velho.png" })).toEqual(["Anexos/velho.png"]);
+		expect(collectWriteTargets({ base64: "aGk=" })).toEqual([]);
+	});
+
+	it("combina com pathMatchesFolder: anexo em pasta bloqueada é negado", () => {
+		const targets = collectWriteTargets({ path: "Secretas/anexo.png" });
+		// O alvo BATE com a blocklist — é exatamente por isso que o gate nega.
+		expect(targets.some((t) => pathMatchesFolder(t, "Secretas"))).toBe(true);
 	});
 });
 

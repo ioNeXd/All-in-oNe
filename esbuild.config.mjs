@@ -28,6 +28,10 @@ const context = await esbuild.context({
 		"@lezer/highlight",
 		"@lezer/lr",
 		...builtins,
+		// builtin-modules lista os módulos SEM o prefixo "node:"; imports como
+		// "node:fs/promises" são especificadores distintos para o esbuild e
+		// precisam ser externos por conta própria.
+		...builtins.map((m) => `node:${m}`),
 	],
 	format: "cjs",
 	target: "es2020",

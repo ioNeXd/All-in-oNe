@@ -1,14 +1,17 @@
-# Status de implementação — v0.1.1
+# Status de implementação — v0.2.0
 
 Este documento existe para ser honesto sobre o que está **funcional de
 verdade** neste projeto versus o que é **esqueleto pronto para expandir**.
 A v0.1.0 é a linha de base (v0.1.1 corrige 15 achados da primeira revisão
-externa — ver CHANGELOG): a arquitetura está completa e auditada, cada
+externa; v0.2.0 fecha as 8 partes do plano pós-auditoria — anexos do MCP,
+.ics no Calendário, assinatura GPG + BRAT no Auto-update, realce de CSS,
+filtros de Notificações/Histórico, teclado/drag-and-drop no Lobby — ver
+CHANGELOG): a arquitetura está completa e auditada, cada
 módulo está funcional na sua função principal, e as lacunas restantes estão
 listadas aqui sem rodeio.
 
 > Estado da validação nesta linha de base: typecheck estrito ✅ ·
-> **120 testes em 16 arquivos** (todos importando código real, não cópias
+> **252 testes em 23 arquivos** (todos importando código real, não cópias
 > espelhadas) ✅ · build de produção ✅. O que os testes não cobrem é o
 > runtime de verdade no Obsidian — para isso, siga `docs/MANUAL-VALIDATION.md`.
 
@@ -46,18 +49,28 @@ listadas aqui sem rodeio.
 por token, rate limiting, modo dry-run, permissões de escrita por pasta
 com fronteira por segmento cobrindo todos os destinos de escrita (incluindo
 renames e combines), split/combine de notas, liberação temporária de
-escrita por tempo com revogação, todas as escritas pela fila do núcleo,
-catch global no servidor, limite de 10 MB no streaming do corpo, restart
-coalescido (paralelo não falha com EADDRINUSE fantasma; desligar durante
+escrita por tempo com revogação, anexos completos: listagem, leitura,
+gravação (criar/sobrescrever via base64 com validação estrita e criação de
+pastas-pai) e exclusão só para a lixeira (`list_attachments`,
+`get_attachment`, `put_attachment`, `delete_attachment`), log de atividade
+dedicado (`mcp:action-logged`, um evento por ação executada — incluindo as
+que falham — com resultado ou erro — e COM consumidor real: o Histórico
+escuta o evento e registra o desfecho: ok, simulado ou FALHOU), negociação formal da versão da API de
+ferramentas (`toolsApiVersion` exposta no `initialize` e na ferramenta
+`get_server_info`; cliente pedindo major incompatível é rejeitado no
+handshake com código dedicado), todas as escritas pela fila do
+núcleo, catch global no servidor, limite de 10 MB no streaming do corpo,
+restart coalescido (paralelo não falha com EADDRINUSE fantasma; desligar durante
 um restart não reabre o servidor), diagnóstico mostrando a porta **em
 escuta** (não a configurada), reinício automático quando a porta configurada
 muda, painel completo no Lobby (porta, somente-leitura, dry-run, listas de
 permissão, regenerar token, reiniciar — tudo usável com o módulo desligado).
 
-**Não implementado ainda:** ferramentas de backlinks/links, integração com
-Dataview/Bases, manipulação de anexos, log de atividade dedicado além do
-Histórico genérico, negociação formal de versão da API de ferramentas (o
-campo existe, a lógica não).
+**Não implementado ainda:** ferramentas de backlinks/links; integração com
+Dataview/Bases — dependência externa, não implementável dentro do plugin:
+`dataview_query` exige o plugin Dataview instalado e habilitado; sem ele,
+a ferramenta responde com erro que aponta o pré-requisito em vez de falhar
+em silêncio.
 
 ## Módulo Ciclo de vida de arquivos — funcional
 
@@ -79,26 +92,36 @@ interno do `Menu` e pode deixar de funcionar num update futuro do Obsidian
 `buildTheme()` (~45 variáveis derivadas de cores-base), painel visual com
 ~40 variáveis editáveis (sliders/color pickers), preview de tema antes de
 aplicar (`ThemePreviewModal`), undo, export/import de tema, detecção de
-conflito com temas externos, re-aplicação reativa a mudanças de
+conflito com temas externos, realce de sintaxe no editor livre (overlay
+colorido atrás do textarea — tokenizador puro em `CssHighlight.ts`, com
+garantia testada de round-trip exato do texto; autocomplete Ctrl+Espaço e
+inserção pela referência continuam funcionando; realce pode ser
+ligado/desligado no próprio editor), re-aplicação reativa a mudanças de
 configuração e reset (o `<style>` injetado é limpo ao "Restaurar tudo").
-
-**Não implementado:** realce de sintaxe/autocomplete no editor livre (hoje
-é campo de texto puro; o Painel visual cobre a edição guiada).
 
 ## Módulo Auto-update — funcional
 
 **Funciona:** checagem manual e automática com throttle, canal estável/
 beta, comparação SemVer real (pré-lançamento é mais antigo que o release
 de mesmo número base), download de TODOS os assets antes de escrever
-qualquer um (falha de checksum no meio não deixa instalação pela metade),
-checksum SHA-256 quando o release declara, backup automático antes de
-sobrescrever, rollback com tratamento de falha (Notice + log), "Ignorar"
-persistindo a versão dispensada, mensagens de erro honestas.
+qualquer um (falha de checksum ou assinatura no meio não deixa instalação
+pela metade), checksum SHA-256 quando o release declara, verificação de
+assinatura GPG dos assets (OPT-IN em `SignatureUtils.ts`, regra pura
+testada): assets `.sig`/`.asc` verificados com o binário `gpg` num keyring
+temporário ISOLADO (nunca toca o keyring do usuário); verificação ligada
++ assinatura ausente + gpg indisponível ⇒ instalação ABORTA (falha
+fechada — habilitar cria a obrigação); sem assinatura no release e opção
+desligada ⇒ como sempre (checksum); o Diagnóstico reflete a ÚLTIMA
+verificação (verificada/reprovada/sem chave) e `validateSettings`
+bloqueia chave pública que não é armadura OpenPGP. Interoperabilidade com o BRAT: lê o
+data.json do BRAT (campo `pluginList`) e, se ele gerencia este plugin, o
+módulo CEdE o controle — sem checagem automática, sem comando e com aviso
+no painel e no Diagnóstico (duas ferramentas escrevendo main.js é corrida
+de escrita). Backup automático antes de sobrescrever, rollback com
+tratamento de falha (Notice + log), "Ignorar" persistindo a versão
+dispensada, mensagens de erro honestas.
 
-**Não implementado:** assinatura GPG dos assets; interoperabilidade formal
-com o fluxo do BRAT (documentado como alternativa, sem código específico).
-
-## Módulo Templates por pasta — funcional no fluxo principal
+## Módulo Templates por pasta — funcional
 
 **Funciona:** regras por pasta com herança e derivação automática de
 `thema` pela hierarquia, template aplicado sem quebrar o frontmatter,
@@ -106,15 +129,13 @@ com o fluxo do BRAT (documentado como alternativa, sem código específico).
 centralizada em `NoteStatus.ts`, testada contra o código real), movimentação
 para pasta Pendente por categoria com fallback, retorno automático ao
 completar, proteção anti-loop, histórico de versões de regras, painel no
-Lobby para criar/remover regras.
+Lobby para criar, editar e remover regras (formulário único de criação e
+edição, com dropdown "Herdar de (regra pai)" gravando `extendsRuleId` e
+trava contra ciclos de herança via `wouldCreateInheritanceLoop`), e seção
+"Sugestões de template" no painel consumindo as sugestões por similaridade
+(`pendingSuggestions`) com botões Aplicar/Dispensar.
 
-**Não implementado:** edição de regra existente pelo painel (hoje só criar
-ou remover — editar exige recriar); sugestão de template por similaridade
-emite evento mas não tem UI consumindo; validação de `allowedValues` por
-campo (o tipo existe, a checagem não usa); seletor de "regra pai" para
-herança no formulário.
-
-## Módulo Calendário — funcional no essencial
+## Módulo Calendário — funcional
 
 **Funciona:** grade clicável com navegação entre meses (‹ › e "Hoje",
 sem duplicar controles), indicadores por dia (nota existente, pendente,
@@ -124,9 +145,17 @@ sempre", lembretes com timer de 10s, nota vinculada aberta em segundo
 plano, vínculo por metadado (renomear/mover a nota não quebra), janela
 espontânea desligada por padrão (opt-in), listagem de templates a partir
 da pasta configurável, seletor filtrável de notas/pastas
-(`FilterSuggest.ts`).
-
-**Não implementado:** import `.ics`.
+(`FilterSuggest.ts`), importação de arquivos `.ics` (parser puro em
+`IcsParser.ts`, testado contra o código real): VEVENT → evento do projeto
+com dedupe por UID (importar o mesmo arquivo de novo substitui os eventos
+anteriores em vez de duplicar; eventos criados à mão ficam intactos),
+RRULE `FREQ=YEARLY` → recorrência anual, frequências sem suporte no modelo
+(MONTHLY, WEEKLY…) viram evento único COM aviso — nunca aproximação
+silenciosa —, .ics malformado mantém o painel aberto com Notice do
+motivo, e o reset nível "data" remove só os eventos importados
+(`ics:<uid>`), preservando os criados à mão (`evt-*`), e a última importação de .ics
+aparece no Diagnóstico (falha deixa o módulo não-saudável até a próxima
+boa).
 
 ## Módulo Notificações — funcional
 
@@ -134,19 +163,22 @@ da pasta configurável, seletor filtrável de notas/pastas
 `AudioContext`), 11 gatilhos documentados no manifest do módulo, regras
 globais (criação/renomeação/exclusão) ligadas de fábrica, modo
 não-perturbe por horário, histórico persistente dentro do painel com
-"Limpar histórico" e "marcar tudo como lido".
-
-**Não implementado:** agrupamento/filtros dentro da lista (hoje é
-cronológica simples).
+"Limpar histórico" e "marcar tudo como lido", filtro por tipo de gatilho
+(com contagens no dropdown) e agrupamento por dia (Hoje/Ontem/data por
+extenso) — regras puras em `NotificationList.ts`, testadas contra o código
+real, com preferências (filtro e agrupar por dia) persistidas na fatia do
+módulo; filtro de gatilho removido degrada para "Todas" em vez de esconder
+tudo.
 
 ## Módulo Histórico — funcional
 
 **Funciona:** módulo independente (não vive no núcleo), persistente entre
-sessões, filtro com autocomplete e rótulos em português, limite
+sessões, filtro com autocomplete e rótulos em português, busca por texto
+livre (substring em message/path, case-insensitive e sem acento —
+"reuniao" encontra "Reunião") combinável com o filtro de tipo (E lógico;
+regra pura em `HistoryFilter.ts`, testada contra o código real), limite
 configurável, integração com o dedupe da ponte de eventos (sem duplicar
 "Untitled" e criação).
-
-**Não implementado:** busca por texto livre (o filtro é por tipo/evento).
 
 ## Lobby — completo
 
@@ -160,8 +192,17 @@ aba de Histórico com filtro; aba de Ajuda; reset em 3 níveis com
 descrição honesta; ações rápidas funcionais (emitem eventos que os
 módulos escutam); toggles com navegação por teclado e `aria-label`.
 
-**Não implementado:** navegação 100% por teclado em todos os painéis;
-painéis são funcionais mas simples (sem drag-and-drop).
+Navegação por teclado em todos os controles: linhas da Central de Eventos
+(copiam o evento como JSON), dias do calendário (com aria-label descritivo),
+visões de semana/agenda, notas pendentes e referência de CSS têm `tabIndex`,
+`role`/`aria-label` e Enter/Espaço; abas internas movem o foco com ←/→
+(modo manual ARIA) e ativam com Enter/Espaço; foco visível padronizado.
+Reordenação dos módulos na barra lateral: arrastar pela alça ⠿ ou
+Alt+↑/Alt+↓ com a alça focada; ordem persistida em
+`settings.lobby.moduleOrder`, tolerante a módulos novos (entram no fim) e
+removidos (somem) — regras puras em `lobbyOrder.ts`, testadas; reordenar
+equivale a apresentação e NÃO muda quais módulos estão ligados
+(`enabledModules` intocado).
 
 ## Coisas deliberadamente fora do escopo
 
@@ -179,7 +220,7 @@ painéis são funcionais mas simples (sem drag-and-drop).
 
 ## Como continuar a partir daqui
 
-1. **Validar o runtime num vault real** — o que os 120 testes não cobrem:
+1. **Validar o runtime num vault real** — o que os 252 testes não cobrem:
    Lobby completo, reset em 3 níveis, servidor MCP respondendo a um cliente
    de verdade, calendário navegando meses, update/rollback.
 2. Pegar a lista de "não implementado" de **um módulo por vez**,

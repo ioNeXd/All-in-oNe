@@ -10,6 +10,8 @@ import type { HubSettings } from "../../core/types";
 import { obfuscate, deobfuscate } from "../../core/secureStore";
 import { createMcpServer, McpServerHandle } from "./server";
 import { pathMatchesFolder as pathMatches, collectWriteTargets } from "./WriteRules";
+import { negotiateToolsApiVersion, TOOLS_API_VERSION } from "./ToolsApiVersion";
+import { ensureVaultFolder } from "../../core/VaultPaths";
 import { cryptoRandomId } from "../../core/types";
 
 export interface McpModuleSettings {
@@ -64,10 +66,10 @@ export class McpModule implements HubModule {
 		description:
 			"Expõe o vault para clientes MCP (Claude Desktop, Cursor, etc.) enquanto o Obsidian estiver aberto.",
 		icon: "server",
-		version: "0.1.0",
+		version: "0.2.0",
 		contractVersion: "2.0.0",
 		desktopOnly: true,
-		emits: ["mcp:action", "mcp:server-started", "mcp:server-stopped"],
+		emits: ["mcp:action", "mcp:action-logged", "mcp:server-started", "mcp:server-stopped"],
 		listensTo: [],
 		settingsSchema: [
 			{ key: "port", label: "Porta", type: "number", default: MCP_DEFAULTS.port },
@@ -114,6 +116,7 @@ export class McpModule implements HubModule {
 				port: settings.port,
 				getToken: () => deobfuscate(this.readSettings().tokenObfuscated),
 				serverInfo: { name: "All iₙ oNe", version: this.manifest.version },
+				getToolsApiVersion: () => this.readSettings().toolsApiVersion,
 				handleToolCall: (toolName, args) => this.handleToolCall(toolName, args),
 			});
 			this.listeningPort = this.server.port;
@@ -413,6 +416,7 @@ export class McpModule implements HubModule {
 				port: settings.port,
 				getToken: () => deobfuscate(this.readSettings().tokenObfuscated),
 				serverInfo: { name: "All iₙ oNe", version: this.manifest.version },
+				getToolsApiVersion: () => this.readSettings().toolsApiVersion,
 				handleToolCall: (toolName, args) => this.handleToolCall(toolName, args),
 			});
 			this.listeningPort = this.server.port;
@@ -470,8 +474,26 @@ export class McpModule implements HubModule {
 				"mcp"
 			);
 			this.context?.log(`Ferramenta MCP executada: ${toolName}`, { path: args.path as string });
+			// Log de atividade DEDICADO do MCP (antes o módulo só aparecia no
+			// Histórico genérico via mcp:action). Cada ação executada emite o
+			// evento próprio com o resultado; o bus cuida da distribuição — o
+			// MCP não conhece quem escuta (o Histórico pode assinar no futuro
+			// sem este módulo saber).
+			this.context?.bus.emit(
+				"mcp:action-logged",
+				{ tool: toolName, path: args.path, dryRun, isWrite, result },
+				"mcp"
+			);
 			return { ok: true, result };
 		} catch (err) {
+			// Falha TAMBÉM entra no log de atividade: ação tentada e falhada é
+			// informação que o log precisa ter (base64 inválido, destino negado
+			// pelo vault etc.). Sem isto, o log contaria só os acertos.
+			this.context?.bus.emit(
+				"mcp:action-logged",
+				{ tool: toolName, path: args.path, dryRun, isWrite, error: String(err) },
+				"mcp"
+			);
 			return { ok: false, error: String(err) };
 		}
 	}
@@ -660,6 +682,47 @@ export class McpModule implements HubModule {
 					base64: Buffer.from(buffer).toString("base64"),
 				};
 			}
+			case "put_attachment": {
+				const path = normalizePath(String(args.path));
+				const bytes = decodeBase64(args.base64);
+				const existing = vault.getAbstractFileByPath(path);
+				if (existing instanceof TFileClass) {
+					// Sobrescrever: o Obsidian reescreve o arquivo inteiro — a fila
+					// serializa com qualquer outra escrita no mesmo caminho.
+					await write(path, () => vault.modifyBinary(existing as TFile, toArrayBuffer(bytes)));
+				} else {
+					// Criar: a pasta-pai pode não existir (o createBinary não cria
+					// pastas-pai — mesma armadilha do vault.createFolder).
+					const folder = path.substring(0, path.lastIndexOf("/"));
+					if (folder) await ensureVaultFolder(app, folder);
+					await write(path, () => vault.createBinary(path, toArrayBuffer(bytes)));
+				}
+				return { path, sizeBytes: bytes.byteLength, created: !(existing instanceof TFileClass) };
+			}
+			case "delete_attachment": {
+				const path = normalizePath(String(args.path));
+				const file = vault.getAbstractFileByPath(path);
+				if (!(file instanceof TFileClass)) throw new Error("Anexo não encontrado.");
+				if (file.extension === "md") {
+					// Rede de segurança: notas têm ferramenta própria (delete_note,
+					// que também vai para a lixeira). Apagar .md por aqui esconderia
+					// a intenção e poderia colidir com o Ciclo de Vida.
+					throw new Error("O caminho aponta para uma nota — use delete_note.");
+				}
+				await write(path, () => vault.trash(file as TFile, true)); // lixeira, nunca exclusão direta
+				return { path, deleted: true };
+			}
+			case "get_server_info": {
+				const settings = this.readSettings();
+				const negotiation = negotiateToolsApiVersion(undefined, settings.toolsApiVersion);
+				return {
+					server: { name: "All iₙ oNe", version: this.manifest.version },
+					toolsApiVersion: negotiation.version,
+					toolsApiLatest: TOOLS_API_VERSION,
+					noteCount: vault.getMarkdownFiles().length,
+					desktopOnly: this.manifest.desktopOnly,
+				};
+			}
 			case "split_note": {
 				// Divide a nota em várias, quebrando nos headings do nível indicado.
 				const path = normalizePath(String(args.path));
@@ -698,10 +761,17 @@ export class McpModule implements HubModule {
 				return { target, combined: paths.length };
 			}
 			case "dataview_query": {
-				// Só funciona se o plugin Dataview estiver instalado e habilitado.
+				// Só funciona se o plugin Dataview estiver instalado e habilitado —
+				// dependência EXTERNA, não implementável dentro do plugin (ver
+				// docs/STATUS.md). O erro aponta o caminho, em vez de só dizer "não".
 				// @ts-expect-error — plugins de terceiros não estão na tipagem oficial
 				const dataview = app.plugins?.plugins?.dataview?.api;
-				if (!dataview) throw new Error("Plugin Dataview não está instalado ou habilitado.");
+				if (!dataview)
+					throw new Error(
+						"Ferramenta dataview_query exige o plugin Dataview instalado e habilitado no vault " +
+							"(Community plugins → Dataview). Instale-o e chame de novo — esta é uma dependência " +
+							"externa, não um recurso do All iₙ oNe."
+					);
 				const result = await dataview.query(String(args.query ?? ""));
 				return { result };
 			}
@@ -724,6 +794,8 @@ const WRITE_TOOLS = new Set([
 	"patch_note",
 	"split_note",
 	"combine_notes",
+	"put_attachment",
+	"delete_attachment",
 ]);
 
 function splitLines(raw: string): string[] {
@@ -731,6 +803,38 @@ function splitLines(raw: string): string[] {
 		.split("\n")
 		.map((v) => v.trim())
 		.filter(Boolean);
+}
+
+/**
+ * Decodifica base64 de forma ESTRICTA: `atob`/`Buffer.from(..., "base64")`
+ * toleram qualquer entrada (ignoram caracteres inválidos sem reclamar), o
+ * que deixaria um base64 truncado ou lixo virar um binário corrompido no
+ * vault — gravado com sucesso e sem erro nenhum. Aqui a falha é explícita
+ * e ANTES de tocar o vault.
+ */
+export function decodeBase64(value: unknown): Buffer {
+	if (typeof value !== "string" || value.length === 0) {
+		throw new Error("Campo base64 vazio ou ausente.");
+	}
+	if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value)) {
+		throw new Error("Campo base64 inválido: use o conteúdo do anexo codificado em base64.");
+	}
+	if (value.length % 4 !== 0) {
+		throw new Error("Campo base64 inválido: o comprimento não é múltiplo de 4 (conteúdo truncado?).");
+	}
+	return Buffer.from(value, "base64");
+}
+
+/**
+ * A tipagem oficial do Obsidian pede `ArrayBuffer` em createBinary/
+ * modifyBinary (e `readBinary` devolve `ArrayBuffer`): Buffer é um Uint8Array
+ * com buffer próprio, mas os tipos não se cruzam. Conversão na fronteira —
+ * byte a byte idêntica.
+ */
+function toArrayBuffer(buffer: Buffer): ArrayBuffer {
+	const out = new ArrayBuffer(buffer.byteLength);
+	new Uint8Array(out).set(buffer);
+	return out;
 }
 
 

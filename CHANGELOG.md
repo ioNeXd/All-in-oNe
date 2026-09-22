@@ -5,6 +5,170 @@ formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
 o versionamento segue [SemVer](https://semver.org/lang/pt-BR/), conforme
 `docs/ARCHITECTURE.md`.
 
+## [Não lançado]
+
+## [0.2.0] — 2026-09-22
+
+### Adicionado
+
+**Lobby**
+
+- Navegação por teclado em todos os controles: linhas da Central de
+  Eventos (copiam o evento como JSON), dias do calendário, visões de
+  semana/agenda, notas pendentes e referência de CSS agora têm tabIndex,
+  role/aria-label e Enter/Espaço; abas internas movem o foco com ←/→
+  (modo manual ARIA) e ativam com Enter/Espaço; foco visível padronizado
+  (`ione-hub-focusable`)
+- Reordenação dos módulos na barra lateral: arrastar pela alça ⠿ ou
+  Alt+↑/Alt+↓ com a alça focada; ordem persistida em
+  `settings.lobby.moduleOrder` (campo novo opcional, sem migração de
+  schema), tolerante a módulos novos/removidos — regras puras em
+  `lobbyOrder.ts`, com suíte própria. Reordenar não muda quais módulos
+  estão ligados
+
+**Módulo Histórico**
+
+- Consumidor real do log dedicado do MCP: o Histórico escuta
+  `mcp:action-logged` (TRACKED_EVENTS e listensTo do manifest) e registra
+  cada ação executada com o DESFECHO — "— ok", "— simulado (dry-run)" ou
+  "— FALHOU: <motivo>" — fechando o circuito emitir→consumir (antes, o
+  evento era emitido e ninguém ouvia)
+- Busca por texto livre no registro de atividade: substring em message e
+  path, case-insensitive e sem acento ("reuniao" encontra "Reunião"),
+  combinável com o filtro por tipo de evento (E lógico). Regra pura em
+  `HistoryFilter.ts` (filtro + normalização, testada contra o código
+  real). A lista re-renderiza com debounce sem recarregar o painel — o
+  foco não salta do campo no meio da digitação — e o estado vazio agora
+  distingue "nada registrado" de "nenhuma entrada corresponde aos filtros"
+
+**Módulo Notificações**
+
+- Filtro por tipo de gatilho na central de notificações: dropdown com
+  contagem por tipo; gatilhos sem ocorrências não poluem a lista de
+  opções, mas o filtro PERSISTIDO entra mesmo com zero (a preferência
+  salva não some do controle); gatilho removido degrada para "Todas" em
+  vez de devolver lista vazia sem explicação
+- Agrupamento da central por dia (Hoje / Ontem / data por extenso em
+  pt-BR), com toggle para voltar à lista cronológica; regras puras em
+  `NotificationList.ts` (filtro, contagem, agrupamento com `now`
+  injetável — determinístico em teste) e preferências `viewFilter` /
+  `groupByDay` persistidas na fatia do módulo (default novo, sem
+  migração de schema)
+
+**Módulo Estilos**
+
+- Realce de sintaxe no editor livre de CSS: overlay colorido atrás do
+  textarea (texto do input transparente, caret e seleção visíveis), com
+  tokenizador puro em `CssHighlight.ts` — propriedade testada de round-trip
+  EXATO (a concatenação dos tokens reproduz o texto byte a byte, senão o
+  overlay desalinha do caret), incluindo strings com `{ : ; }`, comentários
+  multi-linha e não fechados, tabs e unicode. Contexto léxico: fora de
+  chaves `palavra:` é seletor (`a:hover`), dentro é propriedade
+  (`color: red`); parênteses de `@media()`/`@supports()` contam como
+  contexto de valor. Sem dependência nova (o `@codemirror/lang-css` não
+  está disponível no bundle do Obsidian); autocomplete Ctrl+Espaço,
+  inserção pela referência, undo, preview, export/import e o Painel visual
+  seguem intactos; o realce pode ser ligado/desligado no próprio editor
+
+**Módulo Calendário**
+
+- Importação de arquivos `.ics` (iCalendar, RFC 5545): parser puro em
+  `IcsParser.ts` (sem I/O de vault, com suíte própria) converte VEVENT →
+  `CalendarEvent` — SUMMARY/DESCRIPTION (com desdobramento de linhas longas
+  e escapes), DTSTART em data, data-hora local, UTC (Z) e com TZID;
+  RRULE `FREQ=YEARLY` mapeia para a recorrência anual do modelo;
+  frequências não representáveis (MONTHLY, WEEKLY, DAILY…) viram evento
+  único com aviso explícito, em vez de aproximação silenciosa
+- Botão "Importar .ics" na aba de Eventos: falha de leitura/validação
+  mantém o painel aberto com Notice do motivo; eventos importados entram
+  na fatia de settings via `updateSettings`, mesclados por UID — importar
+  o mesmo arquivo de novo substitui os eventos anteriores (dedupe por id
+  determinístico `ics:<uid>`) e eventos criados à mão ficam intactos
+- Reset de dados do Calendário (`onResetData`): "Restaurar tudo → Data"
+  remove os eventos IMPORTADOS de .ics (dado derivado de um arquivo —
+  refazer é um clique) e preserva os criados à mão (configuração do
+  usuário), com a fronteira decidida pelo prefixo do id (`ics:` × `evt-`)
+- Diagnóstico: o resumo de saúde do Calendário reflete a ÚLTIMA
+  importação de .ics — arquivo malformado deixa o módulo "não-saudável"
+  até a próxima importação bem-sucedida, em vez de sempre "ok"
+
+**Módulo Auto-update**
+
+- Verificação de assinatura GPG dos assets (opt-in, desligada de fábrica):
+  quando o release publica `.sig`/`.asc`, a assinatura é verificada com o
+  binário `gpg` do sistema contra a chave pública configurada pelo usuário
+  (colada no painel, armazenada apenas no vault local), num keyring
+  TEMPORÁRIO isolado — o keyring do usuário nunca é tocado. Falha fechada:
+  com a verificação ligada, release sem assinatura ou gpg indisponível
+  ABORTA a instalação com Notice honesto (mesma filosofia do checksum
+  SHA-256). Regras de decisão/parse em `SignatureUtils.ts` (puro, testado):
+  só linhas de status `[GNUPG:]` decidem (saída humana varia por locale);
+  `NO_PUBKEY` é falha, não sucesso; `GOODSIG`+`BADSIG` juntos = inválida
+- Diagnóstico reflete o estado da ÚLTIMA verificação de assinatura
+  (verificada / reprovada / sem chave configurada) em vez de sempre "ok"
+- `validateSettings` bloqueia na gravação uma chave pública que não
+  parece armadura OpenPGP (erro de colagem vira issue de validação, não
+  falha silenciosa na hora de instalar)
+- Interoperabilidade formal com o BRAT: o módulo detecta se o
+  TfTHacker/obsidian42-brat gerencia este plugin (lê `pluginList` do
+  data.json do BRAT) e, em caso positivo, CEdE o controle de atualização —
+  sem checagem automática, sem comando nativo e com aviso no painel e no
+  Diagnóstico. Instalar via BRAT deixa de competir (e correr) com o
+  auto-update próprio
+
+**Módulo MCP**
+
+- `put_attachment`: cria ou sobrescreve anexos binários (conteúdo em
+  base64 com validação estrita — base64 truncado/inválido falha ANTES de
+  tocar o vault, em vez de virar binário corrompido); cria pastas-pai que
+  não existem; toda escrita pela fila do núcleo, respeitando readOnly,
+  dry-run e as permissões por pasta (`WriteRules`)
+- `delete_attachment`: move o anexo para a lixeira (nunca exclusão
+  direta) e recusa caminhos `.md` apontando para `delete_note`
+- `get_server_info`: versão do plugin, versão da API de ferramentas e
+  contagens do vault
+- Log de atividade dedicado do MCP: cada ação executada emite
+  `mcp:action-logged` no bus (`{ tool, path, dryRun, isWrite, result }`) —
+  falhas também entram no log, com `error` em vez de `result`. Sem
+  acoplamento com o módulo Histórico: apenas emissão declarada no manifest
+- Negociação formal da versão da API de ferramentas: o campo
+  `toolsApiVersion` (antes inerte) agora é exposto no `initialize` e
+  negociado — cliente pedindo major maior que o suportado é rejeitado no
+  handshake com erro claro e código `TOOLS_API_INCOMPATIBLE`; major menor
+  ou igual é aceito (minor/patch além do suportado são tolerados — falha
+  por ferramenta, nunca no handshake). Regra pura em
+  `mcp/ToolsApiVersion.ts`, com suíte própria
+- Ferramentas novas declaradas no `tools/list`: `put_attachment`,
+  `delete_attachment`, `get_server_info`
+
+### Decisões de design documentadas
+
+- **Assinatura GPG opt-in, com chave pública fornecida pelo usuário**
+  (colada no painel, guardada apenas no vault local) — decidido assim
+  porque o projeto ainda não tem chave de assinatura própria. Quando os
+  releases passarem a sair assinados estavelmente pelo workflow, a chave
+  pública do projeto deve ser EMBUTIDA no plugin (decisão de superfície
+  de segurança, na mesma linha do "repo de update fixo") e o campo
+  configurável vira ponte/exceção. Já é parte da decisão: verificação
+  ligada cria a obrigação — falha fechada, nunca "verificar" de mentira
+
+### Corrigido
+
+- Classe `.ione-hub-notification-list__day` (cabeçalho dos grupos de dia
+  do agrupamento da central de Notificações) agora estilizada no
+  `styles.css` — era usada pelo painel mas não tinha estilo, e o
+  `styles.css` é um dos três assets do release
+- `dataview_query`: erro de pré-requisito agora aponta o caminho
+  (instalar/habilitar o plugin Dataview) e declara que é dependência
+  externa, em vez de um "não" seco
+- `docs/STATUS.md` atualizado para refletir o código real: a seção do
+  módulo Templates por pasta descrevia como "não implementado" recursos
+  que já existem (edição de regra pelo painel, UI consumindo as sugestões
+  por similaridade, seletor de regra pai para herança) e citava uma
+  validação de `allowedValues` que nunca existiu; a seção do módulo MCP
+  agora distingue o que falta de anexos (upload/edição) do que já existe
+  (leitura/listagem via `list_attachments` e `get_attachment`).
+
 > **Nota sobre esta entrada.** A v0.1.0 é o **ponto de partida oficial** do
 > projeto: a linha de base abaixo descreve o plugin como ele existe hoje,
 > após um ciclo intenso de desenvolvimento interno em que o código foi
@@ -271,6 +435,10 @@ de base (as principais, para registro):
   `as any`), mas o **runtime real no Obsidian** é o próximo passinho:
   validar Lobby, reset em 3 níveis, servidor MCP respondendo e calendário
   num vault de verdade.
+- *(nota da v0.2.0)* A limitação "painéis simples, sem drag-and-drop e sem
+  navegação 100% por teclado" citada nesta época foi resolvida nesta
+  versão (reordenação por arrastar/Alt+setas e teclado em todos os
+  controles) — mantida aqui apenas como registro histórico.
 - Intercepção do menu nativo de renomear/mover/excluir usa um campo interno
   do `Menu` (técnica comum na comunidade); pode parar de funcionar num
   update futuro do Obsidian — nesse caso os itens nativos apenas voltam a
@@ -280,4 +448,5 @@ de base (as principais, para registro):
   limitação de plataforma: não existe gancho cancelável "antes de
   renomear".
 
+[0.2.0]: https://github.com/ioNeXd/All-in-oNe/releases/tag/0.2.0
 [0.1.0]: https://github.com/ioNeXd/All-in-oNe/releases/tag/0.1.0

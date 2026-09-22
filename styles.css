@@ -211,6 +211,15 @@
 	font-size: var(--font-ui-small);
 }
 
+/* Cabeçalho dos grupos de dia (Hoje/Ontem/data) no agrupamento. */
+.ione-hub-notification-list__day {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	margin: var(--size-4-2) 0 var(--size-4-1);
+}
+
 .ione-hub-notification-list__row.is-unread {
 	border-left: 3px solid var(--interactive-accent);
 	padding-left: var(--size-4-2);
@@ -243,6 +252,32 @@
 .ione-hub-lobby__history-row:focus-visible {
 	outline: 2px solid var(--interactive-accent);
 	outline-offset: 2px;
+}
+
+/* Qualquer linha interativa do plugin (helper makeInteractiveRow e linhas
+   focáveis dos módulos) recebe o mesmo tratamento de foco visível. */
+.ione-hub-focusable:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
+/* ---- Reordenação de módulos: drag-and-drop e teclado ---- */
+.ione-hub-lobby__drag-handle {
+	cursor: grab;
+	color: var(--text-faint);
+}
+
+.ione-hub-lobby__drag-handle:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 1px;
+}
+
+.ione-hub-lobby__nav-item.is-dragging {
+	opacity: 0.45;
+}
+
+.ione-hub-lobby__nav-item.is-drop-target {
+	box-shadow: inset 0 3px 0 var(--interactive-accent);
 }
 
 /* ---- Estilos: autocomplete e referência ---- */
@@ -395,6 +430,70 @@
 	background: var(--background-primary-alt, var(--background-primary));
 	color: var(--text-normal);
 }
+
+/*
+ * Realce de sintaxe por overlay: o wrapper posiciona o <pre> colorizado
+ * ATRÁS do textarea, cujo texto vira transparente — o usuário digita no
+ * textarea e vê as cores do overlay. As duas camadas compartilham a classe
+ * .ione-hub-styles__editor (mesma fonte/padding/borda); qualquer diferença
+ * de métrica desalinha cor e caret, então nada de margin/scroll extra em
+ * uma das camadas.
+ */
+.ione-hub-styles__editor-wrap {
+	position: relative;
+	/* o textarea continua responsivo pelo resize vertical dele */
+}
+.ione-hub-styles__overlay {
+	position: absolute;
+	inset: 0;
+	height: 100%;
+	margin: 0;
+	overflow: hidden;
+	white-space: pre-wrap;
+	word-break: break-word; /* mesma quebra de linha longa do textarea */
+	z-index: 0;
+	pointer-events: none; /* cliques/seleção atravessam para o textarea */
+}
+.ione-hub-styles__overlay--off .tok-comment { color: inherit !important; }
+.ione-hub-styles__overlay--off .tok-selector,
+.ione-hub-styles__overlay--off .tok-property,
+.ione-hub-styles__overlay--off .tok-value,
+.ione-hub-styles__overlay--off .tok-variable,
+.ione-hub-styles__overlay--off .tok-string,
+.ione-hub-styles__overlay--off .tok-atrule,
+.ione-hub-styles__overlay--off .tok-punct {
+	color: inherit !important;
+}
+
+/* Linha lógica: display block faz o \n final do textarea virar quebra real. */
+.ione-hub-styles__line {
+	display: block;
+	min-height: 1em;
+}
+
+/* Input na frente, com texto transparente mas caret e seleção visíveis. */
+textarea.ione-hub-styles__editor-input {
+	position: relative;
+	z-index: 1;
+	color: transparent;
+	caret-color: var(--text-normal);
+	background: transparent;
+}
+textarea.ione-hub-styles__editor-input::selection {
+	background: var(--text-selection, rgba(59, 109, 196, 0.4));
+	color: transparent;
+}
+
+/* Cores de token — variáveis do próprio Obsidian, legíveis nos dois temas. */
+.ione-hub-styles__overlay .tok-comment { color: var(--text-faint); font-style: italic; }
+.ione-hub-styles__overlay .tok-property { color: var(--color-cyan, #56b6c2); }
+.ione-hub-styles__overlay .tok-value { color: var(--color-green, #98c379); }
+.ione-hub-styles__overlay .tok-string { color: var(--color-orange, #d19a66); }
+.ione-hub-styles__overlay .tok-atrule { color: var(--color-purple, #c678dd); }
+.ione-hub-styles__overlay .tok-variable { color: var(--color-blue, #61afef); font-weight: 600; }
+.ione-hub-styles__overlay .tok-selector { color: var(--color-yellow, #e5c07b); }
+.ione-hub-styles__overlay .tok-punct { color: var(--text-muted); }
+.ione-hub-styles__overlay .tok-plain { color: var(--text-normal); }
 
 /* ---- Módulo desligado ---- */
 .ione-hub-lobby__disabled-box {
