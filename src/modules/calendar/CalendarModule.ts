@@ -1297,6 +1297,18 @@ class EventEditorModal extends Modal {
 		if (!this.draft.title.trim()) errors.push("Dê um título ao evento.");
 		if (!Number.isInteger(this.draft.day) || this.draft.day < 1 || this.draft.day > 31) {
 			errors.push("Dia inválido: use um número entre 1 e 31.");
+		} else {
+			// Validação real de calendário: dia vs. mês/ano.
+			// Para "once", usa o ano informado; para "yearly", usa um ano bissexto
+			// fictício para que 29/02 passe (repete todo ano, incluindo bissextos).
+			const testYear = this.draft.recurrence === "once" ? (this.draft.year ?? 2024) : 2024;
+			const daysInMonth = new Date(testYear, this.draft.month, 0).getDate();
+			if (this.draft.day > daysInMonth) {
+				errors.push(
+					`Dia ${this.draft.day} não existe em ${MONTH_NAMES[this.draft.month - 1]} ` +
+					`(${daysInMonth} dias no máximo).`
+				);
+			}
 		}
 		if (this.draft.recurrence === "once") {
 			const year = this.draft.year;
