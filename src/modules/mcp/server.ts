@@ -22,7 +22,6 @@ import { AuthThrottle, identityOf } from "./AuthThrottle";
  * Funciona com Claude Desktop, Cursor e Claude Code. Se o objetivo for
  * servidor MCP genérico, estenda o roteamento em handleRequest mantendo o
  * mesmo formato JSON-RPC.
- * resposta JSON-RPC.
  */
 
 export interface McpServerOptions {
