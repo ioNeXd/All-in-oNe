@@ -294,12 +294,27 @@ export class HubCore {
 	}
 
 	getHealthSnapshot(): { moduleId: ModuleId; ok: boolean; summary: string }[] {
-		return this.getModules().map((m) => {
+		const modules = this.getModules().map((m) => {
 			if (!this.isModuleEnabled(m.manifest.id)) {
 				return { moduleId: m.manifest.id, ok: true, summary: "Desligado" };
 			}
 			const status = m.getHealthStatus?.() ?? { ok: true, summary: "OK" };
 			return { moduleId: m.manifest.id, ...status };
 		});
+
+		// Estado de persistência: degradado quando uma gravação falhou
+		// (disco potencialmente defasado). Mostrado no diagnóstico como
+		// item separado — não é módulo, mas é saúde do sistema.
+		if (this.settings.persistenceDegraded) {
+			modules.push({
+				moduleId: "persist" as ModuleId,
+				ok: false,
+				summary: this.settings.lastPersistenceError
+					? `Persistência degradada: ${this.settings.lastPersistenceError}`
+					: "Persistência degradada — última gravação pode ter falhado",
+			});
+		}
+
+		return modules;
 	}
 }

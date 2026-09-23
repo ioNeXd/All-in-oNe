@@ -46,6 +46,14 @@ export class SettingsManager {
 	 * dois eventos quase simultâneos são o caso comum, não a exceção.
 	 */
 	private writeQueue: Promise<unknown> = Promise.resolve();
+	/**
+	 * Estado de persistência degradada: quando uma gravação falha, o
+	 * writeQueue absorve o erro (para a fila não quebrar), mas o sistema
+	 * precisa saber que o disco pode estar defasado. Resetado a cada
+	 * gravação bem-sucedida.
+	 */
+	persistenceDegraded = false;
+	lastPersistenceError?: string;
 
 	/**
 	 * Persistência SPLIT (opcional): quando presente, as fatias dos módulos
@@ -213,8 +221,14 @@ export class SettingsManager {
 		// Enfileira APENAS a persistência: mesmo que o persist de um save
 		// anterior esteja lento, este save grava DEPOIS dele — o disco sempre
 		// termina com a última versão aceita.
-		const operation = this.writeQueue.then(() => this.persistAll(next));
-		this.writeQueue = operation.catch(() => undefined); // falha não quebra a fila para os próximos
+		const operation = this.writeQueue.then(() => this.persistAll(next)).then(() => {
+			this.persistenceDegraded = false;
+			this.lastPersistenceError = undefined;
+		});
+		this.writeQueue = operation.catch((err) => {
+			this.persistenceDegraded = true;
+			this.lastPersistenceError = err instanceof Error ? err.message : String(err);
+		});
 		await operation;
 		return [];
 	}
