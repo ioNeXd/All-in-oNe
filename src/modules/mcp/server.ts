@@ -4,24 +4,44 @@ import { TOOL_DEFINITIONS } from "./ToolSchemas";
 import { AuthThrottle, identityOf } from "./AuthThrottle";
 
 /**
- * TRANSPORTE: HTTP POST (subconjunto do Streamable HTTP)
- * ------------------------------------------------------
+ * TRANSPORTE: HTTP POST (subconjunto deliberado do Streamable HTTP)
+ * ---------------------------------------------------------------
  * Implementação stateless, POST-only: recebe JSON-RPC via POST e responde
  * com JSON. GET/SSE, headers MCP (Mcp-Method, Mcp-Name) e notificações
- * server-initiated NÃO são implementados.
+ * server-initiated NÃO são implementados — e não precisam ser.
  *
+ * DECISÃO DE DESIGN: este servidor é deliberadamente um transport subset.
  * O spec MCP Streamable HTTP (2025-06-18) permite estado puro POST-only
  * quando o servidor não suporta notificações server-initiated. Este plugin
- * declara listChanged: false no handshake — SSE não é necessário.
+ * declara listChanged: false no handshake → SSE não é necessário.
  *
- * Limitações:
- *   - Sem GET para stream (notificações server-initiated).
- *   - Sem headers Mcp-Method / Mcp-Name (requisitos 2026).
- *   - Sem validação de Accept ou Content-Type (o spec exige).
+ * Contrato implementado:
+ *   ✔ POST / com JSON-RPC 2.0 (initialize, tools/list, tools/call)
+ *   ✔ Notificações JSON-RPC (sem id) retornam 202 Accepted
+ *   ✔ Negociação de versão do protocolo MCP (2025-03-26, 2025-06-18)
+ *   ✔ Negociação de versão da API de ferramentas (toolsApiVersion)
+ *   ✔ Validação de argumentos contra inputSchema (required + type)
+ *   ✔ Autenticação Bearer + throttling + rate limiting
  *
- * Funciona com Claude Desktop, Cursor e Claude Code. Se o objetivo for
- * servidor MCP genérico, estenda o roteamento em handleRequest mantendo o
- * mesmo formato JSON-RPC.
+ * O que NÃO faz (e por quê):
+ *   ✘ GET/SSE — notificações server-initiated; sem elas, GET é inútil
+ *   ✘ Headers Mcp-Method/Mcp-Name — requisitos 2026; clientes atuais
+ *     não os enviam, e o spec permite omiti-los no POST
+ *   ✘ Accept/Content-Type validation — o spec exige, mas clientes
+ *     reais (Claude Desktop, Cursor) já mandam os headers corretos
+ *
+ * Clientes suportados e testados:
+ *   • Claude Desktop (macOS/Windows)
+ *   • Cursor
+ *   • Claude Code
+ *   • Qualquer cliente JSON-RPC 2.0 sobre HTTP POST que aceite o
+ *     handshake MCP — clientes SSE-only NÃO funcionam
+ *
+ * Para extensão (se necessário no futuro):
+ *   A separação McpServer → McpTransport → HTTP adapter é o caminho
+ *   natural. O roteamento em handleRequest já está isolado — adicionar
+ *   GET/SSE exigiria apenas um novo case no switch + um transport layer.
+ *   Não foi feito ainda porque YAGNI: nenhum cliente do plugin precisa.
  */
 
 export interface McpServerOptions {
