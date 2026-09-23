@@ -12,6 +12,13 @@
  * rodem em sequência, nunca em paralelo — sem bloquear operações em arquivos
  * diferentes, que continuam concorrentes normalmente.
  *
+ * Limitação conhecida: a serialização é por path, não por identidade do
+ * arquivo. Operações que alteram o caminho (rename/move A→B) e operações
+ * concorrentes em B usam chaves diferentes e PODEM executar em paralelo.
+ * Para o escopo atual (MCP + templates + histórico), isso é aceitável;
+ * se no futuro for necessário, a extensão seria um renameLock: Set<string>
+ * para paths de destino durante renames.
+ *
  * Uso: `await fileWriteQueue.run(path, () => app.vault.modify(file, novoConteudo))`
  */
 export class FileWriteQueue {
