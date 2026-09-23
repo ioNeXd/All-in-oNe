@@ -54,7 +54,17 @@ export const AUTOUPDATE_DEFAULTS: AutoUpdateSettings = {
 	channel: "stable",
 	lastCheckedAt: 0,
 	checkIntervalMs: 1000 * 60 * 60 * 6, // checa no máximo a cada 6h automaticamente
-	verifySignature: false, // opt-in — sem isso, proteção = checksum do release
+	/**
+	 * Verificação de assinatura GPG dos assets. Quando desligada,
+	 * a única proteção contra release comprometido é HTTPS + checksum
+	 * publicado no próprio release — o que NÃO é âncora criptográfica
+	 * independente (atacante que controla o release atualiza asset +
+	 * checksum juntos). A assinatura GPG resolve isso: a chave privada
+	 * que assina não está no canal de release, então o checksum sozinho
+	 * não basta pra forçar a verificação. Mantenha ligado para uso
+	 * em produção.
+	 */
+	verifySignature: false,
 };
 
 interface GitHubRelease {
