@@ -831,7 +831,7 @@ export class CalendarModule implements HubModule {
 
 	async addEvent(event: Omit<CalendarEvent, "id">): Promise<void> {
 		const settings = this.readSettings();
-		const full: CalendarEvent = { ...event, id: `evt-${randomId()}` };
+		const full: CalendarEvent = { ...event, id: `evt-${randomId()}`, source: "manual" };
 		await this.context?.updateSettings({ events: [...settings.events, full] });
 		this.scheduleNextCheck();
 	}
@@ -983,7 +983,7 @@ export class CalendarModule implements HubModule {
 	 */
 	onResetData(): Promise<void> {
 		const settings = this.readSettings();
-		const manual = settings.events.filter((e) => !e.id.startsWith("ics:"));
+		const manual = settings.events.filter((e) => e.source === "manual" || !e.source);
 		return (this.context?.updateSettings({ events: manual }) ?? Promise.resolve([])).then(
 			() => this.scheduleNextCheck()
 		);

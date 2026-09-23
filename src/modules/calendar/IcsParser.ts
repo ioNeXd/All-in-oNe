@@ -243,6 +243,7 @@ function toCalendarEvent(raw: RawIcsEvent, index: number): { event?: CalendarEve
 		month: d.getMonth() + 1,
 		time: raw.dtstart.allDay ? undefined : `${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
 		reminder: true,
+		source: "ics",
 	};
 
 	// RRULE: YEARLY é o único mapeável direto ao modelo atual. Outras

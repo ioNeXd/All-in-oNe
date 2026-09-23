@@ -157,8 +157,8 @@ describe("onResetData do Calendário — dados × configuração", () => {
 
 	it("limpa eventos importados (ics:) e preserva os criados à mão (evt-)", async () => {
 		const { module, updateSettings, slice } = setup([
-			{ id: "ics:abc@x", title: "Do calendário", description: "", recurrence: "once", day: 1, month: 1, reminder: false },
-			{ id: "evt-manual", title: "Manual", description: "", recurrence: "yearly", day: 2, month: 1, reminder: true },
+			{ id: "ics:abc@x", source: "ics", title: "Do calendário", description: "", recurrence: "once", day: 1, month: 1, reminder: false },
+			{ id: "evt-manual", source: "manual", title: "Manual", description: "", recurrence: "yearly", day: 2, month: 1, reminder: true },
 		]);
 		await module.onResetData();
 		expect(updateSettings).toHaveBeenCalledTimes(1);
@@ -167,7 +167,7 @@ describe("onResetData do Calendário — dados × configuração", () => {
 
 	it("com só eventos importados, a fatia fica vazia", async () => {
 		const { module, slice } = setup([
-			{ id: "ics:only@x", title: "X", description: "", recurrence: "once", day: 3, month: 1, reminder: false },
+			{ id: "ics:only@x", source: "ics", title: "X", description: "", recurrence: "once", day: 3, month: 1, reminder: false },
 		]);
 		await module.onResetData();
 		expect(slice.events).toEqual([]);

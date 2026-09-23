@@ -28,6 +28,12 @@ export interface CalendarEvent {
 	noteRefId?: string;
 	/** Ano em que já disparou — evita repetir no mesmo dia. */
 	lastFiredYear?: number;
+	/**
+	 * Origem do evento — centraliza a política de reset (antes acoplada
+	 * ao prefixo do id: evt-* vs ics:*). Ausente = "manual" (compat
+	 * com dados antigos que não tinham o campo).
+	 */
+	source?: "manual" | "ics";
 }
 
 export const MONTH_NAMES = [

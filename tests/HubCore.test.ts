@@ -372,6 +372,7 @@ describe("HubCore — reset em 3 níveis (escadinha real)", () => {
 			events: [
 				{
 					id: "ics:reuniao-anual@exemplo",
+					source: "ics",
 					title: "Reunião importada",
 					description: "",
 					recurrence: "yearly",
@@ -381,6 +382,7 @@ describe("HubCore — reset em 3 níveis (escadinha real)", () => {
 				},
 				{
 					id: "evt-abc123",
+					source: "manual",
 					title: "Aniversário criado à mão",
 					description: "",
 					recurrence: "yearly",
