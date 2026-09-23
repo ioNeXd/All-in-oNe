@@ -75,7 +75,7 @@ export class SettingsManager {
 
 
 	async init(): Promise<HubSettings> {
-		const loaded = await this.load();
+		const loaded = this.split ? await this.split.loadMain() : await this.load();
 		if (!loaded) {
 			this.current = createDefaultSettings();
 			await this.persistAll(this.current);
