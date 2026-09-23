@@ -48,8 +48,10 @@ export interface McpServerHandle {
 	port: number;
 }
 
-/** Versão mais recente do protocolo MCP que este servidor entende. */
-const LATEST_PROTOCOL_VERSION = "2025-06-18";
+/** Versões do protocolo MCP que este servidor implementa de fato. */
+const SUPPORTED_PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18"] as const;
+const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[SUPPORTED_PROTOCOL_VERSIONS.length - 1];
+const PROTOCOL_VERSION_INCOMPATIBLE = "PROTOCOL_VERSION_INCOMPATIBLE";
 
 /** Erro enviado ao cliente quando a negociação de versão da API rejeita o pedido. */
 export const TOOLS_API_INCOMPATIBLE = "TOOLS_API_INCOMPATIBLE";
@@ -199,28 +201,48 @@ async function handleRequest(
 	switch (message.method) {
 		case "initialize": {
 			// Handshake MCP: clientes reais enviam isto ANTES de tools/list — sem
-			// responder, a conexão morre no primeiro passo. A versão do PROTOCOLO
-			// pedida é ecoada (nosso conjunto tools/* é estável entre versões do
-			// protocolo); sem pedido, a mais recente que este servidor fala.
-			// Em paralelo, a versão da API DE FERRAMENTAS é negociada: cliente
-			// pedindo major além do suportado é rejeitado aqui, no handshake,
-			// com erro claro — nunca no meio de uma chamada de ferramenta.
+			// responder, a conexão morre no primeiro passo. Versão do protocolo:
+			// só aceita versões que o servidor implementa; rejeita com erro claro
+			// se o cliente pedir uma versão desconhecida.
 			const requested = message.params?.protocolVersion;
 			const requestedToolsApi =
 				typeof message.params?.toolsApiVersion === "string"
 					? (message.params.toolsApiVersion as string)
 					: undefined;
+
+			// Negociação de versão do protocolo: sem pedido, usa a mais recente.
+			// Com pedido, aceita só o que implementamos — rejeita versão desconhecida.
+			const protocolVersion =
+				typeof requested !== "string" || !requested
+					? LATEST_PROTOCOL_VERSION
+					: (SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(requested)
+						? requested
+						: undefined;
+			if (!protocolVersion) {
+				respondError(
+					res,
+					message.id,
+					`Versão do protocolo incompatível: ${String(requested ?? "(nenhuma)")}. ` +
+						`Suportadas: ${SUPPORTED_PROTOCOL_VERSIONS.join(", ")}.`,
+					{
+						code: PROTOCOL_VERSION_INCOMPATIBLE,
+						jsonRpcCode: JSONRPC_ERRORS.INVALID_PARAMS,
+					}
+				);
+				return;
+			}
+
+			// Negociação de versão da API de ferramentas.
 			const negotiation = negotiateToolsApiVersion(requestedToolsApi, options.getToolsApiVersion());
 			if (!negotiation.compatible) {
 				respondError(res, message.id, negotiation.reason ?? "Versão da API de ferramentas incompatível.", {
 					code: TOOLS_API_INCOMPATIBLE,
-					// Método EXISTE; os argumentos é que são inaceitáveis:
 					jsonRpcCode: JSONRPC_ERRORS.INVALID_PARAMS,
 				});
 				return;
 			}
 			respond(res, message.id, {
-				protocolVersion: typeof requested === "string" && requested ? requested : LATEST_PROTOCOL_VERSION,
+				protocolVersion,
 				capabilities: { tools: { listChanged: false } },
 				serverInfo: options.serverInfo,
 				toolsApiVersion: negotiation.version,
@@ -234,6 +256,20 @@ async function handleRequest(
 		case "tools/call": {
 			const toolName = String(message.params?.name ?? "");
 			const args = (message.params?.arguments ?? {}) as Record<string, unknown>;
+
+			// Validação de argumentos contra inputSchema (required + type).
+			// Ferramentas desconhecidas passam direto — o executor já rejeita.
+			const def = TOOL_DEFINITIONS.find((d) => d.name === toolName);
+			if (def) {
+				const validationError = validateToolArgs(args, def.inputSchema);
+				if (validationError) {
+					respondError(res, message.id, validationError, {
+						code: "INVALID_PARAMS",
+						jsonRpcCode: JSONRPC_ERRORS.INVALID_PARAMS,
+					});
+					return;
+			}
+			}
 			const result = await options.handleToolCall(toolName, args);
 			if (result.ok) {
 				respond(res, message.id, { content: result.result });
@@ -312,3 +348,43 @@ function readBody(req: http.IncomingMessage, maxBytes: number): Promise<string> 
 
 /** 10 MB — nenhuma ferramenta atual precisa de mais que isso num POST. */
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Validação leve de argumentos contra inputSchema.
+ * Cobertura: required + type (string/number/boolean/array/object).
+ * Sem dependência nova — JSON.parse/stringify já existe no path.
+ */
+function validateToolArgs(
+	args: Record<string, unknown>,
+	schema: { properties: Record<string, unknown>; required?: string[] }
+): string | null {
+	// Campos obrigatórios ausentes.
+	if (schema.required) {
+		for (const field of schema.required) {
+			if (!(field in args) || args[field] === undefined || args[field] === null) {
+				return `Campo obrigatório ausente: "${field}".`;
+		}
+	}
+	}
+
+	// Tipo básico por campo (se declarado no schema).
+	const TYPE_MAP: Record<string, string> = {
+		string: "string",
+		number: "number",
+		boolean: "boolean",
+		object: "object",
+	};
+	for (const [field, prop] of Object.entries(schema.properties)) {
+		const val = args[field];
+		if (val === undefined || val === null) continue;
+		const expected = TYPE_MAP[(prop as { type?: string }).type ?? ""];
+		if (!expected) continue; // array/any: não valida aqui
+		if (expected === "array") {
+			if (!Array.isArray(val)) return `Campo "${field}" deve ser array, recebeu ${typeof val}.`;
+		} else if (typeof val !== expected) {
+			return `Campo "${field}" deve ser ${expected}, recebeu ${typeof val}.`;
+		}
+	}
+
+	return null;
+}
