@@ -476,7 +476,18 @@ export class AutoUpdateModule implements HubModule {
 			// checksum ruim no meio do caminho não deixa a instalação pela metade.
 			for (const name of assetNames) {
 				const asset = release.assets.find((a) => a.name === name);
-				if (!asset) continue; // styles.css é opcional
+				if (!asset) {
+					// styles.css é opcional (não existe em todos os releases).
+					// main.js e manifest.json são obrigatórios — release sem eles
+					// é malformado.
+					if (name !== "styles.css") {
+						throw new Error(
+							`Asset obrigatório "${name}" ausente no release. ` +
+							"Release malformado — instalação abortada."
+						);
+				}
+				continue;
+			}
 				const content = await requestUrl({ url: asset.browser_download_url, method: "GET" });
 
 				if (settings.verifySignature) {
