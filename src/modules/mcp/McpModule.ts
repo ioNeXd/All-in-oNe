@@ -138,7 +138,7 @@ export class McpModule implements HubModule {
 		}
 
 		this.lastServerError = undefined;
-		await context.bus.emit("mcp:server-started", { port: settings.port }, "mcp");
+		await context.bus.emit("mcp:server-started", { port: this.listeningPort ?? settings.port }, "mcp");
 
 		context.registerCommand("mcp-restart-server", "MCP: Reiniciar servidor", () => {
 			// lastServerError já fica visível no painel; aqui só evita rejection
@@ -372,7 +372,7 @@ export class McpModule implements HubModule {
 			.setName("Servidor")
 			.setDesc(
 				running
-					? `Rodando na porta ${settings.port}.`
+					? `Rodando na porta ${this.listeningPort ?? settings.port}.`
 					: "Parado. Ligue o módulo na barra lateral para iniciar o servidor."
 			)
 			.addButton((btn) =>
@@ -504,6 +504,12 @@ export class McpModule implements HubModule {
 		}
 
 		if (dryRun) {
+			// Emite log mesmo em simulação — lacuna de auditoria evitada.
+			this.context?.bus.emit(
+				"mcp:action-logged",
+				{ tool: toolName, path: args.path, dryRun: true, isWrite, result: { simulated: true } },
+				"mcp"
+			);
 			return { ok: true, result: { simulated: true, toolName, args } };
 		}
 

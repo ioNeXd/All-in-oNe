@@ -40,7 +40,7 @@ export class FileLifecycleModule implements HubModule {
 		version: "0.1.0",
 		contractVersion: "2.0.0",
 		desktopOnly: false,
-		emits: ["lifecycle:note-ready", "lifecycle:note-renamed"],
+		emits: ["lifecycle:note-ready", "lifecycle:note-renamed", "file:created"],
 		listensTo: [],
 		settingsSchema: [],
 	};

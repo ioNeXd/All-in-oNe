@@ -196,7 +196,9 @@ describe("put_attachment — criação, sobrescrita e validação", () => {
 		expect(r.ok).toBe(true);
 		expect(r.result).toMatchObject({ simulated: true });
 		expect(vault.getAbstractFileByPath("Anexos/x.png")).toBeUndefined();
-		expect(emitted.find((e) => e.name === "mcp:action-logged")).toBeUndefined();
+		const actionLog = emitted.find((e) => e.name === "mcp:action-logged");
+	expect(actionLog).toBeDefined();
+	expect(actionLog!.payload).toMatchObject({ dryRun: true, tool: "put_attachment" });
 	});
 
 	it("a escrita passa pela fila do núcleo (fileWriteQueueRun)", async () => {
