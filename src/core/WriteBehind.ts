@@ -97,8 +97,9 @@ export class WriteBehindQueue<T extends Identified> {
 					// Remove a ÚLTIMA ocorrência do id (a mais recente). Se o id
 					// foi re-enfileirado durante o voo, a cópia mais nova
 					// permanece na fila para o drain seguinte — versão correta.
-					const index = this.items.findLastIndex?.((x) => x.id === item.id)
-						?? fallbackFindLastIndex(this.items, item.id);
+					// foi re-enfileirado durante o voo, a cópia mais nova
+					// permanece na fila para o drain seguinte — versão correta.
+					const index = fallbackFindLastIndex(this.items, item.id);
 					if (index !== -1) this.items.splice(index, 1);
 				}
 			},
