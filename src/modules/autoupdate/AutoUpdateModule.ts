@@ -500,14 +500,24 @@ export class AutoUpdateModule implements HubModule {
 					}
 				}
 
-				if (expected[name]) {
+				// main.js e manifest.json são obrigatórios: asset existe + checksum
+				// ausente = release malformado. styles.css é opcional (pode faltar
+				// checksum sem problema — ele não existe em todos os releases).
+				if (!expected[name]) {
+					if (name !== "styles.css") {
+						throw new Error(
+							`Asset obrigatório "${name}" sem checksum declarado no release. ` +
+							"Release malformado — instalação abortada por segurança."
+						);
+					}
+			} else {
 					const actual = await sha256Hex(content.text);
 					if (actual !== expected[name].toLowerCase()) {
 						throw new Error(
 							`Checksum do arquivo "${name}" não confere. Download abortado por segurança.`
 						);
 					}
-				}
+			}
 				downloaded[name] = content.text;
 			}
 
