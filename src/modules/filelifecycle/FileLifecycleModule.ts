@@ -47,6 +47,8 @@ export class FileLifecycleModule implements HubModule {
 
 	private context?: ModuleContext;
 	private detachers: (() => void)[] = [];
+	/** Guard para callbacks async que podem disparar depois de onDisable. */
+	private stopped = false;
 	/** Notas aguardando nome — evita que o mesmo arquivo abra dois modais. */
 	private awaiting = new Set<string>();
 
@@ -66,9 +68,11 @@ export class FileLifecycleModule implements HubModule {
 	}
 
 	onEnable(): void {
+		this.stopped = false;
 		const app = this.context!.app;
 
 		app.workspace.onLayoutReady(() => {
+			if (this.stopped) return;
 			const createRef = app.vault.on("create", (file) => {
 				if (file instanceof TFile && file.extension === "md") {
 					void this.handleCreate(file);
@@ -122,6 +126,7 @@ export class FileLifecycleModule implements HubModule {
 	}
 
 	onDisable(): void {
+		this.stopped = true;
 		this.detachers.forEach((d) => d());
 		this.detachers = [];
 		this.awaiting.clear();
