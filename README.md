@@ -60,7 +60,7 @@ perguntar alguns caminhos básicos.
 npm install
 npm run dev     # build com watch, para desenvolvimento
 npm run build   # build de produção
-npm test        # 258 testes em 23 arquivos — todos importam o código real
+npm test        # 386 testes em 34 arquivos — todos importam o código real
 ```
 
 Veja `CONTRIBUTING.md` para o guia de como o projeto é organizado e como
@@ -73,6 +73,10 @@ compartilhados) e **8 módulos independentes** que seguem um **contrato
 comum** — nenhum módulo conhece outro diretamente, toda comunicação passa
 pelo núcleo. Isso é o que permite ligar/desligar cada feature sem afetar as
 demais, e adicionar um nono módulo no futuro sem alterar o que já existe.
+
+> **Versão:** o manifest.json mostra a versão do **plugin** (0.2.0).
+> Alguns módulos possuem versão própria (ex.: Calendário em 0.3.0) —
+> a versão do plugin reflete o pacote como um todo, não cada módulo.
 
 Veja `docs/ARCHITECTURE.md` para o detalhamento completo de cada decisão,
 `docs/STATUS.md` para o que está funcional de verdade (e o que não está),
