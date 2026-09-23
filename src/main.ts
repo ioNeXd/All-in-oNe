@@ -1,5 +1,6 @@
 import { Plugin, WorkspaceLeaf, Modal, App, Setting, Notice } from "obsidian";
 import { HubCore } from "./core/HubCore";
+import { createSplitPersistence } from "./core/SplitPersistence";
 import type { HubSettings } from "./core/types";
 import { LOBBY_VIEW_TYPE, LobbyView, LobbyModal } from "./ui/LobbyView";
 import { OnboardingModal } from "./ui/OnboardingModal";
@@ -41,6 +42,15 @@ export default class IoneHubPlugin extends Plugin {
 			this.app,
 			() => this.loadData() as Promise<HubSettings | null>,
 			(data) => this.saveData(data)
+		);
+		// Persistência SPLIT: fatias pesadas (Histórico/Notificações — write-
+		// behind a cada ~2s) vão para arquivo próprio; o data.json principal
+		// só é regravado quando o resto da config muda. Sem isto, cada flush
+		// reescrevia o JSON inteiro (I/O e sync do vault). O load pelo
+		// loadData() cru do core continua funcionando como fallback: sem os
+		// arquivos por módulo, as fatias vêm do data.json como antes.
+		this.core.settings.setSplitPersistence(
+			createSplitPersistence(this.app, this.manifest.dir ?? ".obsidian/plugins/All-in-oNe")
 		);
 
 		// Ponte para que módulos consigam registrar comandos nativos do

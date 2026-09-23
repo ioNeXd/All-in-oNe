@@ -1,7 +1,8 @@
 import { Setting, Notice } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
-import { cryptoRandomId } from "../../core/types";
+import { randomId } from "../../core/types";
 import { filterHistoryEntries } from "./HistoryFilter";
+import { WriteBehindQueue } from "../../core/WriteBehind";
 
 /**
  * Janela de coalescência das gravações (write-behind). O Histórico recebe
@@ -43,7 +44,10 @@ const TRACKED_EVENTS = [
 	"file:renamed",
 	"folder:created",
 	"folder:deleted",
-	"mcp:action",
+	// "mcp:action" saiu do rastreio: o MCP emite SÓ mcp:action-logged (com
+	// desfecho ok/FALHOU/dry-run) — ouvir os dois duplicava cada ação
+	// bem-sucedida no histórico. O evento antigo permanece nos LABELS/FILTER_HELP
+	// para entradas persistidas por versões anteriores continuarem legíveis.
 	"mcp:action-logged",
 	"mcp:server-started",
 	"mcp:server-stopped",
@@ -97,8 +101,13 @@ export class HistoryModule implements HubModule {
 	private filter = "";
 	/** Busca por texto livre (message/path), combinável com o filtro de tipo. */
 	private searchQuery = "";
-	/** Entradas ainda não persistidas (dreno no flush). */
-	private pendingEntries: HistoryEntryRecord[] = [];
+	/**
+	 * Write-behind: entradas só saem da fila no CONFIRM do save (não no
+	 * takeBatch) — um record durante o save em voo entra atrás do lote e vai
+	 * no drain seguinte, sem a janela de perda do padrão "zerar antes do
+	 * await" (ver core/WriteBehind.ts).
+	 */
+	private pendingEntries = new WriteBehindQueue<HistoryEntryRecord>();
 	private flushTimer?: ReturnType<typeof setTimeout>;
 	/** Protetor de corrida clear/reset × flush pendente (ver clearEntries). */
 	private flushGeneration = 0;
@@ -149,7 +158,7 @@ export class HistoryModule implements HubModule {
 		this.flushGeneration++;
 		if (this.flushTimer) clearTimeout(this.flushTimer);
 		this.flushTimer = undefined;
-		this.pendingEntries = [];
+		this.pendingEntries.clear();
 		return (this.context?.updateSettings({ entries: [] }) ?? Promise.resolve([])).then(() => void 0);
 	}
 
@@ -164,11 +173,12 @@ export class HistoryModule implements HubModule {
 		// disco, sem esperar a janela de flush. Mesmo contrato do
 		// NotificationsModule.readSettings: pendentes primeiro, dedupe por id
 		// contra o que já está persistido, teto de maxEntries.
-		if (this.pendingEntries.length > 0) {
+		const pending = this.pendingEntries.pendingSnapshot();
+		if (pending.length > 0) {
 			const persisted = settings.entries.filter(
-				(e) => !this.pendingEntries.some((p) => p.id === e.id)
+				(e) => !pending.some((p) => p.id === e.id)
 			);
-			settings.entries = [...this.pendingEntries, ...persisted].slice(0, settings.maxEntries);
+			settings.entries = [...pending, ...persisted].slice(0, settings.maxEntries);
 		}
 		return settings;
 	}
@@ -182,10 +192,10 @@ export class HistoryModule implements HubModule {
 		if (settings.mutedEvents.includes(eventName)) return;
 
 		const entry: HistoryEntryRecord = {
-			// cryptoRandomId (mesmo gerador do núcleo): duas entradas no mesmo
+			// randomId (mesmo gerador do núcleo): duas entradas no mesmo
 			// milissegundo não colidem — o id é chave do dedupe contra pendentes
 			// e do "Limpar histórico" em voo.
-			id: `h-${cryptoRandomId()}`,
+			id: `h-${randomId()}`,
 			event: eventName,
 			origin,
 			path: typeof payload?.path === "string" ? payload.path : undefined,
@@ -196,27 +206,41 @@ export class HistoryModule implements HubModule {
 		// Write-behind: acumula em memória e agenda o dreno. A leitura da
 		// lista (record/painel) SEMPRE inclui as pendentes — o usuário vê na
 		// hora; só o DISCO é que é coalescido.
-		this.pendingEntries = [entry, ...this.pendingEntries];
+		this.pendingEntries.enqueue(entry);
 		if (!this.flushTimer) {
 			this.flushTimer = setTimeout(() => void this.flushNow(), FLUSH_INTERVAL_MS);
 		}
 	}
 
-	/** Drena as entradas pendentes num único save (batedor: reset invalida a geração). */
+	/**
+	 * Drena as entradas pendentes num único save (batedor: reset invalida a
+	 * geração). O lote sai da fila SÓ no confirm — se o save falhar, o
+	 * próximo drain o recontém (retry), sem a janela de perda do padrão
+	 * anterior (zerar pending antes do await).
+	 */
 	private async flushNow(): Promise<void> {
 		this.flushTimer = undefined;
-		if (this.pendingEntries.length === 0) return;
+		if (this.pendingEntries.size === 0) return;
 		const generation = this.flushGeneration;
-		const batch = this.pendingEntries;
-		this.pendingEntries = [];
+		const drain = this.pendingEntries.takeBatch(Number.MAX_SAFE_INTEGER);
+		if (drain.batch.length === 0) return;
 
-		const settings = this.readSettings();
-		const merged = [...batch, ...settings.entries].slice(0, settings.maxEntries);
-		await this.context?.updateSettings({ entries: merged });
-		if (generation !== this.flushGeneration) {
-			// Reset aconteceu enquanto o save estava em voo: a fatia limpa no
-			// disco acabou de ser sobrescrita — desfaz.
-			await this.context?.updateSettings({ entries: [] });
+		try {
+			const settings = this.readSettings();
+			// readSettings JÁ inclui o lote em voo (pendingSnapshot dedupe por id
+			// contra o disco) — merged parte dele e NÃO reprefixa o batch, senão
+			// duplica. O resultado é exatamente "pendentes + persistidas".
+			const merged = settings.entries.slice(0, settings.maxEntries);
+			await this.context?.updateSettings({ entries: merged });
+			if (generation !== this.flushGeneration) {
+				// Reset aconteceu enquanto o save estava em voo: a fatia limpa no
+				// disco acabou de ser sobrescrita — desfaz.
+				await this.context?.updateSettings({ entries: [] });
+			}
+			drain.confirm();
+		} catch {
+			// Save falhou: SEM confirm — o lote segue pendente e o próximo
+			// flush o re-tenta (a entrada não se perde na variável local).
 		}
 	}
 
@@ -260,7 +284,7 @@ export class HistoryModule implements HubModule {
 					this.flushGeneration++;
 					if (this.flushTimer) clearTimeout(this.flushTimer);
 					this.flushTimer = undefined;
-					this.pendingEntries = [];
+					this.pendingEntries.clear();
 					await this.context?.updateSettings({ entries: [] });
 					this.refresh(container);
 				})
@@ -373,6 +397,7 @@ export const EVENT_LABELS: Record<string, string> = {
 	"autoupdate:applied": "Atualização instalada",
 	"core:module-error": "Erro em um módulo",
 	"core:safe-mode-entered": "Módulo desligado por falha",
+	"core:safe-mode-exited": "Módulo religado com sucesso",
 };
 
 /** Frase de ajuda por filtro, para quem não conhece os termos técnicos. */
@@ -441,6 +466,8 @@ function describeEvent(eventName: string, payload: Record<string, unknown>): str
 			return `Erro no módulo "${payload.moduleId}": ${payload.error}`;
 		case "core:safe-mode-entered":
 			return `Módulo "${payload.moduleId}" desligado automaticamente após falhas`;
+		case "core:safe-mode-exited":
+			return `Modo seguro encerrado: "${payload.moduleId}" religado com sucesso`;
 		default:
 			return `${eventName} ${path}`.trim();
 	}

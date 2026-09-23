@@ -1,11 +1,19 @@
 import { TFile, TFolder, normalizePath, Setting, Notice, Modal, App } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
 import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
-import { type CalendarEvent, monthFolderName, describeEvent, shouldFire, MONTH_NAMES } from "./EventTypes";
+import {
+	type CalendarEvent,
+	monthFolderName,
+	describeEvent,
+	shouldFire,
+	nextEventDelayMs,
+	MONTH_NAMES,
+} from "./EventTypes";
 import { parseIcs, mergeIcsEvents, type IcsParseResult } from "./IcsParser";
 import { ReminderModal, playReminderChime } from "./ReminderModal";
+import { AudioUnlocker } from "../../core/AudioUnlock";
 import { attachFilterSuggest } from "../../ui/FilterSuggest";
-import { isPendingStatus } from "../templates/NoteStatus";
+import { isPendingStatus, STATUS_COMPLETE_NORMALIZED } from "../../core/NoteStatus";
 import { makeInteractiveRow, focusSiblingTab } from "../../ui/interactiveRows";
 export type { CalendarEvent } from "./EventTypes";
 
@@ -58,7 +66,7 @@ export class CalendarModule implements HubModule {
 		contractVersion: "2.0.0",
 		desktopOnly: false,
 		emits: ["calendar:event-fired", "calendar:note-opened", "calendar:note-created"],
-		listensTo: [],
+		listensTo: ["calendar:open-today"],
 		settingsSchema: [
 			{
 				key: "view",
@@ -75,7 +83,16 @@ export class CalendarModule implements HubModule {
 	};
 
 	private context?: ModuleContext;
+	/** Timer do agendador de lembretes (loop de setTimeout, ver scheduleNextCheck). */
 	private dailyCheckInterval?: number;
+	/**
+	 * Desbloqueio de áudio COMPARTILHADO com as Notificações (core/AudioUnlock):
+	 * o lembrete dispara sozinho — o destravamento acontece no primeiro gesto
+	 * do usuário (clique/tecla), armado no onEnable.
+	 */
+	private readonly audioUnlocker = new AudioUnlocker();
+	/** Desinscrição do pedido da UI (calendar:open-today) — limpo no onDisable. */
+	private busUnsubscribe?: () => void;
 	/** Estado da ÚLTIMA importação .ics — alimenta o Diagnóstico. */
 	private lastIcsImport: { ok: boolean; detail: string } | undefined;
 	/** Mês exibido na grade (independente do mês atual) — controlado pela navegação. */
@@ -93,20 +110,41 @@ export class CalendarModule implements HubModule {
 	}
 
 	onEnable(): void {
+		// Arma o destravamento de áudio no primeiro gesto (política de autoplay).
+		this.audioUnlocker.arm();
+		// Verificação RETROATIVA imediata: se o Obsidian abriu depois da hora
+		// de um evento de hoje (máquina desligada, app fechado), o evento
+		// dispara já na ativação — dever automático não é polling.
 		this.checkTodaysEvents();
-		// 10s em vez dos 60s originais: o atraso relatado (~40-50s depois da
-		// hora marcada) era simplesmente a granularidade do setInterval — o
-		// pior caso era esperar quase um minuto inteiro pela próxima checagem.
-		// Com 10s o pior caso cai para 10s, sem pesar no desempenho.
-		this.dailyCheckInterval = window.setInterval(() => this.checkTodaysEvents(), 10_000);
+		// Agendamento por evento em vez de polling fixo: um setTimeout até o
+		// próximo disparo futuro (com teto de 1h para re-checagem de rotina e
+		// virada de dia). Zero trabalho despertando o event loop quando não
+		// há evento próximo; atraso do lembrete cai de "até 10s" para ~ms.
+		this.scheduleNextCheck();
 
 		this.context!.registerCommand("calendar-open-today", "Calendário: Abrir nota de hoje", () => {
+			void this.openOrCreateForDate(new Date());
+		});
+
+		// Contrato com a UI: o Lobby pede a nota de hoje por EVENTO (não por
+		// cast de método — a UI não conhece API interna de módulo). Inscrito no
+		// onEnable: com o módulo desligado o pedido não tem destinatário, e o
+		// Lobby já avisa o usuário antes de emitir.
+		this.busUnsubscribe = this.context!.bus.on("calendar:open-today", "calendar", () => {
 			void this.openOrCreateForDate(new Date());
 		});
 	}
 
 	onDisable(): void {
-		if (this.dailyCheckInterval) window.clearInterval(this.dailyCheckInterval);
+		if (this.dailyCheckInterval) window.clearTimeout(this.dailyCheckInterval);
+		this.dailyCheckInterval = undefined;
+		this.busUnsubscribe?.();
+		this.busUnsubscribe = undefined;
+		this.audioUnlocker.disarm();
+		// Limpa a dedupe de minuto junto: sem isto, um desligar→ligar dentro
+		// do mesmo minuto pulava a checagem retroativa (e um lembrete sem
+		// horário, elegível o dia todo, podia demorar até 1h para aparecer).
+		this.lastCheckedMinute = "";
 	}
 
 	/** Aba ativa: grade do calendário ou lista de eventos. */
@@ -283,7 +321,7 @@ export class CalendarModule implements HubModule {
 							(refId) => this.openNoteByRef(refId),
 							this.readSettings().autoFocusOnReminder
 						).open();
-						void playReminderChime();
+						void playReminderChime(this.audioUnlocker);
 					})
 				)
 				.addButton((btn) =>
@@ -373,7 +411,7 @@ export class CalendarModule implements HubModule {
 			() => Promise.resolve(),
 			this.readSettings().autoFocusOnReminder
 		).open();
-		void playReminderChime();
+		void playReminderChime(this.audioUnlocker);
 	}
 
 	/** Único ponto de redesenho do painel — sempre a partir da raiz guardada. */
@@ -652,10 +690,28 @@ export class CalendarModule implements HubModule {
 	private lastCheckedMinute = "";
 
 	/**
-	 * Roda a cada 10 segundos (ver setInterval abaixo). Verifica a virada do
-	 * dia E a chegada do horário de cada evento — cada minuto é processado
-	 * UMA vez (dedupe por lastCheckedMinute), então a janela de 10s só
-	 * encurta o atraso, não multiplica o trabalho.
+	 * Reagenda o timer para o próximo momento útil (próximo evento futuro ou
+	 * teto de 1h). Chamado após CADA checagem — um loop de setTimeout, não
+	 * um intervalo: o agendamento se recalcula com os eventos atuais (novo
+	 * evento criado reagenda na próxima passada) e a checagem retroativa
+	 * cobre o wake-up tardio do Obsidian/suspensão do SO.
+	 */
+	private scheduleNextCheck(): void {
+		this.dailyCheckInterval = window.setTimeout(() => {
+			this.checkTodaysEvents();
+			this.scheduleNextCheck();
+		}, nextEventDelayMs(this.readSettings().events, new Date()));
+	}
+
+	/**
+	 * Checagem de disparos. Roda no activation, após cada agendamento e no
+	 * teto de rotina (1h) — a dedupe por minuto evita processar o mesmo
+	 * minuto duas vezes (cheque imediato + timer logo em seguida).
+	 *
+	 * Contrato de UMA VEZ POR DIA: quem marca "já disparou" é o estado que
+	 * fireEvent grava (lastFiredYear / remoção do evento único). Sem time,
+	 * shouldFire é true no dia inteiro por design ("a qualquer hora") — é o
+	 * estado, não o relógio, que impede repetição.
 	 */
 	private checkTodaysEvents(): void {
 		const now = new Date();
@@ -681,7 +737,7 @@ export class CalendarModule implements HubModule {
 				(refId) => this.openNoteByRef(refId),
 				this.readSettings().autoFocusOnReminder
 			).open();
-			void playReminderChime();
+			void playReminderChime(this.audioUnlocker);
 		} else if (event.noteRefId) {
 			await this.openNoteByRef(event.noteRefId);
 		}
@@ -736,10 +792,12 @@ export class CalendarModule implements HubModule {
 		await this.context!.app.fileManager.processFrontMatter(file, (fm) => {
 			fm.date = `${year}-${month}-${day}`;
 			// Mesmos metadados do módulo de Templates, para as duas famílias de
-			// notas ficarem consultáveis do mesmo jeito.
+			// notas ficarem consultáveis do mesmo jeito. O status usa a constante
+			// do core (formato normalizado de completada) — nota de calendário
+			// nasce consultável como completa, mesmo contrato de valores.
 			fm.thema = ["Calendario", String(year), MONTH_NAMES[date.getMonth()]];
 			fm.origem = path;
-			fm.status = "Completo";
+			fm.status = STATUS_COMPLETE_NORMALIZED;
 		});
 		this.context?.log(`Nota de calendário criada: ${path}`, { path });
 		await this.context?.bus.emit("calendar:note-created", { path, templateName }, "calendar");

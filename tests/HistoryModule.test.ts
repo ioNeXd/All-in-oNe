@@ -109,7 +109,7 @@ describe("HistoryModule — write-behind e leitura fresca", () => {
 	it("onEnable inscreve todos os eventos rastreados; onDisable chama cada unsubscribe", () => {
 		const { module, unsubscribers } = setup();
 		module.onEnable();
-		expect(unsubscribers.length).toBe(20); // TRACKED_EVENTS.length
+		expect(unsubscribers.length).toBe(19); // TRACKED_EVENTS.length (mcp:action saiu — duplicava cada ação do MCP)
 
 		module.onDisable();
 		expect(unsubscribers.every((u) => u.mock.calls.length === 1)).toBe(true);

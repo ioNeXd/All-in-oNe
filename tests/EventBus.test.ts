@@ -118,4 +118,64 @@ describe("EventBus", () => {
 		expect(bus.getHistory({ source: "mod-b" })).toHaveLength(1);
 		expect(bus.getHistory()).toHaveLength(2);
 	});
+
+	it("offAll cancela o timer de coalesce quando o evento fica sem inscritos", async () => {
+		const bus = new EventBus();
+		const received: unknown[] = [];
+		const unsub = bus.on("vault:modify", "mod-a", (e) => received.push(e.payload));
+		bus.setThrottle("vault:modify", 20);
+
+		await bus.emit("vault:modify", { n: 1 }, "core"); // sai na hora
+		await bus.emit("vault:modify", { n: 2 }, "core"); // coalescida, timer armado
+
+		// O único ouvante desliga ANTES do fim da janela:
+		unsub();
+
+		// O fim da janela NÃO entrega nada (timer cancelado, buffer limpo):
+		await vi.advanceTimersByTimeAsync(100);
+		expect(received).toEqual([{ n: 1 }]);
+
+		// E um novo inscrito começa do zero: a primeira emissão sai imediata.
+		const late: unknown[] = [];
+		bus.on("vault:modify", "mod-b", (e) => late.push(e.payload));
+		await bus.emit("vault:modify", { n: 3 }, "core");
+		expect(late).toEqual([{ n: 3 }]);
+	});
+
+	it("offAll NÃO cancela o timer quando outros módulos ainda escutam o evento", async () => {
+		const bus = new EventBus();
+		const receivedA: unknown[] = [];
+		const receivedB: unknown[] = [];
+		bus.on("vault:modify", "mod-a", (e) => receivedA.push(e.payload));
+		bus.on("vault:modify", "mod-b", (e) => receivedB.push(e.payload));
+		bus.setThrottle("vault:modify", 20);
+
+		await bus.emit("vault:modify", { n: 1 }, "core");
+		await bus.emit("vault:modify", { n: 2 }, "core"); // coalescida
+		bus.offAll("mod-a"); // mod-b continua inscrito
+
+		await vi.advanceTimersByTimeAsync(20);
+		expect(receivedA).toEqual([{ n: 1 }]); // saiu do mod-a antes do offAll
+		expect(receivedB).toEqual([{ n: 1 }, { coalesced: [{ n: 2 }] }]); // entrega intacta
+	});
+
+	it("disposeAll derruba inscrições, timers e buffers (teardown do plugin)", async () => {
+		const bus = new EventBus();
+		const received: unknown[] = [];
+		bus.on("vault:modify", "mod-a", (e) => received.push(e.payload));
+		bus.setThrottle("vault:modify", 20);
+
+		await bus.emit("vault:modify", { n: 1 }, "core");
+		await bus.emit("vault:modify", { n: 2 }, "core"); // coalescida, timer armado
+
+		bus.disposeAll();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(received).toEqual([{ n: 1 }]); // timer não disparou nada
+
+		// Emissão pós-dispose não entrega a ninguém nem lança:
+		await bus.emit("vault:modify", { n: 3 }, "core");
+		expect(received).toEqual([{ n: 1 }]);
+		// Histórico segue consultável (não é parte do teardown):
+		expect(bus.getHistory({ eventName: "vault:modify" })).toHaveLength(2);
+	});
 });

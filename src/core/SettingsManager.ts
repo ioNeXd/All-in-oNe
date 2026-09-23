@@ -1,5 +1,6 @@
-import { createDefaultSettings, cryptoRandomId, HubSettings, SETTINGS_SCHEMA_VERSION } from "./types";
+import { createDefaultSettings, randomId, HubSettings, SETTINGS_SCHEMA_VERSION } from "./types";
 import type { ConfigValidationIssue, HubModule, ModuleId } from "./ModuleContract";
+import { SPLIT_MODULE_IDS, type SplitPersistenceHandle } from "./SplitPersistence";
 
 type Persist = (data: HubSettings) => Promise<void>;
 type Load = () => Promise<HubSettings | null>;
@@ -14,11 +15,23 @@ type Load = () => Promise<HubSettings | null>;
  * instalado.
  */
 const migrations: Record<number, (old: HubSettings) => HubSettings> = {
-	// Exemplo de como uma futura migração de v1 -> v2 ficaria:
-	// 1: (old) => ({ ...old, schemaVersion: 2, algumCampoNovo: "valor-padrao" }),
+	// v1 -> v2: remove `activeProfileId`/`profiles`. Os campos existiam no
+	// schema desde a v0.1.0 mas NUNCA tiveram implementação (nenhuma UI de
+	// perfis, nenhum leitor em SettingsManager/HubCore/Lobby) — config morta.
+	// A migração descarta os campos; a configuração REAL sempre viveu em
+	// `modules`/`enabledModules`/`paths`, que a migração preserva intacta.
+	1: (old) => {
+		const { activeProfileId: _a, profiles: _p, ...rest } = old as HubSettings & {
+			activeProfileId?: string;
+			profiles?: unknown;
+		};
+		void _a;
+		void _p;
+		return { ...rest, schemaVersion: 2 };
+	},
 };
 
-const INSTANCE_ID = cryptoRandomId();
+const INSTANCE_ID = randomId();
 
 export class SettingsManager {
 	private current: HubSettings;
@@ -34,8 +47,25 @@ export class SettingsManager {
 	 */
 	private writeQueue: Promise<unknown> = Promise.resolve();
 
+	/**
+	 * Persistência SPLIT (opcional): quando presente, as fatias dos módulos
+	 * em SPLIT_MODULE_IDS vão para ARQUIVO PRÓPRIO e o data.json principal
+	 * grava só o resto (stubs no lugar das fatias). É o que evita que o
+	 * write-behind do Histórico/Notificações regrave o JSON inteiro a cada
+	 * ~2s num vault ativo (ver core/SplitPersistence.ts). Sem o handle —
+	 * nos testes — o comportamento monolítico é preservado.
+	 */
+	private split?: SplitPersistenceHandle;
+	/** Última config efetivamente NO DISCO — base do diff do persistAll. */
+	private persistedSnapshot?: HubSettings;
+
 	constructor(private load: Load, private persist: Persist) {
 		this.current = createDefaultSettings();
+	}
+
+	/** Chamado pelo main.ts após criar o handle (usa o adapter do app). */
+	setSplitPersistence(handle: SplitPersistenceHandle): void {
+		this.split = handle;
 	}
 
 	/** Registrado pelo HubCore para que o SettingsManager consiga validar conflitos entre módulos. */
@@ -48,11 +78,23 @@ export class SettingsManager {
 		const loaded = await this.load();
 		if (!loaded) {
 			this.current = createDefaultSettings();
-			await this.persist(this.current);
+			await this.persistAll(this.current);
+			this.persistedSnapshot = JSON.parse(JSON.stringify(this.current)) as HubSettings;
 			return this.current;
 		}
 
+		const before = loaded.schemaVersion ?? 0;
 		this.current = this.runMigrations(loaded);
+
+		// A migração também vai ao DISCO: sem isto, toda inicialização
+		// re-migraria os mesmos dados (o arquivo ficaria v1 para sempre) e a
+		// validação/leitura nos módulos veria o formato velho. Só persiste se
+		// de fato migrou — boot normal não reescreve o data.json.
+		if ((this.current.schemaVersion ?? 0) !== before) {
+			await this.persistAll(this.current);
+		}
+		// Estado que está no disco agora (base do diff do persistAll):
+		this.persistedSnapshot = JSON.parse(JSON.stringify(this.current)) as HubSettings;
 
 		// Detecção de conflito de sync: se o arquivo no disco foi escrito por
 		// outra instância (outro dispositivo) depois da última vez que ESTA
@@ -157,10 +199,61 @@ export class SettingsManager {
 		// Enfileira APENAS a persistência: mesmo que o persist de um save
 		// anterior esteja lento, este save grava DEPOIS dele — o disco sempre
 		// termina com a última versão aceita.
-		const operation = this.writeQueue.then(() => this.persist(next));
+		const operation = this.writeQueue.then(() => this.persistAll(next));
 		this.writeQueue = operation.catch(() => undefined); // falha não quebra a fila para os próximos
 		await operation;
 		return [];
+	}
+
+	/** Fatias splitadas removidas — a projeção do principal para o diff. */
+	private stripSlices(s: HubSettings): HubSettings {
+		const modules: Record<string, Record<string, unknown>> = {};
+		for (const [id, slice] of Object.entries(s.modules)) {
+			if (!(SPLIT_MODULE_IDS as readonly string[]).includes(id)) modules[id] = slice;
+		}
+		return { ...s, modules };
+	}
+
+	/**
+	 * Persiste a configuração. Com persistência split: o data.json principal
+	 * só é regravado quando algo FORA das fatias splitadas mudou, e a fatia
+	 * de cada módulo splitado só quando ELA mudou (deep-equal) — o write-
+	 * behind do Histórico/Notificações deixa de regravar o JSON inteiro.
+	 */
+	private async persistAll(next: HubSettings): Promise<void> {
+		if (!this.split) {
+			await this.persist(next);
+			return;
+		}
+
+		const prev = this.persistedSnapshot;
+		const splitIds = SPLIT_MODULE_IDS;
+
+		// Fatias splitadas: grava só a(s) que mudou.
+		for (const id of splitIds) {
+			const slice = next.modules[id] ?? {};
+			if (JSON.stringify(prev?.modules?.[id] ?? {}) === JSON.stringify(slice)) continue;
+			await this.split.persistModule(id, slice);
+		}
+
+		// Principal: grava só se algo fora das fatias splitadas mudou. O
+		// carimbo de sync NÃO entra no diff (muda em todo save — compará-lo
+		// faria qualquer save parecer mudança do principal); ele é atualizado
+		// no DISCO quando o principal de fato é regravado (persistMain), e o
+		// snapshot da memória segue o current de qualquer forma.
+		const mainChanged =
+			!prev ||
+			(() => {
+				const { sync: _sn, ...restNext } = this.stripSlices(next);
+				const { sync: _sp, ...restPrev } = this.stripSlices(prev);
+				void _sn;
+				void _sp;
+				return JSON.stringify(restPrev) !== JSON.stringify(restNext);
+			})();
+		if (mainChanged) {
+			await this.split.persistMain(next);
+		}
+		this.persistedSnapshot = JSON.parse(JSON.stringify(next)) as HubSettings;
 	}
 
 	async updateModuleSettings(

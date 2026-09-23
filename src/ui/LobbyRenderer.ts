@@ -1,7 +1,7 @@
 import { App, Notice, Setting, TFile, Modal } from "obsidian";
 import type { HubCore } from "../core/HubCore";
 import type { HubModule } from "../core/ModuleContract";
-import { isPendingStatus } from "../modules/templates/NoteStatus";
+import { isPendingStatus } from "../core/NoteStatus";
 import { makeInteractiveRow } from "./interactiveRows";
 import { moveBefore, moveModuleId, orderedModules } from "./lobbyOrder";
 
@@ -454,17 +454,20 @@ export class LobbyRenderer {
 		}
 	}
 
+	/**
+	 * Ação rápida "Nota de hoje" — via BUS, não por cast de método (mesma
+	 * família do item #1 da auditoria): a UI NÃO conhece a API interna do
+	 * módulo de Calendário. O pedido é um evento (`calendar:open-today`) que o
+	 * módulo atende se estiver ligado — renomear/remover `openOrCreateForDate`
+	 * não quebra o Lobby no compile; desligar o Calendário degrada a AÇÃO, com
+	 * aviso, não o plugin.
+	 */
 	private async quickOpenToday(): Promise<void> {
-		const calendar = this.core.getModules().find((m) => m.manifest.id === "calendar") as
-			| (HubModule & { openOrCreateForDate?: (d: Date) => Promise<TFile> })
-			| undefined;
-
-		if (!this.core.isModuleEnabled("calendar") || !calendar?.openOrCreateForDate) {
+		if (!this.core.isModuleEnabled("calendar")) {
 			new Notice("O módulo Calendário precisa estar ligado para isso.");
 			return;
 		}
-		const file = await calendar.openOrCreateForDate(new Date());
-		await this.app.workspace.getLeaf(false).openFile(file);
+		await this.core.bus.emit("calendar:open-today", {}, "lobby");
 	}
 
 	private async quickShowPending(): Promise<void> {

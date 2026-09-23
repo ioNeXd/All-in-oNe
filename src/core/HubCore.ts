@@ -35,7 +35,18 @@ export class HubCore {
 	readonly settings: SettingsManager;
 
 	private modules = new Map<ModuleId, HubModule>();
+	/**
+	 * DOIS SETS, DOIS PAPÉIS (não fundir):
+	 * - enabledModuleIds: o DESEJO da config (semeado em init(), atualizado
+	 *   por enable/disable bem-sucedidos). É o que o Lobby persiste e o que
+	 *   sobrevive a falhas — um módulo cujo onEnable explodiu continua
+	 *   "desejado" para que a próxima tentativa (ou o reset) o religue.
+	 * - runtimeEnabledIds: o que está REALMENTE vivo (onEnable rodou). É o
+	 *   único papel do isModuleEnabled — Paleta de comandos, toggles, health
+	 *   e dependências entre módulos consultam a realidade, não o desejo.
+	 */
 	private enabledModuleIds = new Set<ModuleId>();
+	private runtimeEnabledIds = new Set<ModuleId>();
 	private crashCounts = new Map<ModuleId, number>();
 	private lastEnableErrors = new Map<ModuleId, string>();
 	private safeMode = false;
@@ -106,12 +117,13 @@ export class HubCore {
 		const shouldEnable = this.enabledModuleIds.has(module.manifest.id) && !this.safeMode;
 		if (shouldEnable) {
 			await this.enableModule(module.manifest.id);
-		} else if (this.safeMode) {
-			// O Set foi semeado pela config no init(); um módulo bloqueado pelo
-			// modo seguro NÃO está habilitado de verdade — a memória não pode
-			// dizer o contrário (Lobby/checkCallback leriam estado falso).
-			this.enabledModuleIds.delete(module.manifest.id);
 		}
+		// No modo seguro, o registro de um módulo listado na config NÃO roda
+		// onEnable — e NÃO toca nenhum dos dois sets: o desejo fica como está
+		// (config semântica preservada) e o runtime não vê o módulo (comandos
+		// da Paleta seguem indisponíveis). Um registerModule pós-SAÍDA do modo
+		// seguro habilita de fato; enquanto o bloqueio durar, só uma chamada
+		// EXPLÍCITA de enableModule (ação do usuário pelo Lobby) habilita.
 	}
 
 	private buildContext(id: ModuleId): ModuleContext {
@@ -167,8 +179,19 @@ export class HubCore {
 		try {
 			await module.onEnable();
 			this.enabledModuleIds.add(id);
+			this.runtimeEnabledIds.add(id);
 			this.crashCounts.set(id, 0);
 			this.lastEnableErrors.delete(id);
+			// SAÍDA DO MODO SEGURO: se o módulo OFENSOR foi religado com
+			// sucesso (ex.: o usuário corrigiu a porta do MCP), a condição que
+			// motivou o modo seguro acabou — o bloqueio é da SESSÃO, não
+			// eterno: sem isto, só reiniciar o Obsidian desbloquearia o
+			// registro de módulos. Contadores zeram junto (recomeço limpo).
+			if (this.safeMode) {
+				this.safeMode = false;
+				this.crashCounts.clear();
+				void this.bus.emit("core:safe-mode-exited", { moduleId: id }, "core");
+			}
 		} catch (err) {
 			console.error(`[All iₙ oNe] Falha ao habilitar o módulo "${id}":`, err);
 			// O Set foi semeado por init() a partir da config — se o onEnable
@@ -177,6 +200,7 @@ export class HubCore {
 			// que falhou e o checkCallback deixaria seus comandos executáveis
 			// fora do ciclo de vida.
 			this.enabledModuleIds.delete(id);
+			this.runtimeEnabledIds.delete(id);
 			this.lastEnableErrors.set(id, describeError(err));
 			// Falha de habilitação vira evento no bus — o Histórico (produto,
 			// persistente) registra, em vez de sumir num buffer interno sem
@@ -208,11 +232,12 @@ export class HubCore {
 		} finally {
 			this.bus.offAll(id);
 			this.enabledModuleIds.delete(id);
+			this.runtimeEnabledIds.delete(id);
 		}
 	}
 
 	async disableAll(): Promise<void> {
-		for (const id of [...this.enabledModuleIds]) {
+		for (const id of [...new Set([...this.enabledModuleIds, ...this.runtimeEnabledIds])]) {
 			await this.disableModule(id);
 		}
 	}
@@ -223,9 +248,25 @@ export class HubCore {
 	 * — em vez de travar o Obsidian inteiro na inicialização por causa de um
 	 * módulo problemático.
 	 */
+	/**
+	 * MODO SEGURO (política completa):
+	 *   - ENTRADA: 3 falhas consecutivas de onEnable do mesmo módulo →
+								safeMode = true, módulo desligado, bloqueio de NOVOS
+								registros/habilitações automáticas no startup.
+	 *   - SAÍDA:   o módulo ofensor habilitando com SUCESSO (ação do usuário
+	 *              pelo Lobby, pós-correção) limpa o modo seguro na hora e
+	 *              emite core:safe-mode-exited. O bloqueio é da sessão — não
+								precisa reiniciar o Obsidian.
+	 */
 	private async enterSafeMode(offendingModuleId: ModuleId, error: unknown): Promise<void> {
 		this.safeMode = true;
+		// O ofensor sai dos DOIS sets: do runtime (isModuleEnabled → false;
+		// comandos desabilitados na Paleta) e do desejo (para que a próxima
+		// tentativa de habilitação seja uma decisão consciente do usuário, não
+		// o startup re-executando o que acabou de falhar 3 vezes). O registro
+		// de config do DISCO não é tocado — o reset/reconciliação parte dele.
 		this.enabledModuleIds.delete(offendingModuleId);
+		this.runtimeEnabledIds.delete(offendingModuleId);
 		// O registro cabe ao bus (o Histórico escuta core:safe-mode-entered e
 		// persiste com rótulo próprio) — não há buffer duplicado no núcleo.
 		await this.bus.emit(
@@ -244,7 +285,7 @@ export class HubCore {
 	}
 
 	isModuleEnabled(id: ModuleId): boolean {
-		return this.enabledModuleIds.has(id);
+		return this.runtimeEnabledIds.has(id);
 	}
 
 	// Ponte para o main.ts registrar comandos nativos do Obsidian.
@@ -277,8 +318,13 @@ export class HubCore {
 			const desired = new Set(this.settings.get().enabledModules);
 			for (const module of this.getModules()) {
 				const id = module.manifest.id;
-				if (desired.has(id) && !this.isModuleEnabled(id)) await this.enableModule(id);
-				else if (!desired.has(id) && this.isModuleEnabled(id)) await this.disableModule(id);
+				// Parte do DESEJO DO DISCO (config recém-gravada pelo reset), não
+				// dos sets em memória — um módulo que falhou 3x antes do reset tem
+				// o desejo em memória limpo pelo próprio enterSafeMode.
+				if (desired.has(id) && !this.enabledModuleIds.has(id)) await this.enableModule(id);
+				else if (!desired.has(id) && (this.enabledModuleIds.has(id) || this.isModuleEnabled(id))) {
+					await this.disableModule(id);
+				}
 			}
 		}
 		if (level !== "config") {

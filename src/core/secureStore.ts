@@ -26,6 +26,12 @@ export function obfuscate(value: string): string {
 
 export function deobfuscate(stored: string): string {
 	try {
+		// Buffer.from(base64) do Node IGNORA caracteres inválidos em vez de
+		// falhar — um data.json corrompido/truncado viraria bytes arbitrários
+		// e "deobfuscaria" lixo como se fosse token. A checagem de formato
+		// aqui garante que só base64 estrito entra no XOR; qualquer coisa
+		// fora dele degrada para vazio (o gate Bearer do MCP recusa vazio).
+		if (!/^[A-Za-z0-9+/]*={0,2}$/.test(stored) || stored.length % 4 !== 0) return "";
 		const bytes = Buffer.from(stored, "base64");
 		return Array.from(bytes)
 			.map((byte, i) => String.fromCharCode(byte ^ XOR_KEY.charCodeAt(i % XOR_KEY.length)))

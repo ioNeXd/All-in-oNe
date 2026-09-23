@@ -1,6 +1,8 @@
 import { Notice, Setting } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
-import { cryptoRandomId } from "../../core/types";
+import { randomId } from "../../core/types";
+import { WriteBehindQueue } from "../../core/WriteBehind";
+import { AudioUnlocker } from "../../core/AudioUnlock";
 import {
 	buildFilterOptions,
 	countByTrigger,
@@ -134,12 +136,22 @@ export class NotificationsModule implements HubModule {
 
 	private context?: ModuleContext;
 	private unsubscribers: (() => void)[] = [];
-	/** Notificações ainda não persistidas (write-behind, ver FLUSH_INTERVAL_MS). */
-	private pendingNotifications: StoredNotification[] = [];
+	/**
+	 * Notificações ainda não persistidas (write-behind, ver FLUSH_INTERVAL_MS).
+	 * Fila com confirm: itens saem só quando o save persiste — um record
+	 * durante o save em voo vai no drain seguinte, sem janela de perda
+	 * (ver core/WriteBehind.ts).
+	 */
+	private pendingNotifications = new WriteBehindQueue<StoredNotification>();
 	private flushTimer?: ReturnType<typeof setTimeout>;
 	/** Protetor de corrida clear/reset × flush pendente (ver flushNow). */
 	private flushGeneration = 0;
-	private audioCtx?: AudioContext;
+	/**
+	 * Desbloqueio de áudio: o contexto nasce suspenso até um GESTO do usuário
+	 * (core/AudioUnlock.ts). Arma os ouvintes no onEnable; o som só toca após
+	 * o primeiro clique/tecla na janela — antes disso o popup sai sem som.
+	 */
+	private readonly audioUnlocker = new AudioUnlocker();
 
 	onRegister(context: ModuleContext): void {
 		this.context = context;
@@ -147,6 +159,7 @@ export class NotificationsModule implements HubModule {
 
 	onEnable(): void {
 		const context = this.context!;
+		this.audioUnlocker.arm();
 
 		// Escuta TODOS os gatilhos conhecidos — não só os que já têm regra
 		// salva. Antes, um gatilho ativado depois do onEnable nunca passava a
@@ -179,7 +192,8 @@ export class NotificationsModule implements HubModule {
 
 		context.registerCommand("notifications-test", "Notificações: disparar teste", () => {
 			this.showPopup("🔔 Notificação de teste do All iₙ oNe", "normal");
-			void this.playSound("normal");
+			// Comando da Paleta É um gesto: destrava (e o primeiro teste já tem som).
+			void this.audioUnlocker.unlock().then(() => this.playSound("normal"));
 		});
 	}
 
@@ -192,7 +206,8 @@ export class NotificationsModule implements HubModule {
 			.addButton((btn) =>
 				btn.setButtonText("Disparar teste").onClick(() => {
 					this.showPopup("🔔 Notificação de teste do All iₙ oNe", "normal");
-					void this.playSound("normal");
+					// O clique no botão É o gesto exigido pela política de autoplay:
+					void this.audioUnlocker.unlock().then(() => this.playSound("normal"));
 				})
 			);
 
@@ -278,7 +293,7 @@ export class NotificationsModule implements HubModule {
 					this.flushGeneration++;
 					if (this.flushTimer) clearTimeout(this.flushTimer);
 					this.flushTimer = undefined;
-					this.pendingNotifications = [];
+					this.pendingNotifications.clear();
 					await this.context?.updateSettings({ history: [] });
 					container.empty();
 					this.renderSettingsPanel(container);
@@ -367,6 +382,9 @@ export class NotificationsModule implements HubModule {
 	onDisable(): void {
 		this.unsubscribers.forEach((u) => u());
 		this.unsubscribers = [];
+		// Ouvintes de gesto morrem com o módulo; o contexto destravado
+		// sobrevive — religar não re-trava o som.
+		this.audioUnlocker.disarm();
 		void this.flushNow(); // não perde o que já foi notificado na sessão
 	}
 
@@ -380,7 +398,7 @@ export class NotificationsModule implements HubModule {
 		this.flushGeneration++;
 		if (this.flushTimer) clearTimeout(this.flushTimer);
 		this.flushTimer = undefined;
-		this.pendingNotifications = [];
+		this.pendingNotifications.clear();
 		return (this.context?.updateSettings({ history: [] }) ?? Promise.resolve([])).then(() => void 0);
 	}
 
@@ -388,11 +406,12 @@ export class NotificationsModule implements HubModule {
 		const settings = { ...NOTIFICATIONS_DEFAULTS, ...this.context?.getSettings<NotificationsModuleSettings>() };
 		// As pendentes do write-behind fazem parte do estado lógico — leitura
 		// (painel, contagem de não lidas) inclui o que ainda não chegou ao disco.
-		if (this.pendingNotifications.length > 0) {
+		const pending = this.pendingNotifications.pendingSnapshot();
+		if (pending.length > 0) {
 			const persisted = settings.history.filter(
-				(h) => !this.pendingNotifications.some((p) => p.id === h.id)
+				(h) => !pending.some((p) => p.id === h.id)
 			);
-			settings.history = [...this.pendingNotifications, ...persisted].slice(0, MAX_HISTORY);
+			settings.history = [...pending, ...persisted].slice(0, MAX_HISTORY);
 		}
 		return settings;
 	}
@@ -465,18 +484,18 @@ export class NotificationsModule implements HubModule {
 	}
 
 	/**
-	 * Toca um bipe curto. O AudioContext nasce suspenso até haver interação do
-	 * usuário na janela (política de autoplay do Chromium, que o Obsidian usa)
-	 * — por isso o `resume()` explícito: sem ele, o som simplesmente não saía.
+	 * Toca um bipe curto. O contexto vem do AudioUnlocker compartilhado: só
+	 * toca se já houve gesto do usuário (política de autoplay do Chromium) —
+	 * disparo automático antes do primeiro clique sai SEM som (o popup segue;
+	 * é a política do navegador, e fingir o contrário era o bug do som mudo).
 	 */
 	private async playSound(priority: "low" | "normal" | "high"): Promise<void> {
+		const audioCtx = this.audioUnlocker.getRunningContext();
+		if (!audioCtx) return;
 		try {
-			this.audioCtx = this.audioCtx ?? new AudioContext();
-			if (this.audioCtx.state === "suspended") {
-				await this.audioCtx.resume();
-			}
-
-			const ctx = this.audioCtx;
+			// Nós tipados localmente (OscillatorNode/GainNode reais): o unlocker
+			// abstrai só o ciclo de vida do contexto, não a síntese.
+			const ctx = audioCtx as unknown as AudioContext;
 			const now = ctx.currentTime;
 			const oscillator = ctx.createOscillator();
 			const gain = ctx.createGain();
@@ -515,10 +534,10 @@ export class NotificationsModule implements HubModule {
 
 	private appendHistory(trigger: NotifiableTrigger, message: string): void {
 		const entry: StoredNotification = {
-			// cryptoRandomId (mesmo gerador do núcleo): duas notificações no mesmo
+			// randomId (mesmo gerador do núcleo): duas notificações no mesmo
 			// milissegundo colidiam com `notif-${Date.now()}` e uma sobrescrevia
 			// a outra no "marcar como lida" por id.
-			id: `notif-${cryptoRandomId()}`,
+			id: `notif-${randomId()}`,
 			trigger,
 			message,
 			timestamp: Date.now(),
@@ -526,28 +545,41 @@ export class NotificationsModule implements HubModule {
 		};
 
 		// Write-behind: a leitura (painel) SEMPRE inclui as pendentes — o
-		// usuário vê na hora; só o DISCO é que é coalescido.
-		this.pendingNotifications = [entry, ...this.pendingNotifications].slice(0, MAX_HISTORY);
+		// usuário vê na hora; só o DISCO é que é coalescido. A fila aplica o
+		// teto internamente ao confirmar (o flush grava no máximo MAX_HISTORY).
+		this.pendingNotifications.enqueue(entry);
 		if (!this.flushTimer) {
 			this.flushTimer = setTimeout(() => void this.flushNow(), FLUSH_INTERVAL_MS);
 		}
 	}
 
-	/** Drena as notificações pendentes num único save (batedor: reset invalida a geração). */
+	/**
+	 * Drena as notificações pendentes num único save (batedor: reset invalida
+	 * a geração). O lote sai da fila SÓ no confirm — save falhado é re-tentado
+	 * no próximo flush, sem a janela de perda do padrão anterior.
+	 */
 	private async flushNow(): Promise<void> {
 		this.flushTimer = undefined;
-		if (this.pendingNotifications.length === 0) return;
+		if (this.pendingNotifications.size === 0) return;
 		const generation = this.flushGeneration;
-		const batch = this.pendingNotifications;
-		this.pendingNotifications = [];
+		const drain = this.pendingNotifications.takeBatch(MAX_HISTORY);
+		if (drain.batch.length === 0) return;
 
-		const settings = this.readSettings();
-		const merged = [...batch, ...settings.history].slice(0, MAX_HISTORY);
-		await this.context?.updateSettings({ history: merged });
-		if (generation !== this.flushGeneration) {
-			// Reset/limpeza aconteceu enquanto o save estava em voo: a fatia
-			// limpa no disco acabou de ser sobrescrita — desfaz.
-			await this.context?.updateSettings({ history: [] });
+		try {
+			const settings = this.readSettings();
+			// readSettings JÁ inclui o lote em voo (pendingSnapshot, dedupe por
+			// id contra o disco) — merged parte dele, sem reprefixar o batch.
+			const merged = settings.history.slice(0, MAX_HISTORY);
+			await this.context?.updateSettings({ history: merged });
+			if (generation !== this.flushGeneration) {
+				// Reset/limpeza aconteceu enquanto o save estava em voo: a fatia
+				// limpa no disco acabou de ser sobrescrita — desfaz.
+				await this.context?.updateSettings({ history: [] });
+			}
+			drain.confirm();
+		} catch {
+			// Save falhou: SEM confirm — o lote segue pendente para o próximo
+			// flush re-tentar (a notificação não se perde na variável local).
 		}
 	}
 
@@ -555,10 +587,16 @@ export class NotificationsModule implements HubModule {
 		const settings = this.readSettings();
 		const readAll = settings.history.map((h) => ({ ...h, read: true }));
 		// As pendentes viram "lidas" também na memória, para o flush não as
-		// ressuscitar como não lidas no disco depois.
-		this.pendingNotifications = readAll.filter((h) =>
-			this.pendingNotifications.some((p) => p.id === h.id)
+		// ressuscitar como não lidas no disco depois. A fila é reconstruída a
+		// partir do snapshot (lidas), mantendo quem está em voo em voo — os
+		// ids pendentes continuam os mesmos.
+		const pendingIds = new Set(
+			this.pendingNotifications.pendingSnapshot().map((p) => p.id)
 		);
+		this.pendingNotifications.clear();
+		for (const notification of readAll.filter((h) => pendingIds.has(h.id)).reverse()) {
+			this.pendingNotifications.enqueue(notification);
+		}
 		await this.context?.updateSettings({ history: readAll });
 	}
 }

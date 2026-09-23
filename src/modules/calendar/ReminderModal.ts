@@ -1,5 +1,6 @@
 import { App, Modal, Setting, TFile } from "obsidian";
 import type { CalendarEvent } from "./EventTypes";
+import type { AudioUnlocker } from "../../core/AudioUnlock";
 
 /**
  * JANELA DE LEMBRETE
@@ -128,11 +129,19 @@ function getElectronWindow(): ElectronWindowLike | null {
 	}
 }
 
-/** Som do lembrete: sequência de três notas, mais audível que um bipe só. */
-export async function playReminderChime(): Promise<void> {
+/**
+ * Som do lembrete: sequência de três notas, mais audível que um bipe só.
+ * O contexto vem do AudioUnlocker COMPARTILHADO (core/AudioUnlock.ts) — o
+ * lembrete dispara sozinho (relógio/evento), sem gesto na hora: sem o
+ * destravamento por clique armado no onEnable do módulo, o contexto novo
+ * nasceria suspenso e o `resume()` falharia em silêncio (popup mudo).
+ * Sem gesto ainda → sem som (o popup segue; é a política do navegador).
+ */
+export async function playReminderChime(unlocker: AudioUnlocker): Promise<void> {
+	const audioCtx = unlocker.getRunningContext();
+	if (!audioCtx) return;
 	try {
-		const ctx = new AudioContext();
-		if (ctx.state === "suspended") await ctx.resume();
+		const ctx = audioCtx as unknown as AudioContext;
 
 		const notes = [659.25, 783.99, 1046.5]; // mi, sol, dó
 		notes.forEach((frequency, index) => {
@@ -149,8 +158,8 @@ export async function playReminderChime(): Promise<void> {
 			osc.start(start);
 			osc.stop(start + 0.4);
 		});
-
-		window.setTimeout(() => void ctx.close(), 2000);
+		// SEM ctx.close(): o contexto é compartilhado (Notificações + Calendário)
+		// — fechá-lo mataria o som do próximo módulo que tocar.
 	} catch (err) {
 		console.warn("[All iₙ oNe] Não foi possível tocar o som do lembrete:", err);
 	}

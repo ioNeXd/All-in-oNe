@@ -6,7 +6,7 @@ import type { CalendarEvent } from "./EventTypes";
  * Recebe o TEXTO de um arquivo .ics (iCalendar, RFC 5545) e devolve eventos
  * no modelo do projeto (CalendarEvent, ver EventTypes.ts). Regra de negócio
  * pura em arquivo próprio ao lado do módulo — padrão do projeto (como
- * mcp/WriteRules.ts e templates/NoteStatus.ts) — com suíte própria que
+ * mcp/WriteRules.ts e core/NoteStatus.ts) — com suíte própria que
  * importa este código real.
  *
  * MAPA DE CONVERSÃO (o modelo do projeto é mais estreito que o iCalendar —

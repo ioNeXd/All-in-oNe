@@ -6,6 +6,15 @@ import type { HubModule, ModuleContext, ModuleManifest, ConfigValidationIssue } 
 import type { HubSettings } from "../../core/types";
 import { isNewerVersion, parseChecksums } from "./ReleaseUtils";
 import {
+	BACKUP_FILES,
+	BACKUP_DIR,
+	backupFilePath,
+	pickExisting,
+	migrateLegacyBackup,
+	readBackFromDisk,
+	type VersionBackupMeta,
+} from "./UpdateBackup";
+import {
 	decideSignatureVerification,
 	detectBratInstallation,
 	findSignatureAsset,
@@ -20,7 +29,13 @@ export interface AutoUpdateSettings {
 	lastCheckedAt: number;
 	checkIntervalMs: number;
 	lastKnownVersion?: string;
-	previousVersionBackup?: { version: string; files: Record<string, string> };
+	/**
+	 * Metadado do backup de rollback — SÓ o metadado (pequeno). Os CONTEÚDOS
+	 * moram em arquivos sob `<pasta do plugin>/.backup/` (main.js passa de
+	 * 1MB; inline no data.json inchava cada save de config e o sync). Sem
+	 * backup: undefined.
+	 */
+	previousVersionBackup?: VersionBackupMeta;
 	/**
 	 * Opt-in: verificar a assinatura GPG dos assets antes de instalar.
 	 * Ligada, a ausência de assinatura no release (ou do binário gpg) ABORTA
@@ -100,6 +115,8 @@ export class AutoUpdateModule implements HubModule {
 	}
 
 	async onEnable(): Promise<void> {
+		await this.migrateLegacyInlineBackup();
+
 		// Interoperabilidade com o BRAT: se o BRAT gerencia este plugin, ele é
 		// o dono do ciclo de atualização — duas mãos escrevendo main.js é
 		// corrida de escrita (e rollback de dois donos). O módulo CEDe: sem
@@ -122,6 +139,47 @@ export class AutoUpdateModule implements HubModule {
 		const settings = this.readSettings();
 		if (Date.now() - settings.lastCheckedAt > settings.checkIntervalMs) {
 			void this.checkForUpdates({ manual: false });
+		}
+	}
+
+	/**
+	 * Migração do formato LEGADO do backup (conteúdos inline no data.json →
+	 * arquivos em .backup/): roda no primeiro onEnable após a atualização,
+	 * escreve os arquivos e troca o metadado. Em caso de falha de escrita, o
+	 * legado PERMANECE no settings (rollback continua funcionando pelo caminho
+	 * antigo) — migração idempotente, tenta de novo no próximo enable.
+	 */
+	private async migrateLegacyInlineBackup(): Promise<void> {
+		const settings = this.readSettings();
+		const backup = settings.previousVersionBackup as
+			| { version: string; files: unknown }
+			| undefined;
+		// Formato novo já (files: string[]) → nada a fazer. Detecção: no legado,
+		// `files` é um Record de conteúdos; no novo, um array de nomes.
+		if (!backup || Array.isArray(backup.files)) return;
+
+		const migrated = migrateLegacyBackup(backup as never);
+		if (!migrated) {
+			// Legado vazio (sem conteúdos): o botão "Reverter" nunca funcionaria —
+			// limpa o metadado em vez de manter uma promessa falsa.
+			await this.context?.updateSettings({ previousVersionBackup: undefined });
+			return;
+		}
+		try {
+			const adapter = this.context!.app.vault.adapter;
+			const pluginDir = this.getPluginDir();
+			await adapter.mkdir(`${pluginDir}/${BACKUP_DIR}`).catch(() => undefined);
+			for (const [name, content] of Object.entries(migrated.contents)) {
+				await adapter.write(backupFilePath(pluginDir, name), content);
+			}
+			await this.context?.updateSettings({ previousVersionBackup: migrated.meta });
+			this.context?.log(
+				`Backup do rollback migrado para .backup/ (versão ${migrated.meta.version})`
+			);
+		} catch (err) {
+			// Sem trocar o metadado: o legado continua restaurável pelo caminho
+			// antigo; a migração tenta de novo no próximo onEnable.
+			console.error("[All iₙ oNe] Falha ao migrar backup legado do auto-update:", err);
 		}
 	}
 
@@ -290,12 +348,28 @@ export class AutoUpdateModule implements HubModule {
 		return { ...AUTOUPDATE_DEFAULTS, ...this.context?.getSettings<AutoUpdateSettings>() };
 	}
 
+	/**
+	 * Verifica atualizações. CONTRATO DO RETORNO (documentado de propósito,
+	 * ver item de revisão — o antigo branch "ignorado" devolvia o release
+	 * SEM notificar, e um caller futuro podia auto-aplicar sem UI):
+	 *
+	 *   - GitHubRelease = a versão foi apresentada ao usuário NESTA chamada
+	 *     (notice com botões Atualizar/Ignorar + evento autoupdate:available).
+	 *     O retorno é só para feedback de chamadores DE UI (ex.: painel que
+	 *     quer atualizar o próprio resumo) — NUNCA um gatilho para aplicar.
+	 *   - null = nada foi apresentado (sem candidate, mesma versão, versão
+	 *     dispensada pelo usuário, BRAT no controle ou falha de rede).
+	 *
+	 * Ou seja: "candidate no retorno" ⇒ "usuário notificado". O fluxo de
+	 * instalação mora EXCLUSIVAMENTE no botão do notice (applyUpdate);
+	 * caller nenhum deve agir sobre o retorno além de exibir estado.
+	 */
 	async checkForUpdates(opts: { manual: boolean }): Promise<GitHubRelease | null> {
 		if (this.managedByBrat) {
 			if (opts.manual) {
 				new Notice(
-					"All iₙ oNe: o BRAT está gerenciando este plugin — as atualizações são controladas por ele. " +
-						"Este módulo não compete com o BRAT.",
+					"All iₙ oNe: o BRAT está gerenciando este plugin — as atualizações são controladas por ele. "
+						+ "Este módulo não compete com o BRAT.",
 					8000
 				);
 			}
@@ -324,11 +398,16 @@ export class AutoUpdateModule implements HubModule {
 				return null;
 			}
 
-			// "Ignorar" significa ignorar ESTA versão: o lastKnownVersion (que
-			// existia no tipo mas nunca era lido) guarda a versão dispensada, e a
-			// notificação automática não reaparece a cada 6h pela mesma versão.
-			// Checagem manual sempre mostra — o usuário pediu explicitamente.
-			if (!opts.manual && settings.lastKnownVersion === remoteVersion) return candidate;
+			// "Ignorar" significa ignorar ESTA versão: o lastKnownVersion guarda
+			// a versão dispensada, e a notificação automática não reaparece a
+			// cada 6h pela mesma versão. Checagem manual sempre mostra — o
+			// usuário pediu explicitamente.
+			if (!opts.manual && settings.lastKnownVersion === remoteVersion) {
+				// Versão dispensada: NADA é apresentado → null (contrato acima).
+				// O antigo `return candidate` aqui era o vício: devolvia o release
+				// sem notificar, quebrando a implicação "retorno ⇒ notificado".
+				return null;
+			}
 
 			this.notifyUpdateAvailable(remoteVersion, candidate);
 			await this.context?.bus.emit(
@@ -505,22 +584,40 @@ export class AutoUpdateModule implements HubModule {
 		}
 	}
 
-	/** Guarda uma cópia dos arquivos atuais antes de sobrescrever — permite rollback. */
+	/**
+	 * Guarda uma cópia dos arquivos atuais antes de sobrescrever — permite
+	 * rollback. Os CONTEÚDOS vão para arquivos em `.backup/` (na pasta do
+	 * plugin); no settings entra só o metadado — o data.json deixou de
+	 * carregar main.js inteiro a cada save.
+	 */
 	private async backupCurrentVersion(): Promise<void> {
 		const adapter = this.context!.app.vault.adapter;
 		const pluginDir = this.getPluginDir();
-		const files: Record<string, string> = {};
-		for (const name of ["main.js", "manifest.json", "styles.css"]) {
-			const path = `${pluginDir}/${name}`;
-			if (await adapter.exists(path)) {
-				files[name] = await adapter.read(path);
-			}
+		const existence: Record<string, boolean> = {};
+		for (const name of BACKUP_FILES) {
+			existence[name] = await adapter.exists(`${pluginDir}/${name}`);
+		}
+		const toCopy = pickExisting(existence);
+		if (toCopy.length === 0) return; // nada a copiar — sem metadado mentiroso
+
+		await adapter.mkdir(`${pluginDir}/${BACKUP_DIR}`).catch(() => undefined); // já existe = ok
+		for (const name of toCopy) {
+			const content = await adapter.read(`${pluginDir}/${name}`);
+			await adapter.write(backupFilePath(pluginDir, name), content);
 		}
 		await this.context?.updateSettings({
-			previousVersionBackup: { version: this.currentVersion, files },
+			previousVersionBackup: {
+				version: this.currentVersion,
+				files: toCopy,
+				backedUpAt: Date.now(),
+			},
 		});
 	}
 
+	/**
+	 * Restaura a versão anterior: lê os conteúdos de `.backup/` e reescreve
+	 * os arquivos do plugin. Backup em ARQUIVOS (metadado pequeno no settings).
+	 */
 	async rollback(): Promise<void> {
 		const settings = this.readSettings();
 		const backup = settings.previousVersionBackup;
@@ -528,7 +625,26 @@ export class AutoUpdateModule implements HubModule {
 			new Notice("All iₙ oNe: não há versão anterior salva para rollback.");
 			return;
 		}
-		for (const [name, content] of Object.entries(backup.files)) {
+		const adapter = this.context!.app.vault.adapter;
+		const pluginDir = this.getPluginDir();
+		const diskContents: Record<string, string | undefined> = {};
+		for (const name of backup.files) {
+			diskContents[name] = await adapter
+				.read(backupFilePath(pluginDir, name))
+				.catch(() => undefined);
+		}
+		const toRestore = readBackFromDisk(backup, diskContents);
+		if (Object.keys(toRestore).length === 0) {
+			// Metadado sem nenhum arquivo legível: o backup apodreceu (usuário
+			// apagou a pasta, sync conflitante). O botão morre COM aviso claro —
+			// nunca um rollback que escreve nada e "funciona".
+			await this.context?.updateSettings({ previousVersionBackup: undefined });
+			new Notice(
+				"All iₙ oNe: o backup da versão anterior não está mais legível (pasta .backup apagada?). Não há como reverter."
+			);
+			return;
+		}
+		for (const [name, content] of Object.entries(toRestore)) {
 			await this.writePluginFile(name, content);
 		}
 		new Notice(`All iₙ oNe: revertido para ${backup.version}. Recarregue o plugin.`);

@@ -12,6 +12,27 @@
  * A razão de nascer com os DOIS valores está documentada em applyRuleToNote.
  */
 
+/**
+ * VALORES CANÔNICOS DO FRONTMATTER — fonte única também para ESCRITA.
+ * As funções abaixo já cobriam a LEITURA; os consumidores que gravavam o
+ * status usavam literais soltos ("Completo", ["Pendente", "Completo"]), o
+ * que era duplicação semântica esperando um drift: um typo num só lugar e
+ * notas nascem completas sem ninguém perceber. Todo gravador usa estas
+ * constantes.
+ */
+
+/** Valor do chip pendente (formato v0.6.0 nasce com os DOIS valores). */
+export const STATUS_PENDING = "Pendente";
+
+/** Valor do chip de conclusão. */
+export const STATUS_COMPLETE = "Completo";
+
+/** Status normalizado de nota COMPLETADA. */
+export const STATUS_COMPLETE_NORMALIZED = [STATUS_COMPLETE];
+
+/** Status de nota recém-criada por template: pendente (os DOIS chips). */
+export const STATUS_PENDING_INITIAL = [STATUS_PENDING, STATUS_COMPLETE];
+
 /** Ainda tem o chip "Pendente"? Aceita lista ou string solta, qualquer capitalização. */
 export function isPendingStatus(status: unknown): boolean {
 	const values = Array.isArray(status) ? status : [status];

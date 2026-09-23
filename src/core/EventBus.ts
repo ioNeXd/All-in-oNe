@@ -92,6 +92,44 @@ export class EventBus {
 				list.filter((s) => s.moduleId !== moduleId)
 			);
 		}
+		this.cancelIdleCoalescers();
+	}
+
+	/**
+	 * Derruba o bus inteiro (teardown do plugin): todas as inscrições, timers
+	 * de coalesce e buffers pendentes. Chamado pelo main.ts no onunload — sem
+	 * isto, um timer de coalesce em voo podia disparar emit DEPOIS do unload,
+	 * executando handlers de um ambiente já desmontado.
+	 */
+	disposeAll(): void {
+		for (const timer of this.coalesceTimers.values()) clearTimeout(timer);
+		this.coalesceTimers.clear();
+		this.coalescedPayloads.clear();
+		this.subscriptions.clear();
+	}
+
+	/**
+	 * Limpa timers/buffers de coalesce cujos eventos ficaram SEM inscritos
+	 * (ex.: único ouvinte desligado — onDisable → offAll). O timer ainda
+	 * dispararia e o emit seria no-op em handlers vazios: inofensivo na
+	 * prática, mas mantém o event loop vivo à toa durante a sessão inteira
+	 * (o timer de 20-30ms só morre quando dispara) e enterrava o payload
+	 * pendente que nenhum novo inscrito veria chegar — melhor cancelar e
+	 * rearmar do zero se alguém voltar a escutar.
+	 */
+	private cancelIdleCoalescers(): void {
+		for (const [throttleKey, timer] of this.coalesceTimers.entries()) {
+			// A chave é "evento:fonte"; o evento pode conter ":" no nome — remove
+			// só o ÚLTIMO segmento (a fonte), nunca o primeiro (o nome).
+			const lastColon = throttleKey.lastIndexOf(":");
+			const eventName = lastColon === -1 ? throttleKey : throttleKey.slice(0, lastColon);
+			const hasListeners = (this.subscriptions.get(eventName) ?? []).length > 0;
+			if (!hasListeners) {
+				clearTimeout(timer);
+				this.coalesceTimers.delete(throttleKey);
+				this.coalescedPayloads.delete(throttleKey);
+			}
+		}
 	}
 
 	/**

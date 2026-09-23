@@ -1,5 +1,7 @@
 import * as http from "http";
 import { negotiateToolsApiVersion } from "./ToolsApiVersion";
+import { TOOL_DEFINITIONS } from "./ToolSchemas";
+import { AuthThrottle, identityOf } from "./AuthThrottle";
 
 /**
  * TRANSPORTE: STREAMABLE HTTP
@@ -30,6 +32,11 @@ export interface McpServerOptions {
 		toolName: string,
 		args: Record<string, unknown>
 	) => Promise<{ ok: boolean; result?: unknown; error?: string }>;
+	/**
+	 * Throttle de autenticação (opcional — instância própria por default).
+	 * Injetável para teste determinístico; reset() roda no stop().
+	 */
+	authThrottle?: AuthThrottle;
 }
 
 export interface McpServerHandle {
@@ -44,39 +51,37 @@ const LATEST_PROTOCOL_VERSION = "2025-06-18";
 /** Erro enviado ao cliente quando a negociação de versão da API rejeita o pedido. */
 export const TOOLS_API_INCOMPATIBLE = "TOOLS_API_INCOMPATIBLE";
 
-const TOOL_DEFINITIONS = [
-	{ name: "read_note", description: "Lê o conteúdo de uma nota." },
-	{ name: "create_note", description: "Cria uma nova nota." },
-	{ name: "append_note", description: "Adiciona conteúdo ao final de uma nota." },
-	{ name: "edit_note", description: "Substitui o conteúdo de uma nota." },
-	{ name: "delete_note", description: "Move uma nota para a lixeira." },
-	{ name: "list_folder", description: "Lista arquivos e pastas de um caminho." },
-	{ name: "search_vault", description: "Busca texto no vault inteiro." },
-	{ name: "get_note_metadata", description: "Retorna frontmatter e tags de uma nota." },
-	{ name: "describe_vault", description: "Visão geral do vault (contagens)." },
-	{ name: "rename_note", description: "Renomeia ou move uma nota." },
-	{ name: "patch_note", description: "Substitui um trecho exato dentro de uma nota." },
-	{ name: "get_links", description: "Links e embeds que saem de uma nota." },
-	{ name: "get_backlinks", description: "Notas que apontam para uma nota." },
-	{ name: "list_tags", description: "Todas as tags existentes no vault." },
-	{ name: "search_by_tag", description: "Notas que possuem uma tag." },
-	{ name: "list_attachments", description: "Lista os arquivos não-markdown do vault." },
-	{ name: "get_attachment", description: "Lê um anexo (retorna base64)." },
-	{ name: "put_attachment", description: "Cria ou sobrescreve um anexo (conteúdo em base64)." },
-	{ name: "delete_attachment", description: "Move um anexo para a lixeira." },
-	{ name: "get_server_info", description: "Versão do plugin, da API de ferramentas e contagens do vault." },
-	{ name: "split_note", description: "Divide uma nota em várias, quebrando nos headings." },
-	{ name: "combine_notes", description: "Junta várias notas em uma só." },
-	{ name: "dataview_query", description: "Executa uma query Dataview (exige o plugin Dataview)." },
-	{ name: "get_active_file", description: "Qual nota está aberta agora no Obsidian." },
-];
+/**
+ * Códigos de erro JSON-RPC 2.0 padronizados — clientes sérios (incluindo os
+ * SDKs MCP) dispatcham por NÚMERO, não por mensagem. Erros de protocolo na
+ * camada do servidor os usam; o payload `error.data` preserva o detalhe.
+ * (Erro de EXECUÇÃO de tool é diferente: permanece dentro do result do
+ * `tools/call`, como manda o spec do MCP — não passa por aqui.)
+ */
+export const JSONRPC_ERRORS = {
+	/** Requisição não pôde ser interpretada como JSON. */
+	PARSE_ERROR: -32700,
+	/** JSON inválido como protocolo (ex.: não é um objeto). */
+	INVALID_REQUEST: -32600,
+	/** Método inexistente no servidor. */
+	METHOD_NOT_FOUND: -32601,
+	/** Argumentos malformados para um método existente. */
+	INVALID_PARAMS: -32602,
+	/** Falha interna (o 500 da camada HTTP). */
+	INTERNAL_ERROR: -32603,
+} as const;
+
+// As definições (name + description + inputSchema JSON Schema) vivem em
+// ToolSchemas.ts, puro e testado — clientes em modo estrito (Claude Desktop,
+// Cursor) exigem o schema para montar os argumentos corretamente.
 
 export async function createMcpServer(options: McpServerOptions): Promise<McpServerHandle> {
+	const authThrottle = options.authThrottle ?? new AuthThrottle();
 	const server = http.createServer((req, res) => {
 		// Última linha de defesa: uma exceção assíncrona num handler NUNCA pode
 		// derrubar o processo do Obsidian (e com ele o vault do usuário) — nem
 		// deixar a conexão aberta para sempre. Loga e responde 500.
-		handleRequest(req, res, options).catch((err) => {
+		handleRequest(req, res, options, authThrottle).catch((err) => {
 			console.error("[All iₙ oNe] Erro não tratado no servidor MCP:", err);
 			if (!res.headersSent) {
 				res.writeHead(500).end(JSON.stringify({ error: "Erro interno do servidor MCP." }));
@@ -98,6 +103,7 @@ export async function createMcpServer(options: McpServerOptions): Promise<McpSer
 		port,
 		stop: () =>
 			new Promise<void>((resolve) => {
+				authThrottle.reset(); // teardown: estado de lockout morre com o servidor
 				server.close(() => resolve());
 				// Conexões keep-alive de clientes ainda abertas segurariam o
 				// close() até o timeout do socket — o desligamento do módulo
@@ -110,7 +116,8 @@ export async function createMcpServer(options: McpServerOptions): Promise<McpSer
 async function handleRequest(
 	req: http.IncomingMessage,
 	res: http.ServerResponse,
-	options: McpServerOptions
+	options: McpServerOptions,
+	authThrottle: AuthThrottle
 ): Promise<void> {
 	if (req.method !== "POST") {
 		res.writeHead(405).end("Method Not Allowed");
@@ -119,10 +126,30 @@ async function handleRequest(
 
 	const authHeader = req.headers["authorization"] ?? "";
 	const expectedToken = options.getToken();
-	if (expectedToken && authHeader !== `Bearer ${expectedToken}`) {
+	const hasAuthGate = !!expectedToken;
+	const identity = identityOf(req);
+	// Sem identidade (socket patológico) o throttle é PULADO para esta
+	// requisição — não há como punir uma chave comum sem punir todo mundo.
+	const throttled = hasAuthGate && identity !== undefined;
+
+	if (throttled) {
+		const decision = authThrottle.check(identity!);
+		if (!decision.allowed) {
+			// 429 + Retry-After: o cliente honesto (e o atacante) descobrem
+			// QUANDO voltar — e a comparação de token nem acontece.
+			res
+				.writeHead(429, { "Retry-After": String(decision.retryAfterSeconds ?? 60) })
+				.end(JSON.stringify({ error: "Muitas falhas de autenticação. Tente novamente mais tarde." }));
+			return;
+		}
+	}
+
+	if (hasAuthGate && authHeader !== `Bearer ${expectedToken}`) {
+		if (throttled) authThrottle.recordFailure(identity!);
 		res.writeHead(401).end(JSON.stringify({ error: "Token inválido." }));
 		return;
 	}
+	if (throttled) authThrottle.recordSuccess(identity!);
 
 	// Limite de tamanho aplicado NO STREAMING: um corpo maior que MAX_BODY_BYTES
 	// derruba a conexão no meio, em vez de acumular tudo na memória antes de
@@ -145,7 +172,13 @@ async function handleRequest(
 	try {
 		message = JSON.parse(body);
 	} catch {
-		res.writeHead(400).end(JSON.stringify({ error: "JSON inválido." }));
+		res.writeHead(200).end(
+			JSON.stringify({
+				jsonrpc: "2.0",
+				id: null, // sem id parseável — o padrão manda null
+				error: { code: JSONRPC_ERRORS.PARSE_ERROR, message: "JSON inválido." },
+			})
+		);
 		return;
 	}
 
@@ -178,6 +211,8 @@ async function handleRequest(
 			if (!negotiation.compatible) {
 				respondError(res, message.id, negotiation.reason ?? "Versão da API de ferramentas incompatível.", {
 					code: TOOLS_API_INCOMPATIBLE,
+					// Método EXISTE; os argumentos é que são inaceitáveis:
+					jsonRpcCode: JSONRPC_ERRORS.INVALID_PARAMS,
 				});
 				return;
 			}
@@ -205,7 +240,9 @@ async function handleRequest(
 			return;
 		}
 		default:
-			respondError(res, message.id, `Método não suportado: ${message.method}`);
+			respondError(res, message.id, `Método não suportado: ${message.method}`, {
+				jsonRpcCode: JSONRPC_ERRORS.METHOD_NOT_FOUND,
+			});
 	}
 }
 
@@ -217,10 +254,21 @@ function respondError(
 	res: http.ServerResponse,
 	id: unknown,
 	error: string,
-	opts?: { code?: string }
+	opts?: { code?: string; jsonRpcCode?: number }
 ): void {
 	res.writeHead(200).end(
-		JSON.stringify({ jsonrpc: "2.0", id, error: { message: error, ...(opts?.code ? { code: opts.code } : {}) } })
+		JSON.stringify({
+			jsonrpc: "2.0",
+			id,
+			error: {
+				// Código NUMÉRICO do padrão (default: server error genérico) —
+				// clientes dispatcham por número. `code` string (ex.:
+				// TOOLS_API_INCOMPATIBLE) e a mensagem seguem em `data`.
+				code: opts?.jsonRpcCode ?? JSONRPC_ERRORS.INTERNAL_ERROR,
+				message: error,
+				...(opts?.code ? { data: { code: opts.code } } : {}),
+			},
+		})
 	);
 }
 

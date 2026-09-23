@@ -9,10 +9,13 @@ import type {
 import type { HubSettings } from "../../core/types";
 import { obfuscate, deobfuscate } from "../../core/secureStore";
 import { createMcpServer, McpServerHandle } from "./server";
+import { TOOL_DEFINITIONS } from "./ToolSchemas";
 import { pathMatchesFolder as pathMatches, collectWriteTargets } from "./WriteRules";
 import { negotiateToolsApiVersion, TOOLS_API_VERSION } from "./ToolsApiVersion";
-import { ensureVaultFolder } from "../../core/VaultPaths";
-import { cryptoRandomId } from "../../core/types";
+import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
+import { randomId, cryptoRandomToken } from "../../core/types";
+import { searchVault, normalizeQuery } from "./SearchVault";
+import { createRateLimiter, wouldAllow } from "./RateLimit";
 
 export interface McpModuleSettings {
 	enabled: boolean;
@@ -69,7 +72,7 @@ export class McpModule implements HubModule {
 		version: "0.2.0",
 		contractVersion: "2.0.0",
 		desktopOnly: true,
-		emits: ["mcp:action", "mcp:action-logged", "mcp:server-started", "mcp:server-stopped"],
+		emits: ["mcp:action-logged", "mcp:server-started", "mcp:server-stopped"],
 		listensTo: [],
 		settingsSchema: [
 			{ key: "port", label: "Porta", type: "number", default: MCP_DEFAULTS.port },
@@ -93,7 +96,13 @@ export class McpModule implements HubModule {
 	private server?: McpServerHandle;
 	/** Porta em que o servidor está DE FATO escutando (a config pode divergir até o restart). */
 	private listeningPort?: number;
-	private actionTimestamps: number[] = [];
+	/**
+	 * Rate limit: consumo SÓ na execução real (ver RateLimit.ts). Pré-checado
+	 * no gate com `wouldAllow` (não consome — negação por readOnly/pasta
+	 * bloqueada/dry-run não pode comer a cota de quem segue as regras) e
+	 * consumido de fato logo antes de executeTool/dry-run.
+	 */
+	private rateLimiter = createRateLimiter(MCP_DEFAULTS.rateLimitPerMinute);
 	private lastServerError?: string;
 	/** Escopo temporário: libera escrita até este timestamp, mesmo com readOnly ligado. */
 	private temporaryWriteUntil = 0;
@@ -107,7 +116,10 @@ export class McpModule implements HubModule {
 		const settings = this.readSettings();
 
 		if (!settings.tokenObfuscated) {
-			const token = cryptoRandomId() + cryptoRandomId();
+			// Token SECRETO → CSPRNG (cryptoRandomToken), não o randomId de ids
+			// de log. Antes: dois randomId() com Math.random — previsível o
+			// bastante para quem analisa o processo local.
+			const token = cryptoRandomToken();
 			await context.updateSettings({ tokenObfuscated: obfuscate(token) });
 		}
 
@@ -310,7 +322,7 @@ export class McpModule implements HubModule {
 			)
 			.addButton((btn) =>
 				btn.setButtonText("Regenerar").onClick(async () => {
-					const fresh = cryptoRandomId() + cryptoRandomId();
+					const fresh = cryptoRandomToken();
 					await this.context?.updateSettings({ tokenObfuscated: obfuscate(fresh) });
 					new Notice("Token regenerado. Atualize seus clientes MCP.");
 					this.refreshPanel(container);
@@ -427,16 +439,37 @@ export class McpModule implements HubModule {
 		}
 	}
 
-	/** Ponto único por onde toda ferramenta MCP passa — aplica rate limit, dry-run e permissões. */
+	/** Ponto único por onde toda ferramenta MCP passa — aplica rate limit, dry-run e permissões.
+	 *
+	 * POLÍTICA DE COTA (decisão consciente, documentada em RateLimit.ts):
+	 * a cota marca intenção de executar. Chamadas negadas antes (readOnly,
+	 * pasta bloqueada, ferramenta desconhecida, janela cheia) NÃO consomem;
+	 * a chamada que passa por todas as checagens consome UMA vez, pouco antes
+	 * de executar — sucesso ou falha de execução tanto faz (chegar lá já era
+	 * chamada legítima).
+	 */
 	private async handleToolCall(
 		toolName: string,
 		args: Record<string, unknown>
 	): Promise<{ ok: boolean; result?: unknown; error?: string }> {
-		if (!this.withinRateLimit()) {
+		const settings = this.readSettings();
+
+		// Janela cheia? Nega cedo, SEM consumir (nada foi autorizado ainda).
+		// O limiter é recriado se a config mudou (limite é lido por chamada).
+		if (this.rateLimiterLimit !== settings.rateLimitPerMinute) {
+			this.rateLimiter = createRateLimiter(settings.rateLimitPerMinute);
+			this.rateLimiterLimit = settings.rateLimitPerMinute;
+		}
+		if (!wouldAllow(this.rateLimiter, Date.now())) {
 			return { ok: false, error: "Limite de ações por minuto excedido." };
 		}
 
-		const settings = this.readSettings();
+		// Ferramenta desconhecida: rejeita sem tocar na cota (antes passava pelo
+		// gate e só explodia dentro do executeTool, gastando uma ação).
+		if (!TOOL_DEFINITIONS.some((t) => t.name === toolName)) {
+			return { ok: false, error: `Ferramenta desconhecida: ${toolName}` };
+		}
+
 		const isWrite = WRITE_TOOLS.has(toolName);
 		const dryRun = (args.dryRun as boolean | undefined) ?? settings.dryRunDefault;
 
@@ -462,23 +495,26 @@ export class McpModule implements HubModule {
 			}
 		}
 
+		// Passou por TODAS as checagens (limite, ferramenta, readOnly, pastas):
+		// aqui sim consome a cota — vai executar (ou simular) de fato.
+		if (!this.rateLimiter.tryConsume(Date.now())) {
+			// Corrida benigna (outra chamada consumiu o último slot no meio das
+			// checagens desta): mesma resposta do gate.
+			return { ok: false, error: "Limite de ações por minuto excedido." };
+		}
+
 		if (dryRun) {
 			return { ok: true, result: { simulated: true, toolName, args } };
 		}
 
 		try {
 			const result = await this.executeTool(toolName, args);
-			this.context?.bus.emit(
-				"mcp:action",
-				{ toolName, path: args.path, isWrite },
-				"mcp"
-			);
 			this.context?.log(`Ferramenta MCP executada: ${toolName}`, { path: args.path as string });
-			// Log de atividade DEDICADO do MCP (antes o módulo só aparecia no
-			// Histórico genérico via mcp:action). Cada ação executada emite o
-			// evento próprio com o resultado; o bus cuida da distribuição — o
-			// MCP não conhece quem escuta (o Histórico pode assinar no futuro
-			// sem este módulo saber).
+			// UM evento por ação (o log de atividade DEDICADO, com o desfecho).
+			// Antes emitia TAMBÉM mcp:action: com os dois em TRACKED_EVENTS do
+			// Histórico, cada tool call bem-sucedida virava DUAS linhas quase
+			// idênticas — ruído e maxEntries consumido em dobro. O bus cuida da
+			// distribuição; o MCP não conhece quem escuta.
 			this.context?.bus.emit(
 				"mcp:action-logged",
 				{ tool: toolName, path: args.path, dryRun, isWrite, result },
@@ -498,15 +534,8 @@ export class McpModule implements HubModule {
 		}
 	}
 
-	private withinRateLimit(): boolean {
-		const now = Date.now();
-		const windowStart = now - 60_000;
-		this.actionTimestamps = this.actionTimestamps.filter((t) => t > windowStart);
-		const limit = this.readSettings().rateLimitPerMinute;
-		if (this.actionTimestamps.length >= limit) return false;
-		this.actionTimestamps.push(now);
-		return true;
-	}
+	/** Limite com que o rateLimiter atual foi criado (recria se a config mudar). */
+	private rateLimiterLimit = MCP_DEFAULTS.rateLimitPerMinute;
 
 	private isWriteAllowed(path: string, settings: McpModuleSettings): boolean {
 		const normalized = normalizePath(path);
@@ -570,13 +599,42 @@ export class McpModule implements HubModule {
 				return { items: children.map((c) => c.path) };
 			}
 			case "search_vault": {
-				const query = String(args.query ?? "").toLowerCase();
-				const matches: string[] = [];
-				for (const file of vault.getMarkdownFiles()) {
-					const content = await vault.cachedRead(file);
-					if (content.toLowerCase().includes(query)) matches.push(file.path);
-				}
-				return { matches };
+				// Antes: cachedRead em TODAS as notas por chamada — I/O massivo em
+				// vault grande, travando a tool call inteira. Agora: o metadataCache
+				// decide path/tags/frontmatter EM MEMÓRIA; o conteúdo só é lido
+				// quando o cache não resolve, UMA nota por vez, e a varredura PARA
+				// no teto (maxResults, default 50). A resposta traz snippet, contagem
+				// e truncated para o cliente paginar/refinar em vez de adivinhar.
+				const query = normalizeQuery(args.query);
+				const requested = Number(args.maxResults);
+				const maxResults =
+					Number.isFinite(requested) && requested >= 1
+						? Math.min(Math.floor(requested), 500)
+						: undefined;
+
+				const outcome = await searchVault({ query, maxResults }, {
+					listNotes: () => vault.getMarkdownFiles(),
+					fileMeta: (file) => {
+						const cache = app.metadataCache.getFileCache(file);
+						const fm = cache?.frontmatter ?? {};
+						const frontmatterValues = Object.values(fm)
+							.flatMap((v) => (Array.isArray(v) ? v.map(String) : [String(v)]))
+							.filter((v) => v && v !== "[object Object]");
+						const tags = [
+							...(cache?.tags ?? []).map((t) => t.tag.replace(/^#/, "")),
+							...(Array.isArray(fm.tags) ? fm.tags.map(String) : []),
+						];
+						return { path: file.path, tags, frontmatterValues };
+					},
+					readContent: (file) => vault.cachedRead(file),
+				});
+
+				return {
+					matches: outcome.matches.map((m) => m.path),
+					details: outcome.matches,
+					total: outcome.matches.length,
+					truncated: outcome.truncated,
+				};
 			}
 			case "get_note_metadata": {
 				const path = normalizePath(String(args.path));
@@ -733,32 +791,66 @@ export class McpModule implements HubModule {
 				const content = await vault.read(file as TFile);
 				const folder = path.substring(0, path.lastIndexOf("/"));
 				const created: string[] = [];
+				const skipped: { title: string; reason: string }[] = [];
 
 				const sections = content.split(new RegExp(`^${"#".repeat(level)} `, "m")).slice(1);
 				for (const section of sections) {
 					const title = section.split("\n")[0].trim();
-					if (!title) continue;
+					if (!title) {
+						skipped.push({ title: "(sem título)", reason: "heading vazio" });
+						continue;
+					}
 					const safeTitle = title.replace(/[\\/:*?"<>|]/g, "-");
-					const newPath = normalizePath(`${folder}/${safeTitle}.md`);
+					// Colisão de destino: em vez de vault.create falhar (e o catch
+					// antigo engolir o motivo), deriva "Título 2.md" — a mesma
+					// regra do Ciclo de Vida/Templates. Falha real (permissão,
+					// disco) NÃO é engolida: vira erro da tool com o título nela.
+					const newPath = await uniqueVaultPath(app, normalizePath(`${folder}/${safeTitle}.md`));
 					try {
 						await write(newPath, () => vault.create(newPath, `${marker}${section}`));
-					} catch {
-						continue; // já existia (ou falhou) — não entra na lista de criadas
+					} catch (err) {
+						throw new Error(`split_note: falha ao criar "${newPath}": ${describe(err)}`);
 					}
 					created.push(newPath);
 				}
-				return { created };
+				return { created, skipped };
 			}
 			case "combine_notes": {
 				const paths = (args.paths as string[] | undefined) ?? [];
 				const target = normalizePath(String(args.targetPath));
+				if (paths.length === 0) throw new Error("combine_notes: informe ao menos uma nota em `paths`.");
+
 				const parts: string[] = [];
+				const missing: string[] = [];
 				for (const raw of paths) {
 					const file = vault.getAbstractFileByPath(normalizePath(raw));
 					if (file instanceof TFileClass) parts.push(await vault.read(file as TFile));
+					else missing.push(raw);
 				}
-				await write(target, () => vault.create(target, parts.join("\n\n---\n\n")));
-				return { target, combined: paths.length };
+				if (parts.length === 0) {
+					throw new Error(
+						`combine_notes: nenhuma das notas informadas foi encontrada (${missing.join(", ")}).`
+					);
+				}
+
+				// Destino existente era o pior caso do caminho antigo: vault.create
+				// lançava "file already exists" de forma opaca. Agora: existente é
+				// SOBRESCRITO de forma explícita (modify, com created/overwritten
+				// na resposta); inexistente cria (com pasta-pai garantida).
+				const existing = vault.getAbstractFileByPath(target);
+				if (existing instanceof TFileClass) {
+					await write(target, () => vault.modify(existing as TFile, parts.join("\n\n---\n\n")));
+				} else {
+					const folder = target.substring(0, target.lastIndexOf("/"));
+					if (folder) await ensureVaultFolder(app, folder);
+					await write(target, () => vault.create(target, parts.join("\n\n---\n\n")));
+				}
+				return {
+					target,
+					combined: parts.length,
+					missing,
+					overwritten: existing instanceof TFileClass,
+				};
 			}
 			case "dataview_query": {
 				// Só funciona se o plugin Dataview estiver instalado e habilitado —

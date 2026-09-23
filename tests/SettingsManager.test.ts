@@ -15,8 +15,11 @@ describe("SettingsManager", () => {
 	it("cria configuração padrão quando não há nada salvo", async () => {
 		const { manager } = makeManager(null);
 		const settings = await manager.init();
-		expect(settings.schemaVersion).toBe(1);
+		expect(settings.schemaVersion).toBe(2);
 		expect(settings.enabledModules).toContain("mcp");
+		// Perfis foram removidos do schema (nunca tiveram implementação):
+		expect(settings).not.toHaveProperty("profiles");
+		expect(settings).not.toHaveProperty("activeProfileId");
 	});
 
 	it("detecta conflito de caminho entre dois módulos apontando para a mesma pasta", async () => {
@@ -51,7 +54,7 @@ describe("SettingsManager", () => {
 		await manager.reset();
 
 		expect(manager.getModuleSettings("mcp")).toEqual({});
-		expect((getStored() as any).schemaVersion).toBe(1);
+		expect((getStored() as any).schemaVersion).toBe(2);
 	});
 
 	it("reset 'config' zera fatias de módulo E caminhos globais", async () => {
@@ -73,6 +76,53 @@ describe("SettingsManager", () => {
 		await manager.reset();
 
 		expect(manager.getModuleSettings("history")).toEqual({});
+	});
+
+	it("MIGRAÇÃO v1→v2: descarta perfis mortos e PRESERVA a configuração real", async () => {
+		// data.json de quem usou versões antigas: schema v1, com os campos de
+		// perfil que nunca tiveram leitor — e configuração REAL que não pode
+		// se perder na remoção.
+		const oldSettings = {
+			schemaVersion: 1,
+			onboardingCompleted: true,
+			activeProfileId: "trabalho",
+			profiles: [
+				{ id: "default", name: "Padrão", modules: {} },
+				{ id: "trabalho", name: "Trabalho", modules: { mcp: { port: 1234 } } },
+			],
+			modules: { mcp: { port: 27931, readOnly: true }, history: { maxEntries: 500 } },
+			enabledModules: ["mcp"],
+			lobby: { openMode: "tab", theme: "custom" },
+			paths: { calendarFolder: "Agenda", calendarTemplatesFolder: "Agenda/tpl" },
+			sync: { lastWrittenBy: "abc", lastWrittenAt: 1000 },
+			telemetry: { enabled: false },
+		};
+		const { manager, getStored } = makeManager(oldSettings);
+
+		const settings = await manager.init();
+
+		// Migrou para v2 e os campos mortos sumiram:
+		expect(settings.schemaVersion).toBe(2);
+		expect(settings).not.toHaveProperty("activeProfileId");
+		expect(settings).not.toHaveProperty("profiles");
+		// A configuração REAL ficou intacta:
+		expect(manager.getModuleSettings("mcp")).toEqual({ port: 27931, readOnly: true });
+		expect(manager.getModuleSettings("history")).toEqual({ maxEntries: 500 });
+		expect(settings.enabledModules).toEqual(["mcp"]);
+		expect(settings.paths.calendarFolder).toBe("Agenda");
+		expect(settings.onboardingCompleted).toBe(true);
+
+		// Persistiu a versão migrada (o disco também fica limpo no próximo save):
+		const stored = getStored() as { schemaVersion: number; profiles?: unknown };
+		expect(stored.schemaVersion).toBe(2);
+		expect(stored).not.toHaveProperty("profiles");
+	});
+
+	it("MIGRAÇÃO v1→v2 é idempotente: rodar sobre v2 não re-migra nem recria campos", async () => {
+		const { manager } = makeManager(createDefaultSettings());
+		const settings = await manager.init();
+		expect(settings.schemaVersion).toBe(2);
+		expect(manager.get().schemaVersion).toBe(2);
 	});
 
 	it("gravações concorrentes de módulos diferentes chegam TODAS ao disco (sem lost update)", async () => {

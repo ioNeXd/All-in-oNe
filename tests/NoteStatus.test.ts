@@ -3,7 +3,7 @@ import {
 	isPendingStatus,
 	isNormalizedComplete,
 	decidePendingAction,
-} from "../src/modules/templates/NoteStatus";
+} from "../src/core/NoteStatus";
 
 /**
  * IMPORTA O CÓDIGO REAL (NoteStatus.ts), não uma cópia espelhada — ao

@@ -3,7 +3,9 @@ import {
 	createMcpServer,
 	type McpServerHandle,
 	TOOLS_API_INCOMPATIBLE,
+	JSONRPC_ERRORS,
 } from "../src/modules/mcp/server";
+import { AuthThrottle, MAX_AUTH_FAILURES } from "../src/modules/mcp/AuthThrottle";
 
 /**
  * Teste de INTEGRAÇÃO do servidor MCP: HTTP de verdade, escutando em porta
@@ -190,6 +192,83 @@ describe("MCP — autenticação (401 antes de qualquer processamento)", () => {
 	});
 });
 
+describe("MCP — throttle de autenticação (lockout após falhas repetidas)", () => {
+	const CALL = { jsonrpc: "2.0", id: 1, method: "tools/list" };
+
+	it(`após ${MAX_AUTH_FAILURES} tokens errados, a próxima tentativa recebe 429 + Retry-After`, async () => {
+		const handle = await createMcpServer({
+			port: 0,
+			getToken: () => "tok",
+			serverInfo: { name: "All iₙ oNe", version: "0.1.0" },
+			getToolsApiVersion: () => "1.0.0",
+			handleToolCall: async () => ({ ok: true, result: {} }),
+		});
+		handles.push(handle);
+
+		// MAX falhas com 401 (ainda não travou):
+		for (let i = 0; i < MAX_AUTH_FAILURES; i++) {
+			const res = await post(handle.port, CALL, "errado");
+			expect(res.status).toBe(401);
+		}
+		// A tentativa seguinte nem compara token: 429 com Retry-After:
+		const locked = await post(handle.port, CALL, "tok");
+		expect(locked.status).toBe(429);
+		expect(Number(locked.headers.get("retry-after"))).toBeGreaterThan(0);
+	});
+
+	it("o lockout é levantado quando o throttle injetado drena (controle com relógio fake)", async () => {
+		let t = 1_000_000;
+		const throttle = new AuthThrottle(() => t);
+		const handle = await createMcpServer({
+			port: 0,
+			getToken: () => "tok",
+			serverInfo: { name: "All iₙ oNe", version: "0.1.0" },
+			getToolsApiVersion: () => "1.0.0",
+			handleToolCall: async () => ({ ok: true, result: {} }),
+			authThrottle: throttle,
+		});
+		handles.push(handle);
+
+		for (let i = 0; i < MAX_AUTH_FAILURES; i++) await post(handle.port, CALL, "errado");
+		expect((await post(handle.port, CALL, "tok")).status).toBe(429);
+
+		t += 60_001; // janela esvazia
+		expect((await post(handle.port, CALL, "tok")).status).toBe(200);
+	});
+
+	it("token certo após falhas isoladas continua funcionando (sucesso limpa o histórico)", async () => {
+		const handle = await createMcpServer({
+			port: 0,
+			getToken: () => "tok",
+			serverInfo: { name: "All iₙ oNe", version: "0.1.0" },
+			getToolsApiVersion: () => "1.0.0",
+			handleToolCall: async () => ({ ok: true, result: {} }),
+		});
+		handles.push(handle);
+
+		for (let i = 0; i < MAX_AUTH_FAILURES - 1; i++) await post(handle.port, CALL, "errado");
+		const ok = await post(handle.port, CALL);
+		expect(ok.status).toBe(200);
+		// Com o histórico limpo, o limite não foi atingido: mais falhas ainda
+		// são 401 (não 429) — o usuário real não é punido pelo erro anterior.
+		const more = await post(handle.port, CALL, "errado");
+		expect(more.status).toBe(401);
+	});
+
+	it("servidor SEM token configurado não throttla (gate de auth nem existe)", async () => {
+		const handle = await createMcpServer({
+			port: 0,
+			getToken: () => "",
+			serverInfo: { name: "All iₙ oNe", version: "0.1.0" },
+			getToolsApiVersion: () => "1.0.0",
+			handleToolCall: async () => ({ ok: true, result: {} }),
+		});
+		handles.push(handle);
+		const res = await post(handle.port, CALL, "qualquer-coisa");
+		expect(res.status).toBe(200); // sem gate, sem 401, sem lockout
+	});
+});
+
 describe("MCP — negociação da versão da API de ferramentas", () => {
 	it("initialize devolve a toolsApiVersion do servidor mesmo sem o cliente pedir", async () => {
 		const h = await start("1.2.3");
@@ -242,10 +321,13 @@ describe("MCP — negociação da versão da API de ferramentas", () => {
 		expect(res.status).toBe(200);
 		const json = (await res.json()) as {
 			result?: unknown;
-			error: { message: string; code?: string };
+			error: { message: string; code?: number; data?: { code?: string } };
 		};
 		expect(json.result).toBeUndefined();
-		expect(json.error.code).toBe(TOOLS_API_INCOMPATIBLE);
+		// Código NUMÉRICO do padrão no topo (INVALID_PARAMS: método existe,
+		// argumentos não); o código string da API fica em data.code:
+		expect(json.error.code).toBe(JSONRPC_ERRORS.INVALID_PARAMS);
+		expect(json.error.data?.code).toBe(TOOLS_API_INCOMPATIBLE);
 		expect(json.error.message).toContain("2.0.0");
 		expect(json.error.message).toContain("1.0.0");
 	});
@@ -273,5 +355,44 @@ describe("MCP — negociação da versão da API de ferramentas", () => {
 		const json = (await res.json()) as { result: { toolsApiVersion: string } };
 		expect(res.status).toBe(200);
 		expect(json.result.toolsApiVersion).toBe("1.0.0");
+	});
+});
+
+describe("MCP — códigos de erro JSON-RPC padronizados", () => {
+	it("método inexistente responde -32601 (METHOD_NOT_FOUND) com a mensagem no error.message", async () => {
+		const h = await start();
+		const res = await post(h.port, { jsonrpc: "2.0", id: 1, method: "resources/list" });
+		expect(res.status).toBe(200);
+		const json = (await res.json()) as { error: { code: number; message: string } };
+		expect(json.error.code).toBe(-32601);
+		expect(json.error.message).toContain("resources/list");
+	});
+
+	it("corpo que não é JSON responde -32700 (PARSE_ERROR) com id null", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "Bearer tok" },
+			body: "{isto não é json",
+		});
+		expect(res.status).toBe(200);
+		const json = (await res.json()) as { id: null; error: { code: number; message: string } };
+		expect(json.id).toBeNull(); // sem id parseável — o padrão manda null
+		expect(json.error.code).toBe(-32700);
+	});
+
+	it("erro genérico de servidor usa -32603 (INTERNAL_ERROR) como default do respondError", async () => {
+		const handle = await createMcpServer({
+			port: 0,
+			getToken: () => "tok",
+			serverInfo: { name: "All iₙ oNe", version: "0.1.0" },
+			getToolsApiVersion: () => "1.0.0",
+			handleToolCall: async () => ({ ok: false, error: "explodiu" }),
+		});
+		handles.push(handle);
+		const res = await post(handle.port, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "x" } });
+		const json = (await res.json()) as { error: { code: number; message: string } };
+		expect(json.error.code).toBe(-32603);
+		expect(json.error.message).toBe("explodiu");
 	});
 });

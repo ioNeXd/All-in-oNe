@@ -253,8 +253,9 @@ describe("mcp:action-logged — log de atividade dedicado", () => {
 			isWrite: true,
 		});
 		expect(log[0].payload.result).toMatchObject({ created: true });
-		// O evento genérico mcp:action (Histórico) continua emitido:
-		expect(emitted.some((e) => e.name === "mcp:action")).toBe(true);
+		// UM evento por ação: o genérico mcp:action NÃO é mais emitido (era o
+		// que duplicava cada ação no histórico):
+		expect(emitted.some((e) => e.name === "mcp:action")).toBe(false);
 	});
 
 	it("falha TAMBÉM entra no log — com error em vez de result", async () => {

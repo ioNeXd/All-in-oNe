@@ -14,6 +14,8 @@ src/
     CommandBridge.ts     ← ponte módulos→Command Palette (registro único + checkCallback)
     PathUtils.ts         ← regras puras de caminho (testadas sem vault)
     VaultPaths.ts        ← operações de vault: pastas recursivas, nome único
+    NoteStatus.ts        ← regra pura: pendente/completo (testada) — compartilhada
+                           por templates/calendar/Lobby, sem acoplamento entre módulos
     secureStore.ts       ← ofuscação de campos sensíveis (ex.: token MCP)
     types.ts             ← formato de HubSettings
 
@@ -28,7 +30,6 @@ src/
       ReleaseUtils.ts    ← regra pura: SemVer/assets/checksums (testada)
       SignatureUtils.ts  ← regra pura: decisão/parse da verificação GPG (testada)
     templates/           ← templates por pasta + fluxo Pendente
-      NoteStatus.ts      ← regra pura: pendente/completo (testada)
     calendar/            ← calendário, eventos recorrentes e lembretes
       IcsParser.ts       ← parser puro de iCalendar (testado)
     notifications/       ← pop-ups com som e não-perturbe
@@ -291,6 +292,19 @@ Rende via `textContent`, nunca `innerHTML` com conteúdo do usuário.
 
 ## O que fica de fora, deliberadamente
 
+- **Segredo forte para o token do MCP** (`secureStore.ts`) — o que existe
+  lá é OFUSCAÇÃO (XOR com chave fixa + base64), documentada como tal no
+  código, não criptografia. O ambiente de um plugin (sandbox do Electron
+  renderer, sem acesso a keychain do SO por API estável) não oferece cofre
+  seguro multiplataforma; o objetivo é só o token não ficar em texto plano
+  no `data.json` (sync acidental, print, relatório de bug). Quem tem acesso
+  de leitura ao vault OU ao código do plugin consegue reverter. A
+  consequência de segurança real: o token MCP protege um servidor que só
+  escuta em `127.0.0.1` e cujas permissões de escrita são configuradas no
+  próprio vault (blocklist/allowlist/somente-leitura) — o modelo de ameaça
+  é processo local, não rede. Segredo de verdade exigiria segredo vindo de
+  fora do plugin (keychain via código nativo do Electron), troca que não
+  cabe neste projeto.
 - **Modo "Obsidian fechado"** (acesso cru a arquivos `.md` sem o app aberto)
   não é responsabilidade deste plugin — é responsabilidade de um adaptador
   dentro do projeto separado de gateway MCP do usuário, que pode ler os

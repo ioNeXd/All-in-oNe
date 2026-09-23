@@ -14,7 +14,7 @@ contribuições que sigam a arquitetura existente são bem-vindas.
 3. Caminhos de pasta são sempre configuráveis pelo usuário — nunca hardcode
    um caminho dentro de um módulo.
 4. Regras de negócio puras (sem I/O de vault) vivem em arquivos próprios
-   ao lado do módulo (ex.: `templates/NoteStatus.ts`, `mcp/WriteRules.ts`)
+   ao lado do módulo ou no core (ex.: `core/NoteStatus.ts`, `mcp/WriteRules.ts`)
    e têm suíte de teste própria que importa o código real.
 
 ## Adicionando um módulo novo

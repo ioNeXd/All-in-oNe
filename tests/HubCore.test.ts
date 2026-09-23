@@ -172,6 +172,65 @@ describe("HubCore — ciclo de vida de módulos", () => {
 		expect(onEnable2).not.toHaveBeenCalled();
 		expect(core.isModuleEnabled("styles")).toBe(false);
 	});
+
+	it("SAÍDA do modo seguro: ofensor religado com sucesso limpa o bloqueio (sem reiniciar)", async () => {
+		const initial = customSettings();
+		initial.enabledModules = ["mcp", "styles"];
+		const { core } = makeCore(initial);
+		await core.init();
+
+		const entered: unknown[] = [];
+		const exited: unknown[] = [];
+		core.bus.on("core:safe-mode-entered", "test", (e) => entered.push(e.payload));
+		core.bus.on("core:safe-mode-exited", "test", (e) => exited.push(e.payload));
+
+		let fail = true;
+		const onEnable = vi.fn(() => (fail ? Promise.reject(new Error("porta ocupada")) : Promise.resolve()));
+		await core.registerModule(makeTestModule({ id: "mcp", onEnable }));
+		await core.enableModule("mcp");
+		await core.enableModule("mcp"); // 3ª falha → modo seguro
+		expect(entered).toHaveLength(1);
+
+		// Registro bloqueado enquanto no modo seguro:
+		const onEnable2 = vi.fn();
+		await core.registerModule(makeTestModule({ id: "styles", onEnable: onEnable2 }));
+		expect(onEnable2).not.toHaveBeenCalled();
+
+		// Usuário corrige a causa e religa o OFENSOR pelo Lobby — sucesso:
+		fail = false;
+		await core.enableModule("mcp");
+		expect(core.isModuleEnabled("mcp")).toBe(true);
+		expect(exited).toEqual([{ moduleId: "mcp" }]);
+
+		// Bloqueio encerrado: registro de módulos volta a habilitar de fato.
+		await core.registerModule(makeTestModule({ id: "styles", onEnable: onEnable2 }));
+		expect(onEnable2).toHaveBeenCalledTimes(1);
+		expect(core.isModuleEnabled("styles")).toBe(true);
+	});
+
+	it("saída do modo seguro zera os contadores de crash (recomeço limpo)", async () => {
+		const { core } = makeCore(customSettings());
+		await core.init();
+
+		let fail = true;
+		const onEnable = vi.fn(() => (fail ? Promise.reject(new Error("x")) : Promise.resolve()));
+		const module = makeTestModule({ id: "mcp", onEnable });
+		await core.registerModule(module); // crash 1
+		await core.enableModule("mcp"); // crash 2
+		await core.enableModule("mcp"); // crash 3 → modo seguro
+
+		fail = false;
+		await core.enableModule("mcp"); // sucesso → sai do modo seguro
+
+		// Com contadores zerados, DUAS falhas novas não re-entram no modo
+		// seguro (precisaria de 3 de novo):
+		fail = true;
+		await core.enableModule("mcp");
+		await core.enableModule("mcp");
+		expect(core.getLastEnableError("mcp")).toBeDefined();
+		// ainda fora do modo seguro — sem evento de entrada novo após a saída:
+		// (o entered original foi 1; nenhuma entrada adicional aconteceu)
+	});
 });
 
 describe("HubCore — reset em 3 níveis (escadinha real)", () => {

@@ -7,6 +7,7 @@
  * `normalizePath` do Obsidian (case-insensitive por sistema de arquivos) —
  * este módulo recebe os caminhos JÁ normalizados e decide a fronteira.
  */
+import { EXTRA_PATH_ARGS } from "./ToolSchemas";
 
 /**
  * Compatibilidade de pasta com fronteira de segmento:
@@ -27,9 +28,13 @@ export function pathMatchesFolder(normalizedPath: string, normalizedBase: string
  * ferramenta de escrita. rename_note escreve em args.newPath e combine_notes
  * em args.targetPath — checar só args.path permitia mover notas para dentro
  * de pasta bloqueada. A ordem define a mensagem de erro (primeiro negado).
+ *
+ * Os campos extras (além de `path`) são o mesmo mapa EXTRA_PATH_ARGS de
+ * ToolSchemas.ts — o contrato do schema e o gate de permissões compartilham
+ * uma única fonte da verdade.
  */
 export function collectWriteTargets(args: Record<string, unknown>): string[] {
-	return ["path", "newPath", "targetPath"]
+	return ["path", ...Object.keys(EXTRA_PATH_ARGS)]
 		.map((k) => (args[k] === undefined || args[k] === null ? "" : String(args[k])))
 		.filter(Boolean);
 }

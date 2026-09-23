@@ -79,11 +79,20 @@ export class FileLifecycleModule implements HubModule {
 
 		// Entradas extras no menu de clique-direito, e uma tentativa de
 		// remover as nativas equivalentes (ver removeNativeMenuItems abaixo
-		// para o porquê e os riscos disso).
+		// para o porquê e os riscos disso). Falha é reportada no Diagnóstico
+		// (nativeMenuDegraded), não engolida em silêncio.
 		const fileMenuRef = app.workspace.on("file-menu", (menu, file) => {
 			if (!(file instanceof TFile) || file.extension !== "md") return;
 
-			removeNativeMenuItems(menu);
+			const removed = removeNativeMenuItems(menu);
+			if (removed !== null) {
+				// A estrutura interna ainda é a esperada (removed = nº de itens
+				// nativos tirados, podendo ser 0). Uma virada para null aqui
+				// significa "API interna mudou" — degrada o health UMA vez.
+				this.nativeMenuDegraded = false;
+			} else {
+				this.nativeMenuDegraded = true;
+			}
 
 			menu.addItem((item) =>
 				item
@@ -120,6 +129,18 @@ export class FileLifecycleModule implements HubModule {
 
 	getHealthStatus() {
 		const settings = this.readSettings();
+		if (this.nativeMenuDegraded) {
+			// API interna do Menu mudou num update do Obsidian: os itens nativos
+			// (Renomear/Excluir/Mover) voltaram a aparecer — o plugin segue
+			// funcionando, mas as confirmações podem ser contornadas por eles.
+			return {
+				ok: true,
+				summary:
+					(settings.askNameOnCreate ? "Perguntando nome ao criar" : "Sem perguntar nome") +
+					" · ATENÇÃO: não consegui remover os itens nativos do menu (Obsidian atualizou?) — " +
+					"renomear/excluir por eles NÃO passam pela confirmação deste plugin.",
+			};
+		}
 		return {
 			ok: true,
 			summary: settings.askNameOnCreate ? "Perguntando nome ao criar" : "Sem perguntar nome",
@@ -129,6 +150,13 @@ export class FileLifecycleModule implements HubModule {
 	private readSettings(): FileLifecycleSettings {
 		return { ...FILE_LIFECYCLE_DEFAULTS, ...this.context?.getSettings<FileLifecycleSettings>() };
 	}
+
+	/**
+	 * true quando a remoção dos itens nativos do menu FALHOU (API interna do
+	 * Menu mudou — ex.: update do Obsidian). Volta a false na primeira
+	 * remoção bem-sucedida. Alimenta o getHealthStatus (Diagnóstico).
+	 */
+	private nativeMenuDegraded = false;
 
 	/** Pergunta o nome logo na criação e só então libera o resto do plugin. */
 	private async handleCreate(file: TFile): Promise<void> {
@@ -514,15 +542,22 @@ class MovePromptModal extends Modal {
  * mesma técnica que vários plugins da comunidade usam para isso — funciona
  * hoje, mas pode parar de funcionar num futuro update do Obsidian sem
  * aviso, já que nada garante que esse campo continue existindo com esse
- * nome. Por isso todo o bloco está em try/catch: se a estrutura mudar, o
- * pior que acontece é os itens nativos voltarem a aparecer (nada quebra).
+ * nome.
+ *
+ * RETORNO (em vez de engolir o resultado):
+ *   - número  = itens nativos removidos com sucesso (0 = menu sem nativos);
+ *   - null    = a estrutura interna mudou (campo ausente, não-array ou
+ *               exceção ao ler) — o chamador degrada o health status.
+ * Todo o bloco continua em try/catch: se a estrutura mudar, o pior que
+ * acontece é os itens nativos voltarem a aparecer (nada quebra) — e agora
+ * com sinal visível no Diagnóstico.
  *
  * Isto NÃO é possível de outra forma: o Obsidian não oferece um gancho
  * público "antes de renomear/excluir, cancelável" para plugins — mesmo
  * assim, dá pra pelo menos tirar a opção nativa da frente e deixar só a
  * deste plugin no menu.
  */
-function removeNativeMenuItems(menu: Menu): void {
+function removeNativeMenuItems(menu: Menu): number | null {
 	const NATIVE_LABELS = [
 		"rename...",
 		"rename",
@@ -538,13 +573,20 @@ function removeNativeMenuItems(menu: Menu): void {
 
 	try {
 		const items = (menu as unknown as { items?: { title?: string; titleEl?: HTMLElement }[] }).items;
-		if (!Array.isArray(items)) return;
+		if (!Array.isArray(items)) return null;
 
+		let removed = 0;
 		for (let i = items.length - 1; i >= 0; i--) {
 			const label = (items[i]?.title ?? items[i]?.titleEl?.textContent ?? "").trim().toLowerCase();
-			if (NATIVE_LABELS.includes(label)) items.splice(i, 1);
+			if (NATIVE_LABELS.includes(label)) {
+				items.splice(i, 1);
+				removed++;
+			}
 		}
+		return removed;
 	} catch {
-		// Estrutura interna mudou — sem problema, os itens nativos só continuam aparecendo.
+		// Estrutura interna mudou (ou leitura lançou): sinaliza degradação —
+		// os itens nativos só continuam aparecendo.
+		return null;
 	}
 }

@@ -24,23 +24,12 @@ export interface HistoryEntry {
 	timestamp: number;
 }
 
-/** Um perfil de configuração inteiro, salvo/alternável pelo usuário. */
-export interface SettingsProfile {
-	id: string;
-	name: string;
-	modules: Record<string, Record<string, unknown>>;
-}
-
 export interface HubSettings {
 	/** Versão do schema de configuração — usada para migração automática. */
 	schemaVersion: number;
 
 	/** true até o assistente de primeira execução ser concluído. */
 	onboardingCompleted: boolean;
-
-	/** Perfil ativo no momento. */
-	activeProfileId: string;
-	profiles: SettingsProfile[];
 
 	/** Configuração por módulo, chaveada pelo ModuleId. Formato interno é do próprio módulo. */
 	modules: Record<string, Record<string, unknown>>;
@@ -78,14 +67,12 @@ export interface HubSettings {
 	};
 }
 
-export const SETTINGS_SCHEMA_VERSION = 1;
+export const SETTINGS_SCHEMA_VERSION = 2;
 
 export function createDefaultSettings(): HubSettings {
 	return {
 		schemaVersion: SETTINGS_SCHEMA_VERSION,
 		onboardingCompleted: false,
-		activeProfileId: "default",
-		profiles: [{ id: "default", name: "Padrão", modules: {} }],
 		modules: {},
 		enabledModules: [
 			"filelifecycle",
@@ -106,7 +93,7 @@ export function createDefaultSettings(): HubSettings {
 			calendarTemplatesFolder: "Calendario/templates",
 		},
 		sync: {
-			lastWrittenBy: cryptoRandomId(),
+			lastWrittenBy: randomId(),
 			lastWrittenAt: Date.now(),
 		},
 		telemetry: {
@@ -115,6 +102,28 @@ export function createDefaultSettings(): HubSettings {
 	};
 }
 
-export function cryptoRandomId(): string {
+/**
+ * Id aleatório NÃO-secreto (inscrições no bus, ids de entrada de log) —
+ * Math.random é suficiente para UNICIDADE, que é o requisito aqui.
+ * O nome antigo ("randomId") enganava: nada de criptográfico.
+ * Segredos usam `cryptoRandomToken` (abaixo) — CSPRNG de verdade.
+ */
+export function randomId(): string {
 	return Array.from({ length: 16 }, () => Math.floor(Math.random() * 36).toString(36)).join("");
+}
+
+/**
+ * Token SECRETO via CSPRNG — `crypto.getRandomValues` (Web Crypto, presente
+ * no renderer do Obsidian e no runtime de teste via Node ≥ 19). 32 bytes de
+ * entropia codificados em base64url (~256 bits): não previsível nem para
+ * quem analisa o processo local — o requisito mínimo para um segredo de
+ * autenticação, ainda que o servidor só escute em 127.0.0.1.
+ */
+export function cryptoRandomToken(bytes = 32): string {
+	const buffer = new Uint8Array(bytes);
+	globalThis.crypto.getRandomValues(buffer);
+	let binary = "";
+	for (const byte of buffer) binary += String.fromCharCode(byte);
+	// base64url: seguro em headers/tokens sem escaping (sem +, / ou =).
+	return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }

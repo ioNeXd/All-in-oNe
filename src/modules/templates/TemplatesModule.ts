@@ -1,7 +1,18 @@
 import { TFile, TFolder, normalizePath, Setting, Notice, Modal, App } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
 import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
-import { decidePendingAction, isPendingStatus as isStillPending } from "./NoteStatus";
+import {
+	decidePendingAction,
+	isPendingStatus as isStillPending,
+	STATUS_PENDING_INITIAL,
+	STATUS_COMPLETE_NORMALIZED,
+} from "../../core/NoteStatus";
+import {
+	addSuggestion,
+	removeSuggestion,
+	validSuggestions,
+	type PendingSuggestion,
+} from "./PendingSuggestions";
 
 export interface FolderTemplateRule {
 	id: string;
@@ -59,7 +70,7 @@ export class TemplatesModule implements HubModule {
 	private detachCreate?: () => void;
 	private detachModify?: () => void;
 	/** Sugestões por similaridade aguardando decisão do usuário no painel. */
-	private pendingSuggestions: { path: string; suggestedRuleId: string }[] = [];
+	private pendingSuggestions: PendingSuggestion[] = [];
 	/** Caminhos em movimentação — evita reentrância nos handlers de modify. */
 	private movingFiles = new Set<string>();
 
@@ -152,9 +163,18 @@ export class TemplatesModule implements HubModule {
 		);
 
 		// Sugestões por similaridade pendentes de decisão do usuário.
-		if (this.pendingSuggestions.length > 0) {
+		// Filtradas na hora de renderizar: nota movida/apagada ou regra removida
+		// não geram linhas que vão falhar ao serem aplicadas.
+		const liveSuggestions = validSuggestions(this.pendingSuggestions, {
+			pathExists: (path) => this.context!.app.vault.getAbstractFileByPath(path) instanceof TFile,
+			ruleExists: (ruleId) => settings.rules.some((r) => r.id === ruleId),
+		});
+		if (liveSuggestions.length !== this.pendingSuggestions.length) {
+			this.pendingSuggestions = liveSuggestions;
+		}
+		if (liveSuggestions.length > 0) {
 			container.createEl("h3", { text: "Sugestões de template" });
-			for (const suggestion of this.pendingSuggestions) {
+			for (const suggestion of liveSuggestions) {
 				const rule = settings.rules.find((r) => r.id === suggestion.suggestedRuleId);
 				new Setting(container)
 					.setName(suggestion.path)
@@ -165,14 +185,12 @@ export class TemplatesModule implements HubModule {
 							this.refreshPanel(container);
 						})
 					)
-					.addButton((btn) =>
-						btn.setButtonText("Dispensar").onClick(() => {
-							this.pendingSuggestions = this.pendingSuggestions.filter(
-								(x) => x.path !== suggestion.path
-							);
-							this.refreshPanel(container);
-						})
-					);
+				.addButton((btn) =>
+					btn.setButtonText("Dispensar").onClick(() => {
+						this.pendingSuggestions = removeSuggestion(this.pendingSuggestions, suggestion.path);
+						this.refreshPanel(container);
+					})
+				);
 			}
 		}
 	}
@@ -307,12 +325,16 @@ export class TemplatesModule implements HubModule {
 		const rule = this.readSettings().rules.find((r) => r.id === suggestion.suggestedRuleId);
 		if (!rule) return;
 		await this.applyRuleToNote(file, rule);
-		this.pendingSuggestions = this.pendingSuggestions.filter((x) => x.path !== suggestion.path);
+		this.pendingSuggestions = removeSuggestion(this.pendingSuggestions, suggestion.path);
 	}
 
 	onDisable(): void {
 		this.detachCreate?.();
 		this.detachModify?.();
+		// Fila de sugestões é estado vivo do listener: desligado o módulo, não
+		// há criação nova e a fila não sobrevive ao enable seguinte (as sugestões
+		// são recriadas na hora, se ainda fizerem sentido).
+		this.pendingSuggestions = [];
 	}
 
 	private readSettings(): TemplatesModuleSettings {
@@ -342,12 +364,20 @@ export class TemplatesModule implements HubModule {
 			const similar = this.findSimilarRule(file.path);
 			if (similar) {
 				// Guarda para o painel oferecer ao usuário — nunca aplica sozinha.
-				this.pendingSuggestions.push({ path: file.path, suggestedRuleId: similar.id });
-				this.context?.bus.emit(
-					"templates:similar-rule-suggested",
-					{ path: file.path, suggestedRuleId: similar.id },
-					"templates"
-				);
+				// addSuggestion: dedupe por path + teto (MAX_PENDING_SUGGESTIONS);
+				// só emite quando a fila de fato mudou.
+				const { list, added } = addSuggestion(this.pendingSuggestions, {
+					path: file.path,
+					suggestedRuleId: similar.id,
+				});
+				this.pendingSuggestions = list;
+				if (added) {
+					this.context?.bus.emit(
+						"templates:similar-rule-suggested",
+						{ path: file.path, suggestedRuleId: similar.id },
+						"templates"
+					);
+				}
 			}
 			return;
 		}
@@ -388,7 +418,7 @@ export class TemplatesModule implements HubModule {
 			// robusto do que "lista vazia = completo": o Obsidian às vezes
 			// remove a propriedade inteira quando o último item de uma lista
 			// é apagado, e aí não sobraria nada pra detectar a mudança.
-			fm.status = ["Pendente", "Completo"];
+			fm.status = STATUS_PENDING_INITIAL;
 			fm.origem = file.path;
 		});
 
@@ -438,7 +468,7 @@ export class TemplatesModule implements HubModule {
 		try {
 			if (action.rewriteStatus) {
 				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
-					frontmatter.status = ["Completo"];
+					frontmatter.status = STATUS_COMPLETE_NORMALIZED;
 				});
 			}
 
