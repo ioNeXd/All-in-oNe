@@ -29,6 +29,13 @@ import type { HubSettings } from "./types";
  *      a UI de configuração é o próprio `renderSettingsPanel` do módulo.
  *      O `settingsSchema` é documentação declarativa opcional dos campos
  *      (ex.: diagnósticos, futura UI gerada automaticamente).
+ *
+ *      NOTA: settingsSchema + validateSettings() + renderSettingsPanel()
+ *      são três projeções do mesmo contrato. Hoje é duplicação deliberada:
+ *      schema é leve (docs), validate é runtime (barato), UI é manual.
+ *      Quando um módulo tiver settings complexos o suficiente pra justificar
+ *      schema-driven UI/auto-validação, unificar — schema como single
+ *      source of truth com validação e UI derivados dele.
  */
 
 export type ModuleId =
