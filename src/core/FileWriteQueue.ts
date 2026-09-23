@@ -12,12 +12,9 @@
  * rodem em sequência, nunca em paralelo — sem bloquear operações em arquivos
  * diferentes, que continuam concorrentes normalmente.
  *
- * Limitação conhecida: a serialização é por path, não por identidade do
- * arquivo. Operações que alteram o caminho (rename/move A→B) e operações
- * concorrentes em B usam chaves diferentes e PODEM executar em paralelo.
- * Para o escopo atual (MCP + templates + histórico), isso é aceitável;
- * se no futuro for necessário, a extensão seria um renameLock: Set<string>
- * para paths de destino durante renames.
+ * `runMany(paths, operation)` serializa uma operação que toca MÚLTIPLOS
+ * caminhos simultaneamente (rename/move A→B adquire ambos os locks).
+ * Chaves são ordenadas para evitar deadlock entre renames cruzados.
  *
  * Uso: `await fileWriteQueue.run(path, () => app.vault.modify(file, novoConteudo))`
  */
@@ -41,6 +38,38 @@ export class FileWriteQueue {
 		void chained.then(() => {
 			if (this.queues.get(path) === chained) this.queues.delete(path);
 		});
+		return current;
+	}
+
+	/**
+	 * Serializa uma operação que toca múltiplos paths (ex.: rename A→B).
+	 * Adquire locks de todos os paths em ordem canônica (sort) para evitar
+	 * deadlock entre renames cruzados (A→B e B→A). A operação roda quando
+	 * NENHUM dos paths tiver outra operação pendente.
+	 */
+	runMany<T>(paths: string[], operation: () => Promise<T>): Promise<T> {
+		const keys = [...new Set(paths)].sort();
+
+		let previous = Promise.resolve();
+		for (const key of keys) {
+			const queued = this.queues.get(key) ?? Promise.resolve();
+			previous = Promise.all([previous, queued]).then(() => undefined);
+		}
+
+		const current = previous.then(operation, operation);
+		const chained = current.catch(() => undefined);
+
+		for (const key of keys) {
+			this.queues.set(key, chained);
+		}
+
+		// Drena todas as chaves — só remove se NENHUM run novo assumiu.
+		void chained.then(() => {
+			for (const key of keys) {
+				if (this.queues.get(key) === chained) this.queues.delete(key);
+			}
+		});
+
 		return current;
 	}
 }

@@ -95,4 +95,76 @@ describe("FileWriteQueue", () => {
 		await new Promise((r) => setTimeout(r, 0));
 		expect((queue as unknown as { queues: Map<string, unknown> }).queues.size).toBe(0);
 	});
+	describe("runMany", () => {
+		it("adquire locks de múltiplos paths na ordem canônica", async () => {
+			const queue = new FileWriteQueue();
+			const order: string[] = [];
+
+			await queue.runMany(["b.md", "a.md"], async () => {
+				order.push("op");
+			});
+
+			expect(order).toEqual(["op"]);
+		});
+
+		it("serializa com run concorrente em path diferente", async () => {
+			const queue = new FileWriteQueue();
+			const order: string[] = [];
+
+			await Promise.all([
+				queue.runMany(["a.md", "b.md"], async () => {
+					await new Promise((r) => setTimeout(r, 15));
+					order.push("many");
+				}),
+				queue.run("b.md", async () => {
+					order.push("single");
+				}),
+			]);
+
+			expect(order).toContain("many");
+			expect(order).toContain("single");
+			expect(order.length).toBe(2);
+		});
+
+		it("prevê deadlock em renames cruzados (A→B e B→A)", async () => {
+			const queue = new FileWriteQueue();
+			const order: number[] = [];
+
+			await Promise.all([
+				queue.runMany(["b.md", "a.md"], async () => {
+					await new Promise((r) => setTimeout(r, 10));
+					order.push(1);
+				}),
+				queue.runMany(["a.md", "b.md"], async () => {
+					order.push(2);
+				}),
+			]);
+
+			expect(order).toEqual([1, 2]); // sem deadlock
+		});
+
+		it("captura erro sem travar a fila dos paths", async () => {
+			const queue = new FileWriteQueue();
+
+			await queue
+				.runMany(["x.md"], async () => {
+					throw new Error("fail");
+				})
+				.catch(() => {});
+
+			let ran = false;
+			await queue.runMany(["x.md", "y.md"], async () => {
+				ran = true;
+			});
+			expect(ran).toBe(true);
+		});
+
+		it("drena todas as chaves do Map", async () => {
+			const queue = new FileWriteQueue();
+			await queue.runMany(["a.md", "b.md"], async () => {});
+			await new Promise((r) => setTimeout(r, 0));
+			const size = (queue as unknown as { queues: Map<string, unknown> }).queues.size;
+			expect(size).toBe(0);
+		});
+	});
 });
