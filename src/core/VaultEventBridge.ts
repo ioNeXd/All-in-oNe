@@ -52,10 +52,10 @@ export class VaultEventBridge {
 			// removidos (histórico/notificações vivas com plugin "desligado").
 			if (this.stopped) return;
 			this.register("create", (file) =>
-				this.emitFor(file, "file:created", "folder:created", "Criado")
+				this.emitFor(file, "file:created", "folder:created")
 			);
 			this.register("delete", (file) =>
-				this.emitFor(file, "file:deleted", "folder:deleted", "Excluído")
+				this.emitFor(file, "file:deleted", "folder:deleted")
 			);
 			this.register("modify", (file) => {
 				if (file instanceof TFile) {
@@ -92,8 +92,7 @@ export class VaultEventBridge {
 	private emitFor(
 		file: TAbstractFile,
 		fileEvent: string,
-		folderEvent: string,
-		_label: string
+		folderEvent: string
 	): void {
 		if (file instanceof TFolder) {
 			void this.bus.emit(folderEvent, { path: file.path }, "core");

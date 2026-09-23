@@ -484,7 +484,7 @@ export class NotificationsModule implements HubModule {
 	}
 
 	/**
-	 * Toca um bipe curto. O contexto vem do AudioUnlocker compartilhado: só
+	 * Toca um bipe curto. O contexto vem do AudioUnlocker próprio: só
 	 * toca se já houve gesto do usuário (política de autoplay do Chromium) —
 	 * disparo automático antes do primeiro clique sai SEM som (o popup segue;
 	 * é a política do navegador, e fingir o contrário era o bug do som mudo).

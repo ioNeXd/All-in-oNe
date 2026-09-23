@@ -1,5 +1,6 @@
 import { TFile, TFolder, normalizePath, Setting, Notice, Modal, App } from "obsidian";
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
+import { randomId } from "../../core/types";
 import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
 import {
 	type CalendarEvent,
@@ -86,9 +87,10 @@ export class CalendarModule implements HubModule {
 	/** Timer do agendador de lembretes (loop de setTimeout, ver scheduleNextCheck). */
 	private dailyCheckInterval?: number;
 	/**
-	 * Desbloqueio de áudio COMPARTILHADO com as Notificações (core/AudioUnlock):
-	 * o lembrete dispara sozinho — o destravamento acontece no primeiro gesto
-	 * do usuário (clique/tecla), armado no onEnable.
+	 * Desbloqueio de áudio próprio (core/AudioUnlock): cada módulo tem sua
+	 * instância, com ciclo de vida independente. O lembrete dispara sozinho —
+	 * o destravamento acontece no primeiro gesto do usuário (clique/tecla),
+	 * armado no onEnable.
 	 */
 	private readonly audioUnlocker = new AudioUnlocker();
 	/** Desinscrição do pedido da UI (calendar:open-today) — limpo no onDisable. */
@@ -697,6 +699,8 @@ export class CalendarModule implements HubModule {
 	 * cobre o wake-up tardio do Obsidian/suspensão do SO.
 	 */
 	private scheduleNextCheck(): void {
+		if (typeof window === "undefined") return;
+		if (this.dailyCheckInterval) window.clearTimeout(this.dailyCheckInterval);
 		this.dailyCheckInterval = window.setTimeout(() => {
 			this.checkTodaysEvents();
 			this.scheduleNextCheck();
@@ -728,7 +732,7 @@ export class CalendarModule implements HubModule {
 		await this.context?.bus.emit("calendar:event-fired", { event }, "calendar");
 
 		if (event.reminder) {
-			// Som toca uma vez aqui, dentro do ReminderModal.onOpen (não duas).
+			// Som toca uma vez aqui (ReminderModal.onOpen não toca som — só pisca o ícone).
 			// A janela por padrão NÃO se força para frente — só a aba pisca na
 			// barra de tarefas (autoFocusOnReminder controla o oposto).
 			new ReminderModal(
@@ -751,6 +755,7 @@ export class CalendarModule implements HubModule {
 						e.id === event.id ? { ...e, lastFiredYear: now.getFullYear() } : e
 					);
 		await this.context?.updateSettings({ events });
+		this.scheduleNextCheck();
 	}
 
 	private pathForDate(date: Date): string {
@@ -826,8 +831,9 @@ export class CalendarModule implements HubModule {
 
 	async addEvent(event: Omit<CalendarEvent, "id">): Promise<void> {
 		const settings = this.readSettings();
-		const full: CalendarEvent = { ...event, id: `evt-${Date.now()}` };
+		const full: CalendarEvent = { ...event, id: `evt-${randomId()}` };
 		await this.context?.updateSettings({ events: [...settings.events, full] });
+		this.scheduleNextCheck();
 	}
 
 	/**
@@ -864,6 +870,7 @@ export class CalendarModule implements HubModule {
 			await this.context?.updateSettings({
 				events: mergeIcsEvents(settings.events, parsed.events),
 			});
+			this.scheduleNextCheck();
 
 			const message = [`${parsed.events.length} evento(s) importado(s) de "${file.name}".`];
 			if (parsed.warnings.length > 0) message.push("", ...parsed.warnings);
@@ -877,6 +884,7 @@ export class CalendarModule implements HubModule {
 	async removeEvent(id: string): Promise<void> {
 		const settings = this.readSettings();
 		await this.context?.updateSettings({ events: settings.events.filter((e) => e.id !== id) });
+		this.scheduleNextCheck();
 	}
 
 	/**
@@ -977,7 +985,7 @@ export class CalendarModule implements HubModule {
 		const settings = this.readSettings();
 		const manual = settings.events.filter((e) => !e.id.startsWith("ics:"));
 		return (this.context?.updateSettings({ events: manual }) ?? Promise.resolve([])).then(
-			() => void 0
+			() => this.scheduleNextCheck()
 		);
 	}
 }

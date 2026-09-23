@@ -25,7 +25,6 @@ function describeError(err: unknown): string {
  * Responsabilidades do núcleo:
  *   - Registrar módulos e orquestrar onEnable/onDisable com isolamento de falha.
  *   - Expor o event bus e a fila de escrita de arquivos para os módulos.
- *   - Manter o histórico consolidado (alimentado pelo bus).
  *   - Aplicar o "modo seguro" quando um módulo falha repetidamente ao habilitar.
  *   - Aplicar lazy loading: só instanciar/habilitar módulos que estão ligados.
  */
@@ -84,9 +83,6 @@ export class HubCore {
 		this.enabledModuleIds = new Set(settings.enabledModules);
 
 		if (await this.settings.detectExternalChange()) {
-			// Aviso vai para o log de eventos da sessão (Central de Eventos):
-			// o buffer próprio do núcleo foi removido — quem quer registro
-			// persistente de eventos é o módulo de Histórico, via bus.
 			void this.bus.emit(
 				"core:sync-conflict",
 				{
@@ -101,10 +97,9 @@ export class HubCore {
 	private moduleContexts = new Map<ModuleId, ModuleContext>();
 
 	/**
-	 * Registra a CLASSE de um módulo (não a instância) — permite lazy loading
-	 * real: a ATIVAÇÃO (onEnable) só roda se o módulo estiver na lista de
-	 * módulos habilitados nas configurações. `onRegister`, porém, roda sempre,
-	 * para que o módulo consiga expor configurações mesmo desligado.
+	 * Registra um módulo — permite lazy loading: a ATIVAÇÃO (onEnable) só roda
+	 * se o módulo estiver na lista de habilitados nas configurações. `onRegister`,
+	 * porém, roda sempre, para que o módulo consiga expor configurações mesmo desligado.
 	 */
 	async registerModule(module: HubModule): Promise<void> {
 		this.modules.set(module.manifest.id, module);
@@ -133,28 +128,19 @@ export class HubCore {
 			getSettings: () => this.settings.getModuleSettings(id),
 			updateSettings: async (patch) => {
 				const issues = await this.settings.updateModuleSettings(id, patch);
-				// Se a validação bloqueou, nada foi persistido — notificar seria
-				// mentir para o módulo (o hook veria a config ANTIGA como se nova).
 				if (issues.length > 0) return issues;
-				// Contrato v2: onSettingsChange dispara quando a config DO MÓDULO
-				// muda, não só no reset. Síncrono e isolado — erro de um módulo
-				// reagindo não quebra a gravação nem os demais.
 				try {
 					this.modules.get(id)?.onSettingsChange?.(this.settings.get());
 				} catch (err) {
 					console.error(`[All iₙ oNe] Módulo "${id}" falhou ao reagir à mudança de config:`, err);
 				}
 				return issues;
-			},				getFullSettings: () => this.settings.get(),
-				// Estado de runtime (não a config): é o que permite um módulo
-				// decidir "quem cuida disso" sem divergir de outro lado que usa
-				// o mesmo critério (ex.: fallback do Templates × ponte do vault).
-				isModuleEnabled: (targetId) => this.enabledModuleIds.has(targetId),				// Log do módulo = evento no bus: aparece na Central de Eventos da
-				// sessão e qualquer interessado (ex.: Histórico) pode escutar.
-				// Antes caía num buffer interno do núcleo que NINGUÉM lia.
-				log: (message, data) => {
-					void this.bus.emit("core:log", { message, path: data?.path as string | undefined }, id);
-				},
+			},
+			getFullSettings: () => this.settings.get(),
+			isModuleEnabled: (targetId) => this.runtimeEnabledIds.has(targetId),
+			log: (message, data) => {
+				void this.bus.emit("core:log", { message, path: data?.path as string | undefined }, id);
+			},
 			registerCommand: (cmdId, name, callback) => {
 				this.onRegisterCommand?.(id, cmdId, name, callback);
 			},
@@ -182,11 +168,6 @@ export class HubCore {
 			this.runtimeEnabledIds.add(id);
 			this.crashCounts.set(id, 0);
 			this.lastEnableErrors.delete(id);
-			// SAÍDA DO MODO SEGURO: se o módulo OFENSOR foi religado com
-			// sucesso (ex.: o usuário corrigiu a porta do MCP), a condição que
-			// motivou o modo seguro acabou — o bloqueio é da SESSÃO, não
-			// eterno: sem isto, só reiniciar o Obsidian desbloquearia o
-			// registro de módulos. Contadores zeram junto (recomeço limpo).
 			if (this.safeMode) {
 				this.safeMode = false;
 				this.crashCounts.clear();
@@ -194,18 +175,10 @@ export class HubCore {
 			}
 		} catch (err) {
 			console.error(`[All iₙ oNe] Falha ao habilitar o módulo "${id}":`, err);
-			// O Set foi semeado por init() a partir da config — se o onEnable
-			// falhou, a memória precisa voltar a refletir a realidade: módulo
-			// NÃO habilitado. Sem isto, o Lobby mostraria "ligado" num módulo
-			// que falhou e o checkCallback deixaria seus comandos executáveis
-			// fora do ciclo de vida.
-			this.enabledModuleIds.delete(id);
+			// enabledModuleIds (desejo) NÃO é tocado — módulo continua "desejado"
+			// para próxima tentativa/reset. Só o runtime sai.
 			this.runtimeEnabledIds.delete(id);
 			this.lastEnableErrors.set(id, describeError(err));
-			// Falha de habilitação vira evento no bus — o Histórico (produto,
-			// persistente) registra, em vez de sumir num buffer interno sem
-			// leitor. O aviso imediato segue sendo o Notice do Lobby +
-			// getLastEnableError.
 			void this.bus.emit(
 				"core:module-error",
 				{ moduleId: id, eventName: "onEnable", error: describeError(err) },
@@ -216,9 +189,7 @@ export class HubCore {
 			if (crashes >= CRASH_LIMIT_BEFORE_SAFE_MODE) {
 				await this.enterSafeMode(id, err);
 			}
-			// Não relança: um módulo falhando ao habilitar nunca deve impedir o
-			// registro/ativação dos demais módulos durante o startup do plugin.
-			// Quem chamou (ex.: o Lobby) confere o resultado via isModuleEnabled().
+			// Não relança: falha de um módulo nunca impede os demais no startup.
 		}
 	}
 
@@ -240,35 +211,19 @@ export class HubCore {
 		for (const id of [...new Set([...this.enabledModuleIds, ...this.runtimeEnabledIds])]) {
 			await this.disableModule(id);
 		}
+		this.bus.disposeAll();
 	}
 
 	/**
-	 * MODO SEGURO: se um módulo falha repetidamente ao habilitar, ele é
-	 * desligado automaticamente e o restante do plugin continua funcionando
-	 * — em vez de travar o Obsidian inteiro na inicialização por causa de um
-	 * módulo problemático.
-	 */
-	/**
-	 * MODO SEGURO (política completa):
-	 *   - ENTRADA: 3 falhas consecutivas de onEnable do mesmo módulo →
-								safeMode = true, módulo desligado, bloqueio de NOVOS
-								registros/habilitações automáticas no startup.
-	 *   - SAÍDA:   o módulo ofensor habilitando com SUCESSO (ação do usuário
-	 *              pelo Lobby, pós-correção) limpa o modo seguro na hora e
-	 *              emite core:safe-mode-exited. O bloqueio é da sessão — não
-								precisa reiniciar o Obsidian.
+	 * MODO SEGURO: se um módulo falha repetidamente ao habilitar (3x), ele é
+	 * desligado e o restante do plugin continua. ENTRADA: crashCount >= 3 →
+	 * safeMode = true, bloqueio de novos enables. SAÍDA: ofensor religado
+	 * com sucesso pelo Lobby → safeMode = false. Bloqueio é da sessão.
 	 */
 	private async enterSafeMode(offendingModuleId: ModuleId, error: unknown): Promise<void> {
 		this.safeMode = true;
-		// O ofensor sai dos DOIS sets: do runtime (isModuleEnabled → false;
-		// comandos desabilitados na Paleta) e do desejo (para que a próxima
-		// tentativa de habilitação seja uma decisão consciente do usuário, não
-		// o startup re-executando o que acabou de falhar 3 vezes). O registro
-		// de config do DISCO não é tocado — o reset/reconciliação parte dele.
 		this.enabledModuleIds.delete(offendingModuleId);
 		this.runtimeEnabledIds.delete(offendingModuleId);
-		// O registro cabe ao bus (o Histórico escuta core:safe-mode-entered e
-		// persiste com rótulo próprio) — não há buffer duplicado no núcleo.
 		await this.bus.emit(
 			"core:safe-mode-entered",
 			{ moduleId: offendingModuleId, error: String(error) },
@@ -299,28 +254,15 @@ export class HubCore {
 	/**
 	 * Restaurar tudo — escadinha real de 3 níveis, como promete o modal:
 	 * - "config": só a configuração volta ao padrão; dados gerados intactos.
-	 * - "data": configuração intacta; módulos limpam seus dados via onResetData;
-	 *   histórico do núcleo/bus também é limpo.
+	 * - "data": configuração intacta; módulos limpam seus dados via onResetData.
 	 * - "all": config padrão + onResetData (config E dados zerados).
 	 */
 	async resetAll(level: "config" | "data" | "all"): Promise<void> {
-		// A diferença entre "config" e "all" não está no manager (ele não
-		// conhece módulos): ambos zeram a CONFIG; o que muda é se o reset de
-		// DADOS (onResetData + histórico) roda ou não — orquestrado abaixo.
 		if (level !== "data") await this.settings.reset();
 		if (level !== "data") {
-			// O reset substituiu `enabledModules` no disco (default = todos
-			// ligados), mas o Set em memória — que o Lobby usa para toggles e
-			// diagnóstico — só é sincronizado no init(). Sem reconciliar, o
-			// Lobby mostraria "Desligado" num módulo que a config diz estar
-			// ligado (e o estado só bateria após reiniciar o Obsidian).
-			// enableModule/disableModule mantêm o Set e isolam falhas.
 			const desired = new Set(this.settings.get().enabledModules);
 			for (const module of this.getModules()) {
 				const id = module.manifest.id;
-				// Parte do DESEJO DO DISCO (config recém-gravada pelo reset), não
-				// dos sets em memória — um módulo que falhou 3x antes do reset tem
-				// o desejo em memória limpo pelo próprio enterSafeMode.
 				if (desired.has(id) && !this.enabledModuleIds.has(id)) await this.enableModule(id);
 				else if (!desired.has(id) && (this.enabledModuleIds.has(id) || this.isModuleEnabled(id))) {
 					await this.disableModule(id);
@@ -328,11 +270,6 @@ export class HubCore {
 			}
 		}
 		if (level !== "config") {
-			// Dados gerados: hook do contrato (o Histórico limpa as próprias
-			// entradas persistidas; o bus mantém o log da SESSÃO — é debug,
-			// não produto). Roda para TODOS os módulos registrados, não só os
-			// ligados — dado gerado é dado gerado; se sobrevivesse ao reset,
-			// voltaria ao religar o módulo.
 			for (const module of this.getModules()) {
 				try {
 					await module.onResetData?.();
@@ -343,10 +280,6 @@ export class HubCore {
 			this.bus.clearHistory();
 		}
 		if (level !== "data") {
-			// A fatia de cada módulo pode ter mudado no disco; sem avisar, cada
-			// módulo seguiria com a config ANTIGA em memória (ex.: Histórico com
-			// 500 entradas de volta na próxima gravação). No "data" nada mudou
-			// na config — os módulos acabaram de escrever o próprio dado.
 			for (const module of this.getModules()) {
 				if (this.isModuleEnabled(module.manifest.id)) {
 					try {
