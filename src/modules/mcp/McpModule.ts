@@ -15,7 +15,7 @@ import { negotiateToolsApiVersion, TOOLS_API_VERSION } from "./ToolsApiVersion";
 import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
 import { randomId, cryptoRandomToken } from "../../core/types";
 import { searchVault, normalizeQuery } from "./SearchVault";
-import { createRateLimiter, wouldAllow } from "./RateLimit";
+import { createRateLimiter, wouldAllow, reserve } from "./RateLimit";
 
 export interface McpModuleSettings {
 	enabled: boolean;
@@ -454,19 +454,22 @@ export class McpModule implements HubModule {
 	): Promise<{ ok: boolean; result?: unknown; error?: string }> {
 		const settings = this.readSettings();
 
-		// Janela cheia? Nega cedo, SEM consumir (nada foi autorizado ainda).
-		// O limiter é recriado se a config mudou (limite é lido por chamada).
+		// Reserva ATÔMICA: checa cota E consome num passo.
+		// Se validação posterior falhar, release() devolve o slot.
+		const now = Date.now();
 		if (this.rateLimiterLimit !== settings.rateLimitPerMinute) {
 			this.rateLimiter = createRateLimiter(settings.rateLimitPerMinute);
 			this.rateLimiterLimit = settings.rateLimitPerMinute;
 		}
-		if (!wouldAllow(this.rateLimiter, Date.now())) {
+		const reservation = reserve(this.rateLimiter, now);
+		if (!reservation) {
 			return { ok: false, error: "Limite de ações por minuto excedido." };
 		}
 
 		// Ferramenta desconhecida: rejeita sem tocar na cota (antes passava pelo
 		// gate e só explodia dentro do executeTool, gastando uma ação).
 		if (!TOOL_DEFINITIONS.some((t) => t.name === toolName)) {
+			reservation.release();
 			return { ok: false, error: `Ferramenta desconhecida: ${toolName}` };
 		}
 
@@ -475,6 +478,7 @@ export class McpModule implements HubModule {
 
 		const temporaryGrant = Date.now() < this.temporaryWriteUntil;
 		if (isWrite && settings.readOnly && !temporaryGrant) {
+			reservation.release();
 			return {
 				ok: false,
 				error:
@@ -491,17 +495,13 @@ export class McpModule implements HubModule {
 			const targets = collectWriteTargets(args);
 			const denied = targets.find((t) => !this.isWriteAllowed(t, settings));
 			if (denied !== undefined) {
+				reservation.release();
 				return { ok: false, error: `Escrita não permitida no caminho "${denied}".` };
 			}
 		}
 
-		// Passou por TODAS as checagens (limite, ferramenta, readOnly, pastas):
-		// aqui sim consome a cota — vai executar (ou simular) de fato.
-		if (!this.rateLimiter.tryConsume(Date.now())) {
-			// Corrida benigna (outra chamada consumiu o último slot no meio das
-			// checagens desta): mesma resposta do gate.
-			return { ok: false, error: "Limite de ações por minuto excedido." };
-		}
+		// Passou por TODAS as checagens — slot já reservado, segue para execução.
+		// (A reserva atômica substituiu wouldAllow + tryConsume separados.)
 
 		if (dryRun) {
 			// Emite log mesmo em simulação — lacuna de auditoria evitada.
