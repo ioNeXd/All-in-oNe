@@ -4,20 +4,24 @@ import { TOOL_DEFINITIONS } from "./ToolSchemas";
 import { AuthThrottle, identityOf } from "./AuthThrottle";
 
 /**
- * TRANSPORTE: STREAMABLE HTTP
- * ----------------------------
- * Implementação mínima e direta do transporte atual do MCP: um único
- * endpoint POST que recebe mensagens JSON-RPC e responde com JSON (ou, para
- * chamadas que precisam de progresso incremental, um stream SSE escopado
- * àquela requisição). O antigo transporte HTTP+SSE (dois endpoints, GET
- * separado para o stream) está deprecated e não é implementado aqui de
- * propósito.
+ * TRANSPORTE: HTTP POST (subconjunto do Streamable HTTP)
+ * ------------------------------------------------------
+ * Implementação stateless, POST-only: recebe JSON-RPC via POST e responde
+ * com JSON. GET/SSE, headers MCP (Mcp-Method, Mcp-Name) e notificações
+ * server-initiated NÃO são implementados.
  *
- * Isto é deliberadamente uma implementação enxuta do protocolo — o
- * suficiente para os clientes MCP atuais (Claude Desktop, Cursor, Claude
- * Code) conseguirem completar o handshake, listar e chamar as ferramentas.
- * Ao adicionar suporte a mais recursos do protocolo (resources, prompts),
- * estenda o roteamento em `handleRequest` mantendo o mesmo formato de
+ * O spec MCP Streamable HTTP (2025-06-18) permite estado puro POST-only
+ * quando o servidor não suporta notificações server-initiated. Este plugin
+ * declara listChanged: false no handshake — SSE não é necessário.
+ *
+ * Limitações:
+ *   - Sem GET para stream (notificações server-initiated).
+ *   - Sem headers Mcp-Method / Mcp-Name (requisitos 2026).
+ *   - Sem validação de Accept ou Content-Type (o spec exige).
+ *
+ * Funciona com Claude Desktop, Cursor e Claude Code. Se o objetivo for
+ * servidor MCP genérico, estenda o roteamento em handleRequest mantendo o
+ * mesmo formato JSON-RPC.
  * resposta JSON-RPC.
  */
 
