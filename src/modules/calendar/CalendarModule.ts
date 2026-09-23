@@ -874,6 +874,9 @@ export class CalendarModule implements HubModule {
 
 			const message = [`${parsed.events.length} evento(s) importado(s) de "${file.name}".`];
 			if (parsed.warnings.length > 0) message.push("", ...parsed.warnings);
+			if (parsed.limitations.length > 0) {
+				message.push("", "⚠️ Importação parcial — funcionalidades ignoradas:", ...parsed.limitations);
+			}
 			new Notice(message.join("\n"), 8000);
 			this.context?.log(`Eventos importados do .ics: ${file.name}`, { count: parsed.events.length });
 			this.refreshPanel();

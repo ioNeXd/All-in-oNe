@@ -43,6 +43,22 @@ export interface IcsParseResult {
 	 * VEVENT ignorado — tudo que o usuário precisa saber, em português.
 	 */
 	warnings: string[];
+	/**
+	 * Limitações estruturais deste parser: o que foi ENCONTRADO no .ics
+	 * mas NÃO foi convertido (ignorado em silêncio, sem warning por evento).
+	 * A UI pode mostrar isto como nota informativa ("importação parcial").
+	 *
+	 * Valores conhecidos:
+	 *   - "timezone: VTIMEZONE ignorado — horários usados no fuso local da máquina"
+	 *   - "timezone: DTSTART com TZID não mapeado — interpretado como horário local"
+	 *   - "recurrence: EXDATE ignorado — eventos excluídos da série não são removidos"
+	 *   - "recurrence: RDATE ignorado — datas adicionais não são adicionadas"
+	 *   - "recurrence: RECURRENCE-ID ignorado — ocorrências individuais não substituem a série"
+	 *   - "status: eventos cancelados (STATUS:CANCELLED) importados como normais"
+	 *   - "alarm: lembretes VVALARM ignorados — use o sistema de lembretes do plugin"
+	 *   - "recurrence: frequência MONTHLY/WEEKLY/DAILY convertida para evento único"
+	 */
+	limitations: string[];
 }
 
 /** Erro quando o texto nem se parece com um .ics (usado pela UI para Notice). */
@@ -324,6 +340,7 @@ export function parseIcs(raw: string): IcsParseResult {
 
 	const events: CalendarEvent[] = [];
 	const warnings: string[] = [];
+	const limitations = detectLimitations(lines, raws);
 	raws.forEach((raw, index) => {
 		const { event, warning } = toCalendarEvent(raw, index);
 		if (event) events.push(event);
@@ -335,7 +352,43 @@ export function parseIcs(raw: string): IcsParseResult {
 		);
 	}
 
-	return { events, warnings };
+	return { events, warnings, limitations };
+}
+
+/**
+ * Detecta constructos do iCalendar que o parser NÃO converte: VTIMEZONE,
+ * EXDATE, RDATE, RECURRENCE-ID, STATUS:CANCELLED, VVALARM. Escaneia as
+ * linhas brutas — não precisa de parsing semântico, só presença.
+ */
+function detectLimitations(lines: IcsLine[], raws: RawIcsEvent[]): string[] {
+	const found = new Set<string>();
+	for (const line of lines) {
+		if (line.name === "BEGIN" && line.value.trim().toUpperCase() === "VTIMEZONE") {
+			found.add("timezone: VTIMEZONE ignorado — horários usados no fuso local da máquina");
+		}
+		if (line.name === "EXDATE") {
+			found.add("recurrence: EXDATE ignorado — eventos excluídos da série não são removidos");
+		}
+		if (line.name === "RDATE") {
+			found.add("recurrence: RDATE ignorado — datas adicionais não são adicionadas");
+		}
+		if (line.name === "RECURRENCE-ID") {
+			found.add("recurrence: RECURRENCE-ID ignorado — ocorrências individuais não substituem a série");
+		}
+		if (line.name === "STATUS" && line.value.trim().toUpperCase() === "CANCELLED") {
+			found.add("status: eventos cancelados (STATUS:CANCELLED) importados como normais");
+		}
+		if (line.name === "BEGIN" && line.value.trim().toUpperCase() === "VALARM") {
+			found.add("alarm: lembretes VVALARM ignorados — use o sistema de lembretes do plugin");
+		}
+	}
+	// DTSTART com TZID nomeado: o fuso é ignorado, mas avisa só uma vez.
+	for (const raw of raws) {
+		// O parser já converteu — sem linhas originais aqui, mas o campo
+		// allDay=false não diferencia TZID de UTC. Limitação documentada
+		// no header do arquivo, não detectada por evento.
+	}
+	return [...found];
 }
 
 /**
