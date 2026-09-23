@@ -40,6 +40,10 @@ export interface SplitPersistenceHandle {
 	/** Fatia do módulo — null se o arquivo ainda não existe. */
 	loadModule: (moduleId: string) => Promise<Record<string, unknown> | null>;
 	persistModule: (moduleId: string, slice: Record<string, unknown>) => Promise<void>;
+	/** Se true, algum arquivo de dados existe mas não pôde ser lido. */
+	readCorrupted: boolean;
+	/** Caminhos dos arquivos que falharam ao ler (para diagnóstico/backup). */
+	corruptedPaths: string[];
 }
 
 /** Caminho do arquivo de um módulo, relativo à pasta do plugin. */
@@ -67,12 +71,29 @@ export function stubSlices(settings: HubSettings, ids: readonly string[]): HubSe
 export function createSplitPersistence(app: App, pluginDir: string): SplitPersistenceHandle {
 	const adapter = app.vault.adapter;
 
+	let readCorrupted = false;
+	const corruptedPaths: string[] = [];
+
 	const readFile = async <T>(path: string): Promise<T | null> => {
 		try {
 			if (!(await adapter.exists(path))) return null;
-			return JSON.parse(await adapter.read(path)) as T;
+			const raw = await adapter.read(path);
+			try {
+				return JSON.parse(raw) as T;
+			} catch {
+				// JSON corrompido: salva backup antes de sinalizar.
+				readCorrupted = true;
+				corruptedPaths.push(path);
+				try {
+					await adapter.write(`${path}.corrupt`, raw);
+				} catch { /* backup é melhor-esforço */ }
+				return null;
+			}
 		} catch {
-			return null; // ausente/ilegível/corrompido: tratado como "não salvo"
+			// Arquivo existe mas não pôde ser lido: permissão, disco, etc.
+			readCorrupted = true;
+			corruptedPaths.push(path);
+			return null;
 		}
 	};
 	const writeFile = async (path: string, data: unknown): Promise<void> => {
@@ -101,5 +122,7 @@ export function createSplitPersistence(app: App, pluginDir: string): SplitPersis
 		},
 		loadModule: (moduleId) => readFile(absolute(moduleFilePath(moduleId))),
 		persistModule: (moduleId, slice) => writeFile(absolute(moduleFilePath(moduleId)), slice),
+		get readCorrupted() { return readCorrupted; },
+		get corruptedPaths() { return corruptedPaths; },
 	};
 }

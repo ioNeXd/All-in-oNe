@@ -58,6 +58,8 @@ export class SettingsManager {
 	private split?: SplitPersistenceHandle;
 	/** Última config efetivamente NO DISCO — base do diff do persistAll. */
 	private persistedSnapshot?: HubSettings;
+	/** Arquivos corrompidos detectados no último init (para diagnóstico). */
+	corruptedFiles: string[] = [];
 
 	constructor(private load: Load, private persist: Persist) {
 		this.current = createDefaultSettings();
@@ -76,6 +78,18 @@ export class SettingsManager {
 
 	async init(): Promise<HubSettings> {
 		const loaded = this.split ? await this.split.loadMain() : await this.load();
+
+		// Arquivos corrompidos: avisa o usuário (backup já salvo como .corrupt
+		// pelo SplitPersistence). O loaded pode ser null (defaults) ou parcial
+		// (main lido, módulo splitado corrompido). Em ambos os casos, os dados
+		// do módulo corrompido são perdidos — mas o backup .corrupt permite
+		// recuperação manual.
+		if (this.split?.readCorrupted) {
+			this.corruptedFiles = [...this.split.corruptedPaths];
+		} else {
+			this.corruptedFiles = [];
+		}
+
 		if (!loaded) {
 			this.current = createDefaultSettings();
 			await this.persistAll(this.current);
