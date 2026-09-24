@@ -528,6 +528,7 @@ function respondModern(res: http.ServerResponse, id: unknown, result: Record<str
 		jsonrpc: "2.0",
 		id,
 		result: {
+			resultType: "complete",
 			...result,
 			_meta: { ...(result._meta as Record<string, unknown> | undefined), [SERVER_INFO_META_KEY]: MODERN_SERVER_INFO },
 		},
