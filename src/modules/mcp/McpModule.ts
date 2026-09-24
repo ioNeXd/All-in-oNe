@@ -595,7 +595,7 @@ export class McpModule implements HubModule {
 			case "read_note": {
 				const readPath = validateVaultPath(String(args.path));
 				const file = vault.getAbstractFileByPath(normalizePath(readPath));
-				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
+				if (!(file instanceof TFileClass) || file.extension.toLowerCase() !== "md") throw new Error("Nota não encontrada.");
 				return { content: await vault.read(file as TFile) };
 			}
 			case "create_note": {
@@ -899,11 +899,11 @@ export class McpModule implements HubModule {
 			}
 			case "combine_notes": {
 				const paths = (args.paths as string[] | undefined) ?? [];
-				const target = normalizePath(String(args.targetPath));
 				if (paths.length === 0) throw new Error("combine_notes: informe ao menos uma nota em `paths`.");
 
 				// Dedup preservando a ordem original.
-				const normalizedPaths = [...new Set(paths.map((p) => normalizePath(String(p))))];
+				const normalizedPaths = [...new Set(paths.map((p) => validateVaultPath(String(p))))];
+				const target = validateVaultPath(String(args.targetPath));
 
 				// O destino não pode ser uma das entradas — operação ambígua.
 				if (normalizedPaths.includes(target)) {
