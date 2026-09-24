@@ -504,8 +504,11 @@ function respond(res: http.ServerResponse, id: unknown, result: unknown): void {
 }
 
 function validateModernRequest(req: http.IncomingMessage, message: { method?: string; params?: Record<string, unknown> }): string | null {
-	if (req.headers["mcp-protocol-version"] !== MODERN_PROTOCOL_VERSION) return "MCP-Protocol-Version inválido.";
-	if (req.headers["mcp-method"] !== message.method) return "Mcp-Method deve corresponder ao método JSON-RPC.";
+	const protocolHeader = Array.isArray(req.headers["mcp-protocol-version"]) ? req.headers["mcp-protocol-version"][0] : req.headers["mcp-protocol-version"];
+	const methodHeader = Array.isArray(req.headers["mcp-method"]) ? req.headers["mcp-method"][0] : req.headers["mcp-method"];
+	const nameHeader = Array.isArray(req.headers["mcp-name"]) ? req.headers["mcp-name"][0] : req.headers["mcp-name"];
+	if (protocolHeader !== MODERN_PROTOCOL_VERSION) return "MCP-Protocol-Version inválido.";
+	if (methodHeader !== message.method) return "Mcp-Method deve corresponder ao método JSON-RPC.";
 	const meta = message.params?._meta;
 	if (meta === null || typeof meta !== "object" || Array.isArray(meta)) return "params._meta é obrigatório na era MCP 2026-07-28.";
 	const m = meta as Record<string, unknown>;
@@ -518,8 +521,8 @@ function validateModernRequest(req: http.IncomingMessage, message: { method?: st
 		typeof (info as Record<string, unknown>).version !== "string")) return "clientInfo inválido.";
 	if (message.method === "tools/call") {
 		const name = message.params?.name;
-		if (typeof name !== "string" || req.headers["mcp-name"] !== name) return "Mcp-Name deve corresponder a params.name.";
-	} else if (req.headers["mcp-name"] !== undefined) {
+		if (typeof name !== "string" || nameHeader !== name) return "Mcp-Name deve corresponder a params.name.";
+	} else if (nameHeader !== undefined) {
 		return "Mcp-Name não é permitido neste método.";
 	}
 	const accept = req.headers["accept"] ?? "";
