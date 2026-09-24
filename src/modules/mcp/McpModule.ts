@@ -673,20 +673,20 @@ export class McpModule implements HubModule {
 				return { from: path, to: newPath };
 			}
 			case "patch_note": {
-				// Substitui um trecho exato dentro da nota, sem reescrever o arquivo todo.
+				// Substitui um trecho exato dentro da nota. Toda a operação
+				// (leitura + busca + gravação) acontece DENTRO do lock para
+				// evitar race condition: outro módulo pode alterar o arquivo
+				// entre a leitura e a escrita se o lock não proteger ambos.
 				const path = normalizePath(String(args.path));
-				const file = vault.getAbstractFileByPath(path);
-				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
 				const search = String(args.search ?? "");
 				const replace = String(args.replace ?? "");
-				const content = await vault.read(file as TFile);
-				if (!content.includes(search)) throw new Error("Trecho a substituir não encontrado.");
-				// replace com string TRATA `$&`, `$1` etc. como padrões especiais;
-				// um replace vindo de um cliente MCP precisaria escapar cada `$`
-				// para funcionar. Função substitui literalmente.
-				await write(path, () =>
-					vault.modify(file as TFile, content.replace(search, () => replace))
-				);
+				await write(path, async () => {
+					const file = vault.getAbstractFileByPath(path);
+					if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
+					const content = await vault.read(file as TFile);
+					if (!content.includes(search)) throw new Error("Trecho a substituir não encontrado.");
+					await vault.modify(file as TFile, content.replace(search, () => replace));
+				});
 				return { path };
 			}
 			case "get_links": {
