@@ -8,8 +8,8 @@ import { AuthThrottle, identityOf } from "./AuthThrottle";
  * TRANSPORTE: HTTP POST (subconjunto deliberado do Streamable HTTP)
  * ---------------------------------------------------------------
  * Implementação stateless, POST-only: recebe JSON-RPC via POST e responde
- * com JSON. GET/SSE, headers MCP (Mcp-Method, Mcp-Name) e notificações
- * server-initiated NÃO são implementados — e não precisam ser.
+ * com JSON. A era moderna usa os headers MCP de roteamento; GET/SSE e
+ * notificações server-initiated não são implementados.
  *
  * ERA / COMPATIBILIDADE:
  *   Este servidor implementa duas eras MCP no mesmo endpoint: a era legada
@@ -17,12 +17,12 @@ import { AuthThrottle, identityOf } from "./AuthThrottle";
  *   2026-07-28 via server/discover, envelope _meta e headers MCP por requisição.
  *
  * DECISÃO DE DESIGN: este servidor é deliberadamente um transport subset.
- * O spec MCP Streamable HTTP (2025-06-18) permite estado puro POST-only
- * quando o servidor não suporta notificações server-initiated. Este plugin
- * declara listChanged: false no handshake → SSE não é necessário.
+ * O subset HTTP deste plugin usa POST-only
+ * e declara listChanged: false → SSE/subscriptions não são necessários para
+ * a superfície de Tools implementada.
  *
  * Contrato implementado:
- *   ✔ POST / com JSON-RPC 2.0 (initialize, tools/list, tools/call)
+ *   ✔ POST / com JSON-RPC 2.0 (server/discover, initialize, tools/list, tools/call)
  *   ✔ Notificações JSON-RPC (sem id) retornam 202 Accepted
  *   ✔ Negociação de versão do protocolo MCP nas duas eras
  *   ✔ Negociação de versão da API de ferramentas (toolsApiVersion)
