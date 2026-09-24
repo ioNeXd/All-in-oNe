@@ -490,6 +490,11 @@ export class McpModule implements HubModule {
 		}
 
 		const isWrite = WRITE_TOOLS.has(toolName);
+		const inputLimitError = this.validateToolInput(toolName, args);
+		if (inputLimitError) {
+			reservation.release();
+			return { ok: false, error: inputLimitError };
+		}
 		const dryRun = (args.dryRun as boolean | undefined) ?? settings.dryRunDefault;
 
 		const temporaryGrant = Date.now() < this.temporaryWriteUntil;
@@ -558,6 +563,24 @@ export class McpModule implements HubModule {
 
 	/** Limite com que o rateLimiter atual foi criado (recria se a config mudar). */
 	private rateLimiterLimit = MCP_DEFAULTS.rateLimitPerMinute;
+
+	private validateToolInput(toolName: string, args: Record<string, unknown>): string | undefined {
+		const contentTools = new Set(["create_note", "append_note", "edit_note", "patch_note"]);
+		if (contentTools.has(toolName) && typeof args.content === "string" && args.content.length > McpModule.MAX_INPUT_CONTENT_CHARS) {
+			return `Conteúdo excede o limite de ${McpModule.MAX_INPUT_CONTENT_CHARS} caracteres.`;
+		}
+		if (toolName === "patch_note" && typeof args.search === "string" && args.search.length > McpModule.MAX_INPUT_CONTENT_CHARS) {
+			return `Texto de busca excede o limite de ${McpModule.MAX_INPUT_CONTENT_CHARS} caracteres.`;
+		}
+		if (toolName === "patch_note" && typeof args.replace === "string" && args.replace.length > McpModule.MAX_INPUT_CONTENT_CHARS) {
+			return `Texto de substituição excede o limite de ${McpModule.MAX_INPUT_CONTENT_CHARS} caracteres.`;
+		}
+		if (toolName === "put_attachment" && typeof args.base64 === "string") {
+			const maxEncoded = Math.ceil(McpModule.MAX_INPUT_BASE64_BYTES * 4 / 3) + 4;
+			if (args.base64.length > maxEncoded) return "Anexo base64 excede o limite de 10 MiB.";
+		}
+		return undefined;
+	}
 
 	private isWriteAllowed(path: string, settings: McpModuleSettings): boolean {
 		const normalized = normalizePath(path);
@@ -780,6 +803,7 @@ export class McpModule implements HubModule {
 				assertAttachmentPath(path);
 				const file = vault.getAbstractFileByPath(path);
 				if (!(file instanceof TFileClass)) throw new Error("Anexo não encontrado.");
+				if (file.stat.size > McpModule.MAX_INPUT_BASE64_BYTES) throw new Error("Anexo excede o limite de 10 MiB.");
 				const buffer = await vault.readBinary(file as TFile);
 				return {
 					path,
@@ -791,6 +815,7 @@ export class McpModule implements HubModule {
 				const path = validateVaultPath(String(args.path));
 				assertAttachmentPath(path);
 				const bytes = decodeBase64(args.base64);
+				if (bytes.byteLength > McpModule.MAX_INPUT_BASE64_BYTES) throw new Error("Anexo excede o limite de 10 MiB.");
 				// Decisão create/modify DENTRO do lock —
 				// outro processo pode criar/remover/substituir o arquivo.
 				const result = await write(path, async () => {
