@@ -536,6 +536,10 @@ export class McpModule implements HubModule {
 
 		try {
 			const result = await this.executeTool(toolName, args, settings);
+			const serializedResult = JSON.stringify(result);
+			if (Buffer.byteLength(serializedResult ?? String(result), "utf8") > McpModule.MAX_OUTPUT_BYTES) {
+				throw new Error("Resultado da ferramenta excede o limite de saída de 5 MiB.");
+			}
 			this.context?.log(`Ferramenta MCP executada: ${toolName}`, { path: args.path as string });
 			// UM evento por ação (o log de atividade DEDICADO, com o desfecho).
 			// Antes emitia TAMBÉM mcp:action: com os dois em TRACKED_EVENTS do
