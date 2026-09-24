@@ -124,7 +124,7 @@ export function interpretGpgStatusOutput(output: string): SignatureCheckOutcome 
 				sawNoPubkey = true;
 				break;
 			case "VALIDSIG":
-				if (parts[10]) fingerprint = parts[10];
+				if (parts[7]) fingerprint = parts[7];
 				else if (parts[1]) fingerprint = parts[1];
 				break;
 		}
@@ -139,7 +139,7 @@ export function interpretGpgStatusOutput(output: string): SignatureCheckOutcome 
 		};
 	if (errsigReason)
 		return { valid: false, reason: `Assinatura inválida: ${errsigReason}.` };
-	if (sawTerminalBad) return { valid: false, reason: "Assinatura inválida (BADSIG/EXPKEYSIG/REVKEYSIG)." };
+	if (sawTerminalBad) return { valid: false, reason: "Assinatura inválida (BADSIG/EXPKEYSIG/EXPSIG/REVKEYSIG)." };
 	return {
 		valid: false,
 		reason:
