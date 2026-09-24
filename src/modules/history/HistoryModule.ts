@@ -141,10 +141,10 @@ export class HistoryModule implements HubModule {
 		}
 	}
 
-	onDisable(): void {
+	async onDisable(): Promise<void> {
 		this.unsubscribers.forEach((u) => u());
 		this.unsubscribers = [];
-		void this.flushNow(); // não perde o que já foi registrado na sessão
+		await this.flushNow(); // não perde o que já foi registrado na sessão
 	}
 
 	/**

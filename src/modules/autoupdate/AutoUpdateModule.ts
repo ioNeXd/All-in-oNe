@@ -50,6 +50,11 @@ interface GitHubRelease {
 	assets: { name: string; browser_download_url: string }[];
 }
 
+const TRUSTED_REPO = "ioNeXd/All-in-oNe";
+
+/** Limite máximo de bytes para assets de atualização (50 MB). */
+const MAX_ASSET_BYTES = 50 * 1024 * 1024;
+
 /**
  * MÓDULO DE AUTO-UPDATE
  * ----------------------
@@ -58,9 +63,10 @@ interface GitHubRelease {
  * assets `main.js`, `manifest.json`, `styles.css` do release mais recente e
  * substitui os arquivos locais do plugin.
  *
- * O `repo` é fixo (hardcoded neste módulo / no manifest), nunca configurável
+ * O repositório confiável é fixo (TRUSTED_REPO), nunca configurável
  * pelo usuário via UI — isso é uma medida de segurança deliberada: evita que
  * alguém consiga apontar o auto-update para um repositório malicioso.
+ * O campo `repo` em settings é ignorado para operações de confiança.
  */
 export class AutoUpdateModule implements HubModule {
 	readonly manifest: ModuleManifest = {
@@ -92,6 +98,8 @@ export class AutoUpdateModule implements HubModule {
 	private managedByBrat = false;
 	private bratYieldReason?: string;
 	private lastSignatureStatus: { ok: boolean; detail: string } | undefined;
+	/** Mutex: serializa operações de atualização (check/apply/rollback). */
+	private updateLock: Promise<unknown> = Promise.resolve();
 
 	onRegister(context: ModuleContext): void {
 		this.context = context;
@@ -313,10 +321,21 @@ export class AutoUpdateModule implements HubModule {
 			}
 			return null;
 		}
+		return this.withUpdateLock(() => this.checkForUpdatesInner(opts));
+	}
+
+	/** Serializa operações de atualização: só uma pode executar por vez. */
+	private async withUpdateLock<T>(fn: () => Promise<T>): Promise<T> {
+		const run = this.updateLock.then(fn, fn);
+		this.updateLock = run.then(() => undefined, () => undefined);
+		return run;
+	}
+
+	private async checkForUpdatesInner(opts: { manual: boolean }): Promise<GitHubRelease | null> {
 		const settings = this.readSettings();
 		try {
 			const response = await requestUrl({
-				url: `https://api.github.com/repos/${settings.repo}/releases`,
+				url: `https://api.github.com/repos/${TRUSTED_REPO}/releases`,
 				method: "GET",
 			});
 			const releases = response.json as GitHubRelease[];
@@ -382,10 +401,13 @@ export class AutoUpdateModule implements HubModule {
 	 *   5. Se QUALQUER escrita falhar, restaura do backup e preserva o erro original.
 	 */
 	async applyUpdate(release: GitHubRelease): Promise<void> {
+		return this.withUpdateLock(() => this.applyUpdateInner(release));
+	}
+
+	private async applyUpdateInner(release: GitHubRelease): Promise<void> {
 		const settings = this.readSettings();
 		const assetNames = ["main.js", "manifest.json", "styles.css"];
 		const downloaded: Record<string, string> = {};
-		let backupCreated = false;
 
 		// FASE 1: Validação de assinatura (opt-in) — antes de qualquer I/O de download.
 		if (settings.verifySignature) {
@@ -416,6 +438,10 @@ export class AutoUpdateModule implements HubModule {
 				continue;
 			}
 			const content = await requestUrl({ url: asset.browser_download_url, method: "GET" });
+			// Fix 6: enforce download size limit
+			if (content.arrayBuffer.byteLength > MAX_ASSET_BYTES) {
+				throw new Error(`Asset "${name}" excede o limite de ${MAX_ASSET_BYTES / 1024 / 1024} MB — download abortado por segurança.`);
+			}
 
 			if (settings.verifySignature) {
 				const sigAsset = findSignatureAsset(release.assets, name);
@@ -453,13 +479,10 @@ export class AutoUpdateModule implements HubModule {
 			downloaded[name] = content.text;
 		}
 
-		// FASE 3: Backup antes da primeira escrita.
-		try {
-			await this.backupCurrentVersion();
-			backupCreated = true;
-		} catch (backupErr) {
-			console.error("[All iₙ oNe] Falha ao criar backup para atualização:", backupErr);
-		}
+
+		// FASE 3: Backup transacional OBRIGATÓRIO antes da primeira escrita.
+		// Se o backup falhar, NÃO continua — preserva o erro original.
+		await this.backupCurrentVersion();
 
 		// FASE 4: Escrita. Se QUALQUER escrita falhar, restaura do backup
 		// e preserva o erro original (mesmo se rollback também falhar).
@@ -471,15 +494,13 @@ export class AutoUpdateModule implements HubModule {
 		} catch (writeErr) {
 			originalErr.message = writeErr instanceof Error ? writeErr.message : String(writeErr);
 
-			if (backupCreated) {
-				try {
-					await this.rollback();
-				} catch (rollbackErr) {
-					console.error(
-						"[All iₙ oNe] Rollback também falhou após falha de atualização:",
-						rollbackErr
-					);
-				}
+			try {
+				await this.rollback();
+			} catch (rollbackErr) {
+				console.error(
+					"[All iₙ oNe] Rollback também falhou após falha de atualização:",
+					rollbackErr
+				);
 			}
 
 			throw originalErr;
@@ -519,7 +540,7 @@ export class AutoUpdateModule implements HubModule {
 		}
 
 		// Extrai o fingerprint esperado da chave pública armazenada.
-		const expectedFingerprint = extractFingerprintFromArmoredKey(settings.signingPublicKey);
+		const expectedFingerprint = await extractFingerprintFromArmoredKey(settings.signingPublicKey);
 		if (!expectedFingerprint) {
 			this.lastSignatureStatus = {
 				ok: false,
@@ -577,6 +598,12 @@ export class AutoUpdateModule implements HubModule {
 		}
 	}
 
+	/**
+	 * Backup transacional: cria todos os arquivos num diretório temporário,
+	 * valida completude, e só então promove para o destino final.
+	 * Se QUALQUER arquivo não puder ser preservado, aborta ANTES de modificar
+	 * o vault — nunca continua com backup incompleto.
+	 */
 	private async backupCurrentVersion(): Promise<void> {
 		const adapter = this.context!.app.vault.adapter;
 		const pluginDir = this.getPluginDir();
@@ -587,18 +614,48 @@ export class AutoUpdateModule implements HubModule {
 		const toCopy = pickExisting(existence);
 		if (toCopy.length === 0) return;
 
-		await adapter.mkdir(`${pluginDir}/${BACKUP_DIR}`).catch(() => undefined);
-		for (const name of toCopy) {
-			const content = await adapter.read(`${pluginDir}/${name}`);
-			await adapter.write(backupFilePath(pluginDir, name), content);
+		const tempDir = `${pluginDir}/.backup.tmp`;
+		const finalDir = `${pluginDir}/${BACKUP_DIR}`;
+		try {
+			// Limpa diretório temporário de tentativa anterior.
+			await adapter.rmdir(tempDir, true).catch(() => undefined);
+			await adapter.mkdir(tempDir);
+
+			// Copia todos os arquivos para o diretório temporário.
+			for (const name of toCopy) {
+				const content = await adapter.read(`${pluginDir}/${name}`);
+				await adapter.write(`${tempDir}/${name}`, content);
+			}
+
+			// Valida que TODOS os arquivos foram gravados com sucesso.
+			for (const name of toCopy) {
+				if (!(await adapter.exists(`${tempDir}/${name}`))) {
+					throw new Error(`Backup incompleto: arquivo "${name}" não foi gravado no diretório temporário.`);
+				}
+			}
+
+			// Promove: cria o destino final e move os arquivos.
+			await adapter.mkdir(finalDir).catch(() => undefined);
+			for (const name of toCopy) {
+				const content = await adapter.read(`${tempDir}/${name}`);
+				await adapter.write(backupFilePath(pluginDir, name), content);
+			}
+
+			await this.context?.updateSettings({
+				previousVersionBackup: {
+					version: this.currentVersion,
+					files: toCopy,
+					backedUpAt: Date.now(),
+				},
+			});
+		} catch (backupErr) {
+			// Limpa diretório temporário em caso de falha.
+			await adapter.rmdir(tempDir, true).catch(() => undefined);
+			throw backupErr; // preserva o erro original — NÃO continua
+		} finally {
+			// Remove o temporário após promoção bem-sucedida.
+			await adapter.rmdir(tempDir, true).catch(() => undefined);
 		}
-		await this.context?.updateSettings({
-			previousVersionBackup: {
-				version: this.currentVersion,
-				files: toCopy,
-				backedUpAt: Date.now(),
-			},
-		});
 	}
 
 	async rollback(): Promise<void> {

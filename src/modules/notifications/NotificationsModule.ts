@@ -379,13 +379,13 @@ export class NotificationsModule implements HubModule {
 		await this.context?.updateSettings({ rules });
 	}
 
-	onDisable(): void {
+	async onDisable(): Promise<void> {
 		this.unsubscribers.forEach((u) => u());
 		this.unsubscribers = [];
 		// Ouvintes de gesto morrem com o módulo; o contexto destravado
 		// sobrevive — religar não re-trava o som.
 		this.audioUnlocker.disarm();
-		void this.flushNow(); // não perde o que já foi notificado na sessão
+		await this.flushNow(); // não perde o que já foi notificado na sessão
 	}
 
 	/**

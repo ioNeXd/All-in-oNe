@@ -134,18 +134,28 @@ export function createSplitPersistence(app: App, pluginDir: string): SplitPersis
 
 			detectedVersion = maxVersion;
 
-			// FASE 4: Reconstitui fatias — aceita APENAS versão == máximo.
+						// FASE 4: Reconstitui fatias — aceita APENAS versão == máximo.
 			const modules: Record<string, Record<string, unknown>> = {
 				...(main.modules as Record<string, Record<string, unknown>> ?? {}),
 			};
 
 			for (const id of SPLIT_MODULE_IDS) {
 				const info = sliceData.get(id);
-				const slice = info?.raw ?? {};
+				const sliceRaw = info?.raw;
 				const sliceVersion = info?.version ?? null;
 
+				// Fix 15: distinguish missing, corrupted, and empty
+				if (sliceRaw === null) {
+					// File doesn't exist or couldn't be parsed
+					readCorrupted = true;
+					corruptedPaths.push(absolute(moduleFilePath(id)));
+					console.warn(`[SplitPersistence] Módulo ${id}.json corrompido — usando stub do principal.`);
+					modules[id] = (main.modules as Record<string, Record<string, unknown>>)?.[id] ?? {};
+					continue;
+				}
+
+				// Fix 14: don't silently combine mismatched versions
 				if (maxVersion != null && sliceVersion != null && sliceVersion < maxVersion) {
-					// Módulo ficou para trás — usa stub do principal (descarta).
 					console.warn(
 						`[SplitPersistence] Módulo ${id}.json obsoleto: _v=${sliceVersion} < máximo=${maxVersion}. ` +
 						"Usando stub do principal."
@@ -155,17 +165,15 @@ export function createSplitPersistence(app: App, pluginDir: string): SplitPersis
 				}
 
 				if (sliceVersion != null && mainVersion != null && sliceVersion > mainVersion) {
-					// Módulo mais recente que main — aceita (crash entre gravações).
 					detectedVersion = sliceVersion;
 				}
 
 				// Remove _v antes de merge — campo é meta, não dado do módulo.
-				const { [VERSION_KEY]: _sv, ...cleanSlice } = slice;
+				const { [VERSION_KEY]: _sv, ...cleanSlice } = sliceRaw;
 				void _sv;
 				modules[id] = cleanSlice;
 			}
-
-			const { [VERSION_KEY]: _mainV, ...mainWithoutVersion } = main as Record<string, unknown>;
+const { [VERSION_KEY]: _mainV, ...mainWithoutVersion } = main as Record<string, unknown>;
 			void _mainV;
 			return { ...createDefaultSettings(), ...mainWithoutVersion, modules } as HubSettings;
 		},

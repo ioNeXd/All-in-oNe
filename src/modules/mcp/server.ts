@@ -364,7 +364,18 @@ async function handleRequest(
 		}
 		case "tools/call": {
 			const toolName = String(message.params?.name ?? "");
-			const args = (message.params?.arguments ?? {}) as Record<string, unknown>;
+			// Fix 12: validate arguments is a proper object (not null, array, string, etc.)
+			const rawArgs = message.params?.arguments;
+			if (rawArgs === null || rawArgs === undefined) {
+				// arguments ausente: permite (ferramentas sem args obrigatórios)
+			} else if (typeof rawArgs !== "object" || Array.isArray(rawArgs)) {
+				respondError(res, message.id, "O campo 'arguments' deve ser um objeto.", {
+					code: "INVALID_PARAMS",
+					jsonRpcCode: JSONRPC_ERRORS.INVALID_PARAMS,
+				});
+				return;
+			}
+			const args = (rawArgs ?? {}) as Record<string, unknown>;
 
 			// Validação de argumentos contra inputSchema (required + type).
 			// Ferramentas desconhecidas passam direto — o executor já rejeita.

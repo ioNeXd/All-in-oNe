@@ -67,7 +67,7 @@ export const MCP_DEFAULTS: McpModuleSettings = {
 /** Sanitiza mensagem de erro: remove caminhos internos, stack traces, detalhes de implementação. */
 function sanitizeMcpError(msg: string): string {
 	// Remove qualquer path que pareça caminho de arquivo
-	let safe = msg.replace(/[A-Z]:\\[^s"']+/gi, "[caminho interno]");
+	let safe = msg.replace(/[A-Z]:\\[^\s"']+/gi, "[caminho interno]");
 	safe = safe.replace(/(?<!https?:)\/[^\s"']+/g, "[caminho interno]");
 	// Remove stack traces (linhas que começam com "at " ou "Error:")
 	safe = safe.split("\n").filter(l => !l.trim().startsWith("at ") && !l.trim().startsWith("Error:")).join(" ");
@@ -608,16 +608,22 @@ export class McpModule implements HubModule {
 			}
 			case "append_note": {
 				const path = validateVaultPath(String(args.path));
-				const file = vault.getAbstractFileByPath(path);
-				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
-				await write(path, () => vault.append(file as TFile, String(args.content ?? "")));
+				// Lookup + mutação DENTRO do lock.
+				await write(path, async () => {
+					const file = vault.getAbstractFileByPath(path);
+					if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
+					await vault.append(file as TFile, String(args.content ?? ""));
+				});
 				return { path };
 			}
 			case "edit_note": {
 				const path = validateVaultPath(String(args.path));
-				const file = vault.getAbstractFileByPath(path);
-				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
-				await write(path, () => vault.modify(file as TFile, String(args.content ?? "")));
+				// Lookup + mutação DENTRO do lock.
+				await write(path, async () => {
+					const file = vault.getAbstractFileByPath(path);
+					if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
+					await vault.modify(file as TFile, String(args.content ?? ""));
+				});
 				return { path };
 			}
 			case "delete_note": {
@@ -829,11 +835,8 @@ export class McpModule implements HubModule {
 			case "split_note": {
 				// Divide a nota em várias, quebrando nos headings do nível indicado.
 				const path = validateVaultPath(String(args.path));
-				const file = vault.getAbstractFileByPath(path);
-				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
 				const level = Number(args.headingLevel ?? 2);
 				const marker = "#".repeat(level) + " ";
-				const content = await vault.read(file as TFile);
 				const folder = path.substring(0, path.lastIndexOf("/"));
 				const created: string[] = [];
 				const skipped: { title: string; reason: string }[] = [];

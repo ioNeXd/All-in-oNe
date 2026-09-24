@@ -18,6 +18,9 @@
  */
 
 import { spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
 
 export interface SignatureAsset {
 	name: string;
@@ -143,55 +146,57 @@ export function interpretGpgStatusOutput(output: string): SignatureCheckOutcome 
 }
 
 /**
- * Extrai o fingerprint de uma chave pública em formato armadura ASCII.
- * Procura a subchave primária (UID) ou a primeira subchave pública na
- * seção "pub" da armadura. Retorna null se não conseguir extrair.
+ * Extrai o fingerprint GPG real de uma chave pública em formato armadura ASCII.
+ * Importa a chave num keyring temporário e usa `gpg --list-keys --with-colons`
+ * para obter o fingerprint do subkey primário — o mesmo formato que o GPG
+ * reporta em VALIDSIG durante verificação de assinatura.
  *
- * NOTA: isto é parsing textual da armadura — para validação criptográfica
- * de verdade, o módulo delega ao binário `gpg` em keyring temporário.
- * Esta função serve para comparar contra o fingerprint reportado pelo
- * `gpg --status-fd` após verificação.
+ * Retorna null se:
+ *   - a armadura não contém uma chave válida;
+ *   - o GPG não está disponível;
+ *   - não for possível extrair o fingerprint.
+ *
+ * IMPORTANTE: função assíncrona — requer o binário `gpg` no PATH.
  */
-export function extractFingerprintFromArmoredKey(armoredKey: string): string | null {
-	// GPG armored keys contêm blocos entre BEGIN/END PGP PUBLIC KEY BLOCK.
-	// O body (entre os headers e o checksum) é base64 que, quando decodificado,
-	// contém packet OpenPGP. Em vez de decodificar binário, procuramos o
-	// fingerprint no formato hexadecimal comuns que o gpg imprime:
-	//
-	// Na prática, a forma mais confiável SEM decodificar packets é:
-	// o fingerprint de uma chave RSA/EdDSA/ECDH é derivado do conteúdo
-	// público. Mas extrair textualmente da armadura não é confiável porque
-	// o fingerprint NÃO aparece em texto plano na armadura.
-	//
-	// Abordagem alternativa: hash da armadura como identificador determinístico.
-	// Não é o fingerprint GPG padrão, mas serve como identificador único
-	// e reproduzível desta chave específica. O comparador no AutoUpdateModule
-	// normaliza ambos os lados.
-	//
-	// MELHOR ABORDAGEM: extrair o key ID / fingerprint das linhas de
-	// comment ou metadata se disponíveis, ou usar hash determinístico.
-	// Para our purposes, usamos o hash SHA-1 truncado do bloco codificado
-	// como fingerprint substituto (compatível com comparação).
-	const bodyMatch = armoredKey.match(/-----BEGIN PGP PUBLIC KEY BLOCK-----\s*\n([\s\S]*?)-----END PGP PUBLIC KEY BLOCK-----/);
-	if (!bodyMatch) return null;
+export async function extractFingerprintFromArmoredKey(armoredKey: string): Promise<string | null> {
+	if (!armoredKey.includes("-----BEGIN PGP PUBLIC KEY BLOCK-----")) return null;
 
-	const body = bodyMatch[1]
-		.split("\n")
-		.filter((line) => !line.startsWith(":") && line.trim() !== "")
-		.join("");
+	const tempDir = await mkdtemp(path.join(tmpdir(), "all-in-one-fp-"));
+	try {
+		const keyPath = path.join(tempDir, "key.asc");
+		await writeFile(keyPath, armoredKey);
 
-	if (body.length === 0) return null;
+		const gnupghome = path.join(tempDir, "gnupg");
+		const env = { ...process.env, GNUPGHOME: gnupghome };
 
-	// Retorna hash determinístico da chave como fingerprint substituto.
-	// O AutoUpdateModule normaliza ambos os lados antes de comparar.
-	return `keyhash:${sha1Hex(body)}`;
-}
+		const importResult = await runGpgCommand(["--batch", "--import", keyPath], env);
+		if (importResult.code !== 0) return null;
 
-/** SHA-1 real via Web Crypto — fingerprint determinístico e reproduzível. */
-async function sha1Hex(input: string): Promise<string> {
-	const bytes = new TextEncoder().encode(input);
-	const digest = await crypto.subtle.digest("SHA-1", bytes);
-	return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+		const listResult = await runGpgCommand(
+			["--batch", "--with-colons", "--list-keys"],
+			env
+		);
+		if (listResult.code !== 0) return null;
+
+		// Formato --with-colons (linhas separadas por :):
+		//   pub:...:fingerprint:...
+		//   fpr:...:fingerprint:...
+		// Procura fpr primeiro (preferido), depois pub.
+		for (const line of listResult.stdout.split("\n")) {
+			const fields = line.split(":");
+			if (fields[0] === "fpr" && fields[9]) return fields[9];
+		}
+		for (const line of listResult.stdout.split("\n")) {
+			const fields = line.split(":");
+			if (fields[0] === "pub" && fields[9]) return fields[9];
+		}
+
+		return null;
+	} catch {
+		return null;
+	} finally {
+		await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+	}
 }
 
 /**
