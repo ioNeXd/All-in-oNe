@@ -17,7 +17,7 @@ describe("FileWriteQueue", () => {
 			queue.run("nota.md", op(3, 1)),
 		]);
 
-		expect(order).toEqual([1, 2, 3]); // mesmo o 3 sendo o mais rápido, respeita a ordem de chegada
+		expect(order).toEqual([1, 2, 3]);
 	});
 
 	it("não bloqueia operações em caminhos diferentes", async () => {
@@ -34,7 +34,7 @@ describe("FileWriteQueue", () => {
 			}),
 		]);
 
-		expect(order[0]).toBe("b"); // b termina antes por não esperar a fila de a.md
+		expect(order[0]).toBe("b");
 	});
 
 	it("continua a fila mesmo se uma operação anterior falhar", async () => {
@@ -54,47 +54,126 @@ describe("FileWriteQueue", () => {
 		expect(results).toEqual(["erro-capturado", "segunda-operacao-rodou"]);
 	});
 
-	it("remove a chave quando a fila do caminho drena (sem vazamento)", async () => {
+	it("remove a chave quando a fila do caminho drou (sem vazamento)", async () => {
 		const queue = new FileWriteQueue();
 		await queue.run("a.md", async () => {});
 		await queue.run("b.md", async () => {});
 
-		// A limpeza roda no microtask após a resolução — cede um tick:
 		await new Promise((r) => setTimeout(r, 0));
 
-		// Reflexão sobre o Map privado, sem expor API só para o teste:
 		const size = (queue as unknown as { queues: Map<string, unknown> }).queues.size;
-		expect(size).toBe(0); // antes: 2 entradas para sempre por caminho tocado
+		expect(size).toBe(0);
 	});
 
-	it("NÃO remove a chave se um run novo encadeou antes do dreno", async () => {
+	it("NÃO remove a chave se um run novo encadeou antes do drou", async () => {
 		const queue = new FileWriteQueue();
 		let releaseSecond!: () => void;
 		const gate = new Promise<void>((r) => (releaseSecond = r));
 
 		const first = queue.run("y.md", async () => {
-			await gate; // segura a fila aberta
+			await gate;
 		});
-		const second = queue.run("y.md", async () => {}); // encadeia atrás
+		const second = queue.run("y.md", async () => {});
 
 		releaseSecond();
 		await Promise.all([first, second]);
 		await new Promise((r) => setTimeout(r, 0));
 
-		// Nenhum dos dois removeu no meio: o 1º drena primeiro, mas a chave
-		// já era do `chained` do 2º (que encadeou antes) — a conferência
-		// `still === chained` só deixa o DONO ATUAL da chave remover, então a
-		// serialização de um 3º run concorrente nunca é quebrada. Com a fila
-		// inteira drenada, a chave saiu do Map.
 		const size = (queue as unknown as { queues: Map<string, unknown> }).queues.size;
 		expect(size).toBe(0);
 
-		// E um run novo depois do dreno continua serializado normalmente
-		// (recomeça uma fila nova, sem depender da entrada antiga):
 		await queue.run("y.md", async () => {});
 		await new Promise((r) => setTimeout(r, 0));
 		expect((queue as unknown as { queues: Map<string, unknown> }).queues.size).toBe(0);
 	});
+
+	describe("runMany — cenários de sobreposição obrigatórios", () => {
+		it("runMany([A,B]) + runMany([A,B]) concorrentes → serializa", async () => {
+			const queue = new FileWriteQueue();
+			const order: number[] = [];
+
+			await Promise.all([
+				queue.runMany(["a.md", "b.md"], async () => {
+					await new Promise((r) => setTimeout(r, 20));
+					order.push(1);
+				}),
+				queue.runMany(["a.md", "b.md"], async () => {
+					order.push(2);
+				}),
+			]);
+
+			expect(order).toEqual([1, 2]);
+		});
+
+		it("runMany([A,B]) + runMany([B,A]) → mesma ordem, sem deadlock", async () => {
+			const queue = new FileWriteQueue();
+			const order: number[] = [];
+
+			await Promise.all([
+				queue.runMany(["b.md", "a.md"], async () => {
+					await new Promise((r) => setTimeout(r, 15));
+					order.push(1);
+				}),
+				queue.runMany(["a.md", "b.md"], async () => {
+					order.push(2);
+				}),
+			]);
+
+			expect(order).toEqual([1, 2]);
+		});
+
+		it("runMany([A,B]) + run(A) → run(A) espera runMany em A", async () => {
+			const queue = new FileWriteQueue();
+			const order: string[] = [];
+
+			await Promise.all([
+				queue.runMany(["a.md", "b.md"], async () => {
+					await new Promise((r) => setTimeout(r, 20));
+					order.push("many-a");
+				}),
+				queue.run("a.md", async () => {
+					order.push("run-a");
+				}),
+			]);
+
+			expect(order).toEqual(["many-a", "run-a"]);
+		});
+
+		it("runMany([A,B]) + run(B) → run(B) espera runMany em B", async () => {
+			const queue = new FileWriteQueue();
+			const order: string[] = [];
+
+			await Promise.all([
+				queue.runMany(["a.md", "b.md"], async () => {
+					await new Promise((r) => setTimeout(r, 20));
+					order.push("many-b");
+				}),
+				queue.run("b.md", async () => {
+					order.push("run-b");
+				}),
+			]);
+
+			expect(order).toEqual(["many-b", "run-b"]);
+		});
+
+		it("erro em runMany não trava paths subsequentes", async () => {
+			const queue = new FileWriteQueue();
+			const order: string[] = [];
+
+			await queue
+				.runMany(["a.md", "b.md"], async () => {
+					throw new Error("fail");
+				})
+				.catch(() => {});
+
+			await queue.run("c.md", async () => {
+				order.push("c-ok");
+			});
+
+			expect(order).toEqual(["c-ok"]);
+		});
+	});
+
 	describe("runMany", () => {
 		it("adquire locks de múltiplos paths na ordem canônica", async () => {
 			const queue = new FileWriteQueue();
@@ -140,7 +219,7 @@ describe("FileWriteQueue", () => {
 				}),
 			]);
 
-			expect(order).toEqual([1, 2]); // sem deadlock
+			expect(order).toEqual([1, 2]);
 		});
 
 		it("captura erro sem travar a fila dos paths", async () => {
@@ -159,7 +238,7 @@ describe("FileWriteQueue", () => {
 			expect(ran).toBe(true);
 		});
 
-		it("drena todas as chaves do Map", async () => {
+		it("drou todas as chaves do Map", async () => {
 			const queue = new FileWriteQueue();
 			await queue.runMany(["a.md", "b.md"], async () => {});
 			await new Promise((r) => setTimeout(r, 0));
