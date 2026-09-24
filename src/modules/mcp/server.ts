@@ -79,7 +79,13 @@ export interface McpServerHandle {
 
 /** Versões do protocolo MCP que este servidor implementa de fato. */
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"] as const;
-const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[SUPPORTED_PROTOCOL_VERSIONS.length - 1];
+const LATEST_PROTOCOL_VERSION = "2025-11-25";
+const MODERN_PROTOCOL_VERSION = "2026-07-28";
+const MODERN_TTL_MS = 5 * 60 * 1000;
+const SERVER_INFO_META_KEY = "io.modelcontextprotocol/serverInfo";
+const CLIENT_PROTOCOL_META_KEY = "io.modelcontextprotocol/protocolVersion";
+const CLIENT_CAPABILITIES_META_KEY = "io.modelcontextprotocol/clientCapabilities";
+const CLIENT_INFO_META_KEY = "io.modelcontextprotocol/clientInfo";
 const PROTOCOL_VERSION_INCOMPATIBLE = "PROTOCOL_VERSION_INCOMPATIBLE";
 
 /** Erro enviado ao cliente quando a negociação de versão da API rejeita o pedido. */
