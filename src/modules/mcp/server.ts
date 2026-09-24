@@ -342,7 +342,7 @@ async function handleRequest(
 					capabilities: { tools: { listChanged: false } },
 					ttlMs: 60 * 60 * 1000,
 					cacheScope: "private",
-				});
+				}, options.serverInfo);
 				return;
 			case "tools/list":
 				respondModern(res, message.id, {
@@ -350,7 +350,7 @@ async function handleRequest(
 					tools: TOOL_DEFINITIONS,
 					ttlMs: MODERN_TTL_MS,
 					cacheScope: "private",
-				});
+				}, options.serverInfo);
 				return;
 			case "tools/call": {
 				const toolName = String(message.params?.name ?? "");
@@ -375,7 +375,7 @@ async function handleRequest(
 					}
 				}
 				const result = await options.handleToolCall(toolName, args);
-				respondModern(res, message.id, toToolResult(result.ok ? result.result : (result.error ?? "Erro desconhecido."), !result.ok));
+				respondModern(res, message.id, toToolResult(result.ok ? result.result : (result.error ?? "Erro desconhecido."), !result.ok), options.serverInfo);
 				return;
 			}
 			default:
@@ -523,19 +523,17 @@ function validateModernRequest(req: http.IncomingMessage, message: { method?: st
 	return null;
 }
 
-function respondModern(res: http.ServerResponse, id: unknown, result: Record<string, unknown>): void {
+function respondModern(res: http.ServerResponse, id: unknown, result: Record<string, unknown>, serverInfo: { name: string; version: string }): void {
 	res.writeHead(200).end(JSON.stringify({
 		jsonrpc: "2.0",
 		id,
 		result: {
 			resultType: "complete",
 			...result,
-			_meta: { ...(result._meta as Record<string, unknown> | undefined), [SERVER_INFO_META_KEY]: MODERN_SERVER_INFO },
+			_meta: { ...(result._meta as Record<string, unknown> | undefined), [SERVER_INFO_META_KEY]: serverInfo },
 		},
 	}));
 }
-
-const MODERN_SERVER_INFO = Object.freeze({ name: "All iₙ oNe", version: "0.2.0" });
 
 function respondError(
 	res: http.ServerResponse,
