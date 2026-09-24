@@ -107,6 +107,7 @@ export function interpretGpgStatusOutput(output: string): SignatureCheckOutcome 
 				break;
 			case "BADSIG":
 			case "EXPKEYSIG":
+			case "EXPSIG":
 			case "REVKEYSIG":
 				sawTerminalBad = true;
 				break;
@@ -123,7 +124,8 @@ export function interpretGpgStatusOutput(output: string): SignatureCheckOutcome 
 				sawNoPubkey = true;
 				break;
 			case "VALIDSIG":
-				if (parts[1]) fingerprint = parts[1];
+				if (parts[10]) fingerprint = parts[10];
+				else if (parts[1]) fingerprint = parts[1];
 				break;
 		}
 	}
@@ -137,7 +139,7 @@ export function interpretGpgStatusOutput(output: string): SignatureCheckOutcome 
 		};
 	if (errsigReason)
 		return { valid: false, reason: `Assinatura inválida: ${errsigReason}.` };
-	if (sawTerminalBad) return { valid: false, reason: "Assinatura inválida (BADSIG/EXPKEYSIG/REVKEYSIG)." };
+	if (sawTerminalBad) return { valid: false, reason: "Assinatura inválida (BADSIG/EXPKEYSIG/EXPSIG/REVKEYSIG)." };
 	return {
 		valid: false,
 		reason:
@@ -241,7 +243,7 @@ export function shouldYieldToBrat(bratInstalled: boolean, detection: { managedBy
 }
 
 /** Executa o binário `gpg` capturando stdout/stderr. */
-export function runGpgCommand(args: string[], env: Record<string, string>): Promise<{ code: number; stdout: string; stderr: string }> {
+export function runGpgCommand(args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number; stdout: string; stderr: string }> {
 	return new Promise((resolve, reject) => {
 		const child = spawn("gpg", args, { env, stdio: ["ignore", "pipe", "pipe"] });
 		let stdout = "";

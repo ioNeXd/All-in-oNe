@@ -1,5 +1,5 @@
 import type { TFile, TFolder } from "obsidian";
-import { TFile as TFileClass, normalizePath, Setting, Notice } from "obsidian";
+import { TFile as TFileClass, TFolder as TFolderClass, normalizePath, Setting, Notice } from "obsidian";
 import * as crypto from "crypto";
 import type {
 	ConfigValidationIssue,
@@ -70,7 +70,7 @@ function sanitizeMcpError(msg: string): string {
 	let safe = msg.replace(/[A-Z]:\\[^\s"']+/gi, "[caminho interno]");
 	safe = safe.replace(/(?<!https?:)\/[^\s"']+/g, "[caminho interno]");
 	// Remove stack traces (linhas que começam com "at " ou "Error:")
-	safe = safe.split("\n").filter(l => !l.trim().startsWith("at ") && !l.trim().startsWith("Error:")).join(" ");
+	safe = safe.split("\n").filter(l => !l.trim().startsWith("at ")).join(" ").replace(/^Error:\s*/i, "");
 	// Trunca se ainda muito longo
 	if (safe.length > 200) safe = safe.slice(0, 200) + "...";
 	return safe || "Erro interno na execução da ferramenta.";
@@ -134,10 +134,7 @@ export class McpModule implements HubModule {
 		const context = this.context!;
 		const settings = this.readSettings();
 
-		if (!settings.tokenObfuscated) {
-			// Token SECRETO → CSPRNG (cryptoRandomToken), não o randomId de ids
-			// de log. Antes: dois randomId() com Math.random — previsível o
-			// bastante para quem analisa o processo local.
+		if (!deobfuscate(settings.tokenObfuscated)) {
 			const token = cryptoRandomToken();
 			await context.updateSettings({ tokenObfuscated: obfuscate(token) });
 		}
@@ -493,6 +490,11 @@ export class McpModule implements HubModule {
 		}
 
 		const isWrite = WRITE_TOOLS.has(toolName);
+		const inputLimitError = this.validateToolInput(toolName, args);
+		if (inputLimitError) {
+			reservation.release();
+			return { ok: false, error: inputLimitError };
+		}
 		const dryRun = (args.dryRun as boolean | undefined) ?? settings.dryRunDefault;
 
 		const temporaryGrant = Date.now() < this.temporaryWriteUntil;
@@ -534,6 +536,10 @@ export class McpModule implements HubModule {
 
 		try {
 			const result = await this.executeTool(toolName, args, settings);
+			const serializedResult = JSON.stringify(result);
+			if (Buffer.byteLength(serializedResult ?? String(result), "utf8") > McpModule.MAX_OUTPUT_BYTES) {
+				throw new Error("Resultado da ferramenta excede o limite de saída de 5 MiB.");
+			}
 			this.context?.log(`Ferramenta MCP executada: ${toolName}`, { path: args.path as string });
 			// UM evento por ação (o log de atividade DEDICADO, com o desfecho).
 			// Antes emitia TAMBÉM mcp:action: com os dois em TRACKED_EVENTS do
@@ -542,7 +548,7 @@ export class McpModule implements HubModule {
 			// distribuição; o MCP não conhece quem escuta.
 			this.context?.bus.emit(
 				"mcp:action-logged",
-				{ tool: toolName, path: args.path, dryRun, isWrite, result },
+				{ tool: toolName, path: args.path, dryRun, isWrite, result: { type: "metadata-only" } },
 				"mcp"
 			);
 			return { ok: true, result };
@@ -552,7 +558,7 @@ export class McpModule implements HubModule {
 			// pelo vault etc.). Sem isto, o log contaria só os acertos.
 			this.context?.bus.emit(
 				"mcp:action-logged",
-				{ tool: toolName, path: args.path, dryRun, isWrite, error: String(err) },
+				{ tool: toolName, path: args.path, dryRun, isWrite, error: sanitizeMcpError(String(err)) },
 				"mcp"
 			);
 			return { ok: false, error: String(err) };
@@ -561,6 +567,24 @@ export class McpModule implements HubModule {
 
 	/** Limite com que o rateLimiter atual foi criado (recria se a config mudar). */
 	private rateLimiterLimit = MCP_DEFAULTS.rateLimitPerMinute;
+
+	private validateToolInput(toolName: string, args: Record<string, unknown>): string | undefined {
+		const contentTools = new Set(["create_note", "append_note", "edit_note", "patch_note"]);
+		if (contentTools.has(toolName) && typeof args.content === "string" && args.content.length > McpModule.MAX_INPUT_CONTENT_CHARS) {
+			return `Conteúdo excede o limite de ${McpModule.MAX_INPUT_CONTENT_CHARS} caracteres.`;
+		}
+		if (toolName === "patch_note" && typeof args.search === "string" && args.search.length > McpModule.MAX_INPUT_CONTENT_CHARS) {
+			return `Texto de busca excede o limite de ${McpModule.MAX_INPUT_CONTENT_CHARS} caracteres.`;
+		}
+		if (toolName === "patch_note" && typeof args.replace === "string" && args.replace.length > McpModule.MAX_INPUT_CONTENT_CHARS) {
+			return `Texto de substituição excede o limite de ${McpModule.MAX_INPUT_CONTENT_CHARS} caracteres.`;
+		}
+		if (toolName === "put_attachment" && typeof args.base64 === "string") {
+			const maxEncoded = Math.ceil(McpModule.MAX_INPUT_BASE64_BYTES * 4 / 3) + 4;
+			if (args.base64.length > maxEncoded) return "Anexo base64 excede o limite de 10 MiB.";
+		}
+		return undefined;
+	}
 
 	private isWriteAllowed(path: string, settings: McpModuleSettings): boolean {
 		const normalized = normalizePath(path);
@@ -598,7 +622,7 @@ export class McpModule implements HubModule {
 			case "read_note": {
 				const readPath = validateVaultPath(String(args.path));
 				const file = vault.getAbstractFileByPath(normalizePath(readPath));
-				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
+				if (!(file instanceof TFileClass) || file.extension.toLowerCase() !== "md") throw new Error("Nota não encontrada.");
 				return { content: await vault.read(file as TFile) };
 			}
 			case "create_note": {
@@ -628,16 +652,19 @@ export class McpModule implements HubModule {
 			}
 			case "delete_note": {
 				const path = validateVaultPath(String(args.path));
-				const file = vault.getAbstractFileByPath(path);
-				if (!file) throw new Error("Nota não encontrada.");
-				await write(path, () => vault.trash(file, true)); // vai para a lixeira, nunca exclusão direta (rede de segurança)
+				await write(path, async () => {
+					const file = vault.getAbstractFileByPath(path);
+					if (!(file instanceof TFileClass) || file.extension.toLowerCase() !== "md") throw new Error("Nota não encontrada.");
+					await vault.trash(file, true); // vai para a lixeira, nunca exclusão direta
+				});
 				return { path };
 			}
 			case "list_folder": {
 				const listPath = args.path ? validateVaultPath(String(args.path)) : "";
 				const normalized = listPath ? normalizePath(listPath) : "/";
 				const folder = vault.getAbstractFileByPath(normalized);
-				const children = (folder as TFolder | null)?.children ?? vault.getRoot().children;
+				if (listPath && (!(folder) || !("children" in folder))) throw new Error("Pasta não encontrada.");
+				const children = folder instanceof TFolderClass ? folder.children : vault.getRoot().children;
 				return { items: children.map((c) => c.path) };
 			}
 			case "search_vault": {
@@ -694,11 +721,12 @@ export class McpModule implements HubModule {
 			case "rename_note": {
 				const path = validateVaultPath(String(args.path));
 				const newPath = validateVaultPath(String(args.newPath));
+				if (!newPath.toLowerCase().endsWith(".md")) throw new Error("O destino deve ser uma nota Markdown (.md).");
 				// Lookup + validação + mutação DENTRO do lock —
 				// outro módulo poderia renomear/mover o arquivo no intervalo.
 				await writeMany([path, newPath], async () => {
 					const file = vault.getAbstractFileByPath(path);
-					if (!file) throw new Error("Nota não encontrada.");
+					if (!(file instanceof TFileClass) || file.extension.toLowerCase() !== "md") throw new Error("Nota não encontrada.");
 					await app.fileManager.renameFile(file, newPath);
 				});
 				return { from: path, to: newPath };
@@ -781,6 +809,7 @@ export class McpModule implements HubModule {
 				assertAttachmentPath(path);
 				const file = vault.getAbstractFileByPath(path);
 				if (!(file instanceof TFileClass)) throw new Error("Anexo não encontrado.");
+				if (file.stat.size > McpModule.MAX_INPUT_BASE64_BYTES) throw new Error("Anexo excede o limite de 10 MiB.");
 				const buffer = await vault.readBinary(file as TFile);
 				return {
 					path,
@@ -792,6 +821,7 @@ export class McpModule implements HubModule {
 				const path = validateVaultPath(String(args.path));
 				assertAttachmentPath(path);
 				const bytes = decodeBase64(args.base64);
+				if (bytes.byteLength > McpModule.MAX_INPUT_BASE64_BYTES) throw new Error("Anexo excede o limite de 10 MiB.");
 				// Decisão create/modify DENTRO do lock —
 				// outro processo pode criar/remover/substituir o arquivo.
 				const result = await write(path, async () => {
@@ -835,6 +865,9 @@ export class McpModule implements HubModule {
 			case "split_note": {
 				// Divide a nota em várias, quebrando nos headings do nível indicado.
 				const path = validateVaultPath(String(args.path));
+				const source = vault.getAbstractFileByPath(path);
+				if (!(source instanceof TFileClass) || source.extension.toLowerCase() !== "md") throw new Error("Nota não encontrada.");
+				const content = await vault.read(source as TFile);
 				const level = Number(args.headingLevel ?? 2);
 				const marker = "#".repeat(level) + " ";
 				const folder = path.substring(0, path.lastIndexOf("/"));
@@ -897,11 +930,11 @@ export class McpModule implements HubModule {
 			}
 			case "combine_notes": {
 				const paths = (args.paths as string[] | undefined) ?? [];
-				const target = normalizePath(String(args.targetPath));
 				if (paths.length === 0) throw new Error("combine_notes: informe ao menos uma nota em `paths`.");
 
 				// Dedup preservando a ordem original.
-				const normalizedPaths = [...new Set(paths.map((p) => normalizePath(String(p))))];
+				const normalizedPaths = [...new Set(paths.map((p) => validateVaultPath(String(p))))];
+				const target = validateVaultPath(String(args.targetPath));
 
 				// O destino não pode ser uma das entradas — operação ambígua.
 				if (normalizedPaths.includes(target)) {

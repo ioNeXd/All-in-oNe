@@ -103,81 +103,57 @@ export function createSplitPersistence(app: App, pluginDir: string): SplitPersis
 			const main = await readFile<Record<string, unknown>>(absolute("data.json"));
 			if (!main) return null;
 
-			const mainVersion = (main[VERSION_KEY] as number | undefined) ?? null;
-
-			// FASE 1: Coleta versões de TODOS os arquivos.
+			const mainVersion = typeof main[VERSION_KEY] === "number" ? main[VERSION_KEY] : null;
 			const sliceData = new Map<string, { raw: Record<string, unknown> | null; version: number | null }>();
 			for (const id of SPLIT_MODULE_IDS) {
 				const sliceRaw = await readFile<Record<string, unknown>>(absolute(moduleFilePath(id)));
-				const sliceVersion = (sliceRaw?.[VERSION_KEY] as number | undefined) ?? null;
+				const sliceVersion = typeof sliceRaw?.[VERSION_KEY] === "number" ? sliceRaw[VERSION_KEY] : null;
 				sliceData.set(id, { raw: sliceRaw, version: sliceVersion });
 			}
 
-			// FASE 2: Calcula o _v MÁXIMO entre todos os arquivos.
-			const allVersions: number[] = [];
-			if (mainVersion != null) allVersions.push(mainVersion);
-			for (const entry of sliceData.values()) {
-				if (entry.version != null) allVersions.push(entry.version);
-			}
-			const maxVersion = allVersions.length > 0 ? Math.max(...allVersions) : null;
-			const minVersion = allVersions.length > 0 ? Math.min(...allVersions) : null;
-
-			// FASE 3: Detecta inconsistência — algum arquivo ficou para trás.
-			if (maxVersion != null && minVersion != null && maxVersion !== minVersion) {
-				versionInconsistency = true;
-				console.warn(
-					`[SplitPersistence] Inconsistência de versão detectada: ` +
-					`máximo=${maxVersion}, mínimo=${minVersion}. ` +
-					`Usando snapshot mais recente (máximo=${maxVersion}).`
-				);
-			}
-
-			detectedVersion = maxVersion;
-
-						// FASE 4: Reconstitui fatias — aceita APENAS versão == máximo.
 			const modules: Record<string, Record<string, unknown>> = {
 				...(main.modules as Record<string, Record<string, unknown>> ?? {}),
 			};
 
+			// data.json is the commit point: persistVersioned writes every split slice
+			// first and data.json last. Therefore a crash before the final write leaves
+			// the previous main snapshot as the only committed snapshot; newer slices
+			// are deliberately ignored. This prevents a hybrid of generations.
+			let inconsistent = false;
 			for (const id of SPLIT_MODULE_IDS) {
-				const info = sliceData.get(id);
-				const sliceRaw = info?.raw;
-				const sliceVersion = info?.version ?? null;
-
-				// Fix 15: distinguish missing, corrupted, and empty
-				if (sliceRaw === null) {
-					// File doesn't exist or couldn't be parsed
-					readCorrupted = true;
-					corruptedPaths.push(absolute(moduleFilePath(id)));
-					console.warn(`[SplitPersistence] Módulo ${id}.json corrompido — usando stub do principal.`);
-					modules[id] = (main.modules as Record<string, Record<string, unknown>>)?.[id] ?? {};
+				const info = sliceData.get(id)!;
+				if (info.raw === null) {
+					inconsistent = mainVersion !== null;
 					continue;
 				}
+				const { [VERSION_KEY]: _sliceVersion, ...cleanSlice } = info.raw;
+				void _sliceVersion;
 
-				// Fix 14: don't silently combine mismatched versions
-				if (maxVersion != null && sliceVersion != null && sliceVersion < maxVersion) {
-					console.warn(
-						`[SplitPersistence] Módulo ${id}.json obsoleto: _v=${sliceVersion} < máximo=${maxVersion}. ` +
-						"Usando stub do principal."
-					);
-					modules[id] = {};
+				if (mainVersion === null || info.version === null) {
+					// Backward compatibility for unversioned data: use the slice as before.
+					modules[id] = cleanSlice;
 					continue;
 				}
-
-				if (sliceVersion != null && mainVersion != null && sliceVersion > mainVersion) {
-					detectedVersion = sliceVersion;
+				if (info.version !== mainVersion) {
+					inconsistent = true;
+					continue;
 				}
-
-				// Remove _v antes de merge — campo é meta, não dado do módulo.
-				const { [VERSION_KEY]: _sv, ...cleanSlice } = sliceRaw;
-				void _sv;
 				modules[id] = cleanSlice;
 			}
-const { [VERSION_KEY]: _mainV, ...mainWithoutVersion } = main as Record<string, unknown>;
+
+			if (inconsistent) {
+				versionInconsistency = true;
+				console.warn(
+					`[SplitPersistence] Snapshot inconsistente: data.json _v=${mainVersion ?? "ausente"}; ` +
+						"fatias incompatíveis foram ignoradas para evitar misturar gerações."
+				);
+			}
+			detectedVersion = mainVersion;
+
+			const { [VERSION_KEY]: _mainV, ...mainWithoutVersion } = main;
 			void _mainV;
 			return { ...createDefaultSettings(), ...mainWithoutVersion, modules } as HubSettings;
 		},
-
 		persistMain: async (data) => {
 			await writeFileSafe(absolute("data.json"), stubSlices(data, SPLIT_MODULE_IDS));
 		},

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { uniqueNameWith } from "../src/core/PathUtils";
+import { uniqueNameWith, validateVaultPath } from "../src/core/PathUtils";
 
 /**
  * IMPORTA O CÓDIGO REAL (PathUtils.ts) — a regra de colisão de nomes era
@@ -56,5 +56,16 @@ describe("uniqueNameWith — primeiro nome livre", () => {
 			return p === "X.md"; // só X.md existe; X 2.md livre
 		});
 		expect(perguntas).toEqual(["X.md", "X 2.md"]);
+	});
+});
+
+
+describe("validateVaultPath — traversal", () => {
+	it("aceita nomes com dois pontos que não são segmentos de traversal", () => {
+		expect(validateVaultPath("Notas/relatorio..final.md")).toBe("Notas/relatorio..final.md");
+	});
+
+	it("rejeita segmento de diretório ..", () => {
+		expect(() => validateVaultPath("Notas/../segredo.md")).toThrow();
 	});
 });

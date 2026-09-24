@@ -123,7 +123,8 @@ describe("MCP — handshake do protocolo (initialize + notificações)", () => {
 		expect(res.status).toBe(200);
 		const json = (await res.json()) as { id: number; result: { content: unknown } };
 		expect(json.id).toBe(9);
-		expect(json.result.content).toEqual({ eco: "read_note" });
+		expect(json.result.content).toEqual([{ type: "text", text: JSON.stringify({ eco: "read_note" }) }]);
+		expect(json.result.isError).toBeUndefined();
 	});
 });
 
@@ -681,8 +682,8 @@ describe("MCP — códigos de erro JSON-RPC padronizados", () => {
 		});
 		handles.push(handle);
 		const res = await post(handle.port, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "x" } });
-		const json = (await res.json()) as { error: { code: number; message: string } };
-		expect(json.error.code).toBe(-32603);
-		expect(json.error.message).toBe("explodiu");
+		const json = (await res.json()) as { result: { content: { type: string; text: string }[]; isError?: boolean } };
+		expect(json.result.isError).toBe(true);
+		expect(json.result.content[0].text).toBe("explodiu");
 	});
 });

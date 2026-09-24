@@ -155,8 +155,8 @@ describe("SplitPersistence — version stamping (_v)", () => {
 
 		const loaded = await store.handle.loadMain();
 		expect(loaded).not.toBeNull();
-		expect(loaded!.modules["history"]).toEqual({ entries: [1, 2, 3] });
-		expect(store.handle.lastVersion).toBe(2);
+		expect(loaded!.modules["history"]).toEqual({});
+		expect(store.handle.lastVersion).toBe(1);
 	});
 
 	it("loadMain nao aceita _v do modulo < _v do main (modulo obsoleto)", async () => {

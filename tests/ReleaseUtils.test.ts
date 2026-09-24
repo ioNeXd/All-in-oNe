@@ -39,6 +39,11 @@ describe("compareVersions — comparação SemVer de segmentos numéricos", () =
 		expect(compareVersions("1.0", "1.0.0")).toBe(0);
 	});
 
+	it("pré-lançamentos numéricos usam ordem numérica, não lexicográfica", () => {
+		expect(compareVersions("0.3.0-beta.10", "0.3.0-beta.2")).toBeGreaterThan(0);
+		expect(compareVersions("0.3.0-alpha.2", "0.3.0-alpha.10")).toBeLessThan(0);
+	});
+
 	it("pré-lançamento é MAIS ANTIGO que o release do mesmo número base (regra do SemVer)", () => {
 		// Se contasse como igual/maior, o plugin "atualizaria" de uma 0.3.0
 		// estável para a beta 0.3.0-beta.1. No canal estável isso nunca deve
