@@ -282,6 +282,141 @@ describe("MCP — contrato HTTP (Content-Type e Accept)", () => {
 		expect(res.status).toBe(200);
 	});
 
+	// --- JSON-RPC envelope validation: -32600 INVALID_REQUEST ---
+
+	it("rejeita body null com -32600", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "Bearer tok" },
+			body: "null",
+		});
+		const json = await res.json();
+		expect(res.status).toBe(200);
+		expect(json.error.code).toBe(-32600);
+	});
+
+	it("rejeita body array com -32600", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "Bearer tok" },
+			body: "[1]",
+		});
+		const json = await res.json();
+		expect(json.error.code).toBe(-32600);
+	});
+
+	it("rejeita body string com -32600", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "Bearer tok" },
+			body: "\"hello\"",
+		});
+		const json = await res.json();
+		expect(json.error.code).toBe(-32600);
+	});
+
+	it("rejeita sem jsonrpc field com -32600", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "Bearer tok" },
+			body: JSON.stringify({ method: "tools/list", id: 1 }),
+		});
+		const json = await res.json();
+		expect(json.error.code).toBe(-32600);
+	});
+
+	it("rejeita jsonrpc 1.0 com -32600", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "1.0", method: "tools/list", id: 1 }),
+		});
+		const json = await res.json();
+		expect(json.error.code).toBe(-32600);
+	});
+
+	it("rejeita method ausente com -32600", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1 }),
+		});
+		const json = await res.json();
+		expect(json.error.code).toBe(-32600);
+	});
+
+	it("rejeita method nao-string com -32600", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", method: 42, id: 1 }),
+		});
+		const json = await res.json();
+		expect(json.error.code).toBe(-32600);
+	});
+
+	it("rejeita params array com -32600", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", method: "tools/list", params: [1], id: 1 }),
+		});
+		const json = await res.json();
+		expect(json.error.code).toBe(-32600);
+	});
+
+	it("rejeita params string com -32600", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", method: "tools/list", params: "bad", id: 1 }),
+		});
+		const json = await res.json();
+		expect(json.error.code).toBe(-32600);
+	});
+
+	it("rejeita id objeto com -32600", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", method: "tools/list", id: {} }),
+		});
+		const json = await res.json();
+		expect(json.error.code).toBe(-32600);
+	});
+
+	it("aceita id null — responde com id null", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", method: "initialize", id: null }),
+		});
+		const json = await res.json();
+		expect(json.id).toBeNull();
+	});
+
+	it("rejeita JSON malformado com -32700", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "Bearer tok" },
+			body: "{broken",
+		});
+		const json = await res.json();
+		expect(json.error.code).toBe(-32700);
+	});
+
 describe("MCP — autenticação (401 antes de qualquer processamento)", () => {
 	const CALL = {
 		jsonrpc: "2.0",

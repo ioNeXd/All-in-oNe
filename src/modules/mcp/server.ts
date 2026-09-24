@@ -233,6 +233,45 @@ async function handleRequest(
 		return;
 	}
 
+	// Validação completa do envelope JSON-RPC 2.0.
+	// Rejeita null, arrays, primitivos, jsonrpc errado, method ausente/
+	// não-string, params não-objeto, id não-primitivo.
+	// Tudo → -32600 INVALID_REQUEST com id null (id inválido = não dá pra
+	// associar a resposta ao request).
+	const isObj = message !== null && typeof message === "object" && !Array.isArray(message);
+	if (
+		!isObj ||
+		(message as Record<string, unknown>).jsonrpc !== "2.0" ||
+		typeof message.method !== "string" ||
+		(message.params !== undefined &&
+			(typeof message.params !== "object" || message.params === null || Array.isArray(message.params)))
+	) {
+		res.writeHead(200).end(
+			JSON.stringify({
+				jsonrpc: "2.0",
+				id: null,
+				error: { code: JSONRPC_ERRORS.INVALID_REQUEST, message: "Requisição JSON-RPC inválida." },
+			})
+		);
+		return;
+	}
+
+	// id válido: string, number ou null. Objeto/array/boolean → inválido.
+	if (
+		message.id !== undefined &&
+		(message.id === null ||
+			(typeof message.id !== "string" && typeof message.id !== "number"))
+	) {
+		res.writeHead(200).end(
+			JSON.stringify({
+				jsonrpc: "2.0",
+				id: null,
+				error: { code: JSONRPC_ERRORS.INVALID_REQUEST, message: "id inválido." },
+			})
+		);
+		return;
+	}
+
 	// Notificação JSON-RPC (requisição SEM id — ex.: notifications/initialized,
 	// que clientes reais mandam logo após o initialize): por definição não tem
 	// resposta. O Streamable HTTP usa 202 Accepted sem corpo — responder com
