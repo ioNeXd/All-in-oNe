@@ -134,10 +134,7 @@ export class McpModule implements HubModule {
 		const context = this.context!;
 		const settings = this.readSettings();
 
-		if (!settings.tokenObfuscated) {
-			// Token SECRETO → CSPRNG (cryptoRandomToken), não o randomId de ids
-			// de log. Antes: dois randomId() com Math.random — previsível o
-			// bastante para quem analisa o processo local.
+		if (!deobfuscate(settings.tokenObfuscated)) {
 			const token = cryptoRandomToken();
 			await context.updateSettings({ tokenObfuscated: obfuscate(token) });
 		}
