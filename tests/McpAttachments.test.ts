@@ -27,6 +27,7 @@ class FakeFile extends TFileClass {
 	) {
 		super();
 		this.path = path;
+		this.stat = { size: data.byteLength, ctime: 0, mtime: 0 } as never;
 	}
 }
 
