@@ -44,8 +44,8 @@ export function compareVersions(a: string, b: string): number {
 		for (let i = 0; i < Math.max(ap.length, bp.length); i++) {
 			if (ap[i] === undefined) return -1;
 			if (bp[i] === undefined) return 1;
-			const an = /^\\d+$/.test(ap[i]);
-			const bn = /^\\d+$/.test(bp[i]);
+			const an = /^\d+$/.test(ap[i]);
+			const bn = /^\d+$/.test(bp[i]);
 			if (an && bn) {
 				const diff = Number(ap[i]) - Number(bp[i]);
 				if (diff !== 0) return diff;
