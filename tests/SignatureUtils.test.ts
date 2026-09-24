@@ -45,7 +45,7 @@ describe("interpretGpgStatusOutput — veredicto", () => {
 	it("VALIDSIG usa o fingerprint da chave primária quando a assinatura veio de subchave", () => {
 		const r = interpretGpgStatusOutput(
 			"[GNUPG:] GOODSIG SUBKEYFP Nome\n" +
-			"[GNUPG:] VALIDSIG SUBKEYFP 2026-09-01 1756700000 0 4 0 1 10 PRIMARYFP"
+			"[GNUPG:] VALIDSIG SUBKEYFP 2026-09-01 1756700000 0 4 0 1 10 00 PRIMARYFP"
 		);
 		expect(r.valid).toBe(true);
 		expect(r.keyFingerprint).toBe("PRIMARYFP");
