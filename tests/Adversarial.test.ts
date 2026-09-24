@@ -288,12 +288,11 @@ describe("Adversarial — GPG fingerprint", () => {
 
 	it("extractFingerprintFromArmoredKey: chave válida extrai hash", async () => {
 		const key = [
-			"-----BEGIN PGP PUBLIC KEY BLOCK-----",
-			"",
-			"mDMEZabc123==",
-			"",
-			"-----END PGP PUBLIC KEY BLOCK-----",
-		].join("\n");
+		"-----BEGIN PGP PUBLIC KEY BLOCK-----",
+		"Version: GnuPG v2",
+		"",
+		"-----END PGP PUBLIC KEY BLOCK-----",
+	].join("\\n");
 		const fp = await extractFingerprintFromArmoredKey(key);
 		expect(fp).not.toBeNull();
 		expect(fp).toMatch(/^keyhash:/);
