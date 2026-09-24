@@ -799,7 +799,7 @@ describe("MCP 2026-07-28 — era moderna stateless", () => {
 				"io.modelcontextprotocol/clientCapabilities": {},
 			} },
 		});
-		expect(res.status).toBe(200);
+		expect(res.status).toBe(404);
 		const json = await res.json();
 		expect(json.error.code).toBe(-32601);
 	});
