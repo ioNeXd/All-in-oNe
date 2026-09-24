@@ -11,6 +11,13 @@ import { AuthThrottle, identityOf } from "./AuthThrottle";
  * com JSON. GET/SSE, headers MCP (Mcp-Method, Mcp-Name) e notificações
  * server-initiated NÃO são implementados — e não precisam ser.
  *
+ * ERA / COMPATIBILIDADE:
+ *   Este servidor implementa o transporte HTTP stateless da era MCP 2025,
+ *   usando o handshake initialize. Versões suportadas: 2025-03-26 e
+ *   2025-06-18. NÃO é compatível com MCP 2025-11-25 ou 2026-07-28
+ *   (server/discover). Migração para a era moderna é trabalho de upgrade
+ *   arquitetural, não correção — registrado como pendência.
+ *
  * DECISÃO DE DESIGN: este servidor é deliberadamente um transport subset.
  * O spec MCP Streamable HTTP (2025-06-18) permite estado puro POST-only
  * quando o servidor não suporta notificações server-initiated. Este plugin
@@ -29,6 +36,8 @@ import { AuthThrottle, identityOf } from "./AuthThrottle";
  *   ✘ GET/SSE — notificações server-initiated; sem elas, GET é inútil
  *   ✘ Headers Mcp-Method/Mcp-Name — requisitos 2026; clientes atuais
  *     não os enviam, e o spec permite omiti-los no POST
+ *   ✘ MCP 2025-11-25 / 2026-07-28 — era moderna (server/discover);
+ *     mudança arquitetural registrada como pendência未来的工作
  *
  * Clientes suportados e testados:
  *   • Claude Desktop (macOS/Windows)
