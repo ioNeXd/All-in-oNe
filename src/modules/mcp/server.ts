@@ -12,11 +12,9 @@ import { AuthThrottle, identityOf } from "./AuthThrottle";
  * server-initiated NÃO são implementados — e não precisam ser.
  *
  * ERA / COMPATIBILIDADE:
- *   Este servidor implementa o transporte HTTP stateless da era MCP 2025,
- *   usando o handshake initialize. Versões suportadas: 2025-03-26 e
- *   2025-06-18. NÃO é compatível com MCP 2025-11-25 ou 2026-07-28
- *   (server/discover). Migração para a era moderna é trabalho de upgrade
- *   arquitetural, não correção — registrado como pendência.
+ *   Este servidor implementa duas eras MCP no mesmo endpoint: a era legada
+ *   via initialize (2025-03-26, 2025-06-18 e 2025-11-25) e a era moderna
+ *   2026-07-28 via server/discover, envelope _meta e headers MCP por requisição.
  *
  * DECISÃO DE DESIGN: este servidor é deliberadamente um transport subset.
  * O spec MCP Streamable HTTP (2025-06-18) permite estado puro POST-only
@@ -357,6 +355,7 @@ async function handleRequest(
 				if (rawArgs !== undefined && rawArgs !== null && (typeof rawArgs !== "object" || Array.isArray(rawArgs))) {
 					respondError(res, message.id, "O campo 'arguments' deve ser um objeto.", {
 						code: "INVALID_PARAMS",
+						httpStatus: 400,
 						jsonRpcCode: JSONRPC_ERRORS.INVALID_PARAMS,
 					});
 					return;
@@ -387,6 +386,7 @@ async function handleRequest(
 			default:
 				respondError(res, message.id, `Método não suportado na era MCP 2026-07-28: ${message.method}`, {
 					jsonRpcCode: JSONRPC_ERRORS.METHOD_NOT_FOUND,
+					httpStatus: 404,
 				});
 		}
 		return;
