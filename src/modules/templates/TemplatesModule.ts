@@ -309,12 +309,12 @@ export class TemplatesModule implements HubModule {
 		draft: FolderTemplateRule,
 		rules: FolderTemplateRule[]
 	): boolean {
+		const seen = new Set<string>();
 		let currentId = draft.extendsRuleId;
-		let guard = 0;
-		while (currentId && guard < 50) {
-			if (currentId === draft.id) return true;
+		while (currentId) {
+			if (currentId === draft.id || seen.has(currentId)) return true;
+			seen.add(currentId);
 			currentId = rules.find((r) => r.id === currentId)?.extendsRuleId;
-			guard++;
 		}
 		return false;
 	}
