@@ -127,6 +127,99 @@ describe("MCP — handshake do protocolo (initialize + notificações)", () => {
 	});
 });
 
+describe("MCP — contrato HTTP (Content-Type e Accept)", () => {
+	it("rejeita POST sem Content-Type com 415", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(415);
+	});
+
+	it("rejeita Content-Type text/plain com 415", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "text/plain",
+				Authorization: "Bearer tok",
+			},
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(415);
+	});
+
+	it("aceita Content-Type application/json com charset", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json; charset=utf-8",
+				Authorization: "Bearer tok",
+			},
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(200);
+	});
+
+	it("rejeita Accept incompatível com 406", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "text/html",
+				Authorization: "Bearer tok",
+			},
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(406);
+	});
+
+	it("aceita Accept sem header (omissão = qualquer coisa)", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer tok",
+			},
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(200);
+	});
+
+	it("aceita Accept \*/* ( curinga padrão)", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "*/*",
+				Authorization: "Bearer tok",
+			},
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(200);
+	});
+
+	it("aceita Accept com múltiplos valores incluindo application/json", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "text/html, application/json, */*",
+				Authorization: "Bearer tok",
+			},
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(200);
+	});
+});
+
 describe("MCP — autenticação (401 antes de qualquer processamento)", () => {
 	const CALL = {
 		jsonrpc: "2.0",

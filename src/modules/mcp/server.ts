@@ -149,6 +149,23 @@ async function handleRequest(
 		return;
 	}
 
+	// Contrato HTTP: aceita SOMENTE application/json no POST.
+	// Rejeita ausência (navegador, health-check), text/*, multipart, etc.
+	const contentType = req.headers["content-type"] ?? "";
+	if (!contentType.includes("application/json")) {
+		res.writeHead(415).end(JSON.stringify({ error: "Content-Type deve ser application/json." }));
+		return;
+	}
+
+	// Accept: o servidor só produz application/json (JSON-RPC 2.0).
+	// Se o cliente declara Accept sem application/json, rejeita com 406.
+	// Se o cliente não envia Accept, aceita (omissão = aceita qualquer coisa).
+	const accept = req.headers["accept"] ?? "";
+	if (accept && !accept.includes("application/json") && !accept.includes("*/*")) {
+		res.writeHead(406).end(JSON.stringify({ error: "Servidor produz apenas application/json." }));
+		return;
+	}
+
 	const authHeader = req.headers["authorization"] ?? "";
 	const expectedToken = options.getToken();
 	const hasAuthGate = !!expectedToken;
