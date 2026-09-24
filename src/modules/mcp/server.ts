@@ -330,7 +330,7 @@ async function handleRequest(
 	if (req.headers["mcp-protocol-version"] === MODERN_PROTOCOL_VERSION) {
 		const modernError = validateModernRequest(req, message);
 		if (modernError) {
-			respondError(res, message.id, modernError, { code: "HEADER_MISMATCH", jsonRpcCode: -32020 });
+			respondError(res, message.id, modernError, { code: "HEADER_MISMATCH", jsonRpcCode: -32020, httpStatus: 400 });
 			return;
 		}
 
@@ -389,6 +389,7 @@ async function handleRequest(
 	if (req.headers["mcp-protocol-version"] && !(SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(req.headers["mcp-protocol-version"]!)) {
 		respondError(res, message.id, "Versão do protocolo não suportada.", {
 			code: "UNSUPPORTED_PROTOCOL_VERSION",
+			httpStatus: 400,
 			jsonRpcCode: -32022,
 		});
 		return;
@@ -539,9 +540,9 @@ function respondError(
 	res: http.ServerResponse,
 	id: unknown,
 	error: string,
-	opts?: { code?: string; jsonRpcCode?: number }
+	opts?: { code?: string; jsonRpcCode?: number; httpStatus?: number }
 ): void {
-	res.writeHead(200).end(
+	res.writeHead(opts?.httpStatus ?? 200).end(
 		JSON.stringify({
 			jsonrpc: "2.0",
 			id,
