@@ -372,6 +372,8 @@ const MAX_BODY_BYTES = 10 * 1024 * 1024;
 /**
  * Validação leve de argumentos contra inputSchema.
  * Cobertura: required + type (string/number/boolean/array/object).
+ * `object` rejeita arrays acidentalmente (`typeof [] === "object`).
+ * `number` rejeita NaN e Infinity.
  * Sem dependência nova — JSON.parse/stringify já existe no path.
  */
 function validateToolArgs(
@@ -387,24 +389,39 @@ function validateToolArgs(
 	}
 	}
 
-	// Tipo básico por campo (se declarado no schema).
-	const TYPE_MAP: Record<string, string> = {
-		string: "string",
-		number: "number",
-		boolean: "boolean",
-		object: "object",
-	};
+	// Tipo por campo (se declarado no schema).
 	for (const [field, prop] of Object.entries(schema.properties)) {
 		const val = args[field];
 		if (val === undefined || val === null) continue;
-		const expected = TYPE_MAP[(prop as { type?: string }).type ?? ""];
-		if (!expected) continue; // array/any: não valida aqui
-		if (expected === "array") {
-			if (!Array.isArray(val)) return `Campo "${field}" deve ser array, recebeu ${typeof val}.`;
-		} else if (typeof val !== expected) {
-			return `Campo "${field}" deve ser ${expected}, recebeu ${typeof val}.`;
+		const expected = (prop as { type?: string }).type;
+		if (!expected) continue; // any: não valida
+		if (!matchesType(val, expected)) {
+			return `Campo "${field}" deve ser ${expected}, recebeu ${typeLabel(val)}.`;
 		}
 	}
 
 	return null;
+}
+
+/** Checagem de tipo JSON Schema — object rejeita arrays, number rejeita NaN. */
+function matchesType(value: unknown, expected: string): boolean {
+	switch (expected) {
+		case "string":
+			return typeof value === "string";
+		case "number":
+			return typeof value === "number" && Number.isFinite(value);
+		case "boolean":
+			return typeof value === "boolean";
+		case "object":
+			return typeof value === "object" && value !== null && !Array.isArray(value);
+		case "array":
+			return Array.isArray(value);
+		default:
+			return true; // tipo desconhecido: não bloqueia
+	}
+}
+
+function typeLabel(value: unknown): string {
+	if (Array.isArray(value)) return "array";
+	return typeof value;
 }
