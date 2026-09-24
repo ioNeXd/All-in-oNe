@@ -31,7 +31,7 @@ describe("interpretGpgStatusOutput — veredicto", () => {
 		const r = interpretGpgStatusOutput(GOOD);
 		expect(r.valid).toBe(true);
 		expect(r.keyFingerprint).toBe(
-			"9C1B0A1B4B2B0B7C2A3D4E5F60718293A4B5C6D7"
+			"01AB02CD03EF04AB05CD06EF07AB08CD09EF12AB"
 		);
 		expect(r.reason).toBeUndefined();
 	});
@@ -40,6 +40,19 @@ describe("interpretGpgStatusOutput — veredicto", () => {
 		const r = interpretGpgStatusOutput(BAD);
 		expect(r.valid).toBe(false);
 		expect(r.reason).toContain("BADSIG");
+	});
+
+	it("VALIDSIG usa o fingerprint da chave primária quando a assinatura veio de subchave", () => {
+		const r = interpretGpgStatusOutput(
+			"[GNUPG:] GOODSIG SUBKEYFP Nome\\n" +
+			"[GNUPG:] VALIDSIG SUBKEYFP 2026-09-01 1756700000 0 4 0 1 10 00 PRIMARYFP"
+		);
+		expect(r.valid).toBe(true);
+		expect(r.keyFingerprint).toBe("PRIMARYFP");
+	});
+
+	it("EXPSIG é falha terminal, não sucesso", () => {
+		expect(interpretGpgStatusOutput("[GNUPG:] EXPSIG ABCD Nome").valid).toBe(false);
 	});
 
 	it("EXPKEYSIG e REVKEYSIG são falha terminal, não sucesso", () => {
