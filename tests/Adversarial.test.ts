@@ -286,7 +286,7 @@ describe("Adversarial — GPG fingerprint", () => {
 		expect(r.keyFingerprint).toBe("AB");
 	});
 
-	it("extractFingerprintFromArmoredKey: chave válida extrai hash", async () => {
+	it("extractFingerprintFromArmoredKey: armadura inválida → null", async () => {
 		const key = [
 		"-----BEGIN PGP PUBLIC KEY BLOCK-----",
 		"Version: GnuPG v2",
