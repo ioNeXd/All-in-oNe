@@ -220,6 +220,68 @@ describe("MCP — contrato HTTP (Content-Type e Accept)", () => {
 	});
 });
 
+	// --- MIME estrito: rejeita falsos positivos do antigo includes() ---
+
+	it("rejeita application/jsonx com 415", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/jsonx", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(415);
+	});
+
+	it("rejeita text/plain com application/json no param com 415", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": 'text/plain; charset="application/json"', Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(415);
+	});
+
+	it("rejeita Accept application/jsonx com 406", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Accept: "application/jsonx", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(406);
+	});
+
+	it("rejeita Accept multipart/mixed com 406", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Accept: "multipart/mixed", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(406);
+	});
+
+	it("aceita Accept application/json com parametros extras", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Accept: "application/json; q=0.9", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(200);
+	});
+
+	it("aceita Content-Type Application/JSON case-insensitive", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "Application/JSON", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(200);
+	});
+
 describe("MCP — autenticação (401 antes de qualquer processamento)", () => {
 	const CALL = {
 		jsonrpc: "2.0",

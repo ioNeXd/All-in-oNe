@@ -150,8 +150,10 @@ async function handleRequest(
 
 	// Contrato HTTP: aceita SOMENTE application/json no POST.
 	// Rejeita ausência (navegador, health-check), text/*, multipart, etc.
-	const contentType = req.headers["content-type"] ?? "";
-	if (!contentType.includes("application/json")) {
+	// Parsing MIME: extrai media type (antes de ';') e compara exata —
+	// rejeita 'application/jsonx', 'fooapplication/json', etc.
+	const contentType = (req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+	if (contentType !== "application/json") {
 		res.writeHead(415).end(JSON.stringify({ error: "Content-Type deve ser application/json." }));
 		return;
 	}
@@ -159,10 +161,18 @@ async function handleRequest(
 	// Accept: o servidor só produz application/json (JSON-RPC 2.0).
 	// Se o cliente declara Accept sem application/json, rejeita com 406.
 	// Se o cliente não envia Accept, aceita (omissão = aceita qualquer coisa).
+	// Cada media type na lista é parseado: wildcard (*/*) aceita qualquer coisa;
+	// application/json aceita o tipo exato; qualquer outra coisa rejeita.
 	const accept = req.headers["accept"] ?? "";
-	if (accept && !accept.includes("application/json") && !accept.includes("*/*")) {
-		res.writeHead(406).end(JSON.stringify({ error: "Servidor produz apenas application/json." }));
-		return;
+	if (accept) {
+		const hasJsonOrWildcard = accept.split(",").some((part) => {
+			const mime = part.split(";")[0].trim().toLowerCase();
+			return mime === "application/json" || mime === "*/*";
+		});
+		if (!hasJsonOrWildcard) {
+			res.writeHead(406).end(JSON.stringify({ error: "Servidor produz apenas application/json." }));
+			return;
+		}
 	}
 
 	const authHeader = req.headers["authorization"] ?? "";
