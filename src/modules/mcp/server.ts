@@ -392,7 +392,8 @@ async function handleRequest(
 		return;
 	}
 
-	if (req.headers["mcp-protocol-version"] && !(SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(req.headers["mcp-protocol-version"]!)) {
+	const requestProtocolHeader = Array.isArray(req.headers["mcp-protocol-version"]) ? req.headers["mcp-protocol-version"][0] : req.headers["mcp-protocol-version"];
+	if (requestProtocolHeader && !(SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(requestProtocolHeader)) {
 		respondError(res, message.id, "Versão do protocolo não suportada.", {
 			code: "UNSUPPORTED_PROTOCOL_VERSION",
 			httpStatus: 400,
