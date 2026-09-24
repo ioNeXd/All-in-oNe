@@ -1,5 +1,5 @@
 import type { TFile, TFolder } from "obsidian";
-import { TFile as TFileClass, normalizePath, Setting, Notice } from "obsidian";
+import { TFile as TFileClass, TFolder as TFolderClass, normalizePath, Setting, Notice } from "obsidian";
 import * as crypto from "crypto";
 import type {
 	ConfigValidationIssue,
@@ -664,7 +664,7 @@ export class McpModule implements HubModule {
 				const normalized = listPath ? normalizePath(listPath) : "/";
 				const folder = vault.getAbstractFileByPath(normalized);
 				if (listPath && (!(folder) || !("children" in folder))) throw new Error("Pasta não encontrada.");
-				const children = folder && "children" in folder ? folder.children : vault.getRoot().children;
+				const children = folder instanceof TFolderClass ? folder.children : vault.getRoot().children;
 				return { items: children.map((c) => c.path) };
 			}
 			case "search_vault": {
