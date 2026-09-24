@@ -75,25 +75,31 @@ export function createSplitPersistence(app: App, pluginDir: string): SplitPersis
 	const corruptedPaths: string[] = [];
 
 	const readFile = async <T>(path: string): Promise<T | null> => {
+		// 1) Arquivo não existe → estado normal, retorna null (caller usa default).
+		if (!(await adapter.exists(path))) return null;
+
+		// 2) Arquivo existe → tenta ler. Erro aqui é I/O real (permissão, disco).
+		let raw: string;
 		try {
-			if (!(await adapter.exists(path))) return null;
-			const raw = await adapter.read(path);
-			try {
-				return JSON.parse(raw) as T;
-			} catch {
-				// JSON corrompido: salva backup antes de sinalizar.
-				readCorrupted = true;
-				corruptedPaths.push(path);
-				try {
-					await adapter.write(`${path}.corrupt`, raw);
-				} catch { /* backup é melhor-esforço */ }
-				return null;
-			}
-		} catch {
-			// Arquivo existe mas não pôde ser lido: permissão, disco, etc.
+			raw = await adapter.read(path);
+		} catch (error) {
 			readCorrupted = true;
 			corruptedPaths.push(path);
-			return null;
+			console.error("[SplitPersistence] Erro de I/O ao ler arquivo:", path, error);
+			throw error; // não mascarar como "arquivo não existe"
+		}
+
+		// 3) Arquivo lido → tenta parsear. JSON inválido = corrupção.
+		try {
+			return JSON.parse(raw) as T;
+		} catch (error) {
+			readCorrupted = true;
+			corruptedPaths.push(path);
+			console.error("[SplitPersistence] Arquivo corrompido:", path, error);
+			try {
+				await adapter.write(`${path}.corrupt`, raw);
+			} catch { /* backup é melhor-esforço */ }
+			return null; // recuperação com defaults
 		}
 	};
 	const writeFile = async (path: string, data: unknown): Promise<void> => {
