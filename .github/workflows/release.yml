@@ -18,34 +18,25 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-      # npm ci (não install): usa o package-lock.json — build reprodutível,
-      # o que importa para o checksum do main.js bater entre CI e release.
       - run: npm ci
       - run: npm run build
       - run: npm test
 
   release:
-    # Só roda em push de tag v* — o build-and-test já passou antes (needs).
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "20"
           cache: "npm"
       - run: npm ci
       - run: npm run build
 
-      # Guarda: o manifest.json publicado precisa descrever a MESMA versão
-      # da tag. Caso contrário o AutoUpdate entra em loop: baixa o release
-      # "novo", o manifest instalado continua com a versão antiga e a
-      # checagem nunca converge. O version-bump.mjs (npm version) atualiza
-      # manifest.json e versions.json juntos — taggear sem rodar
-      # "npm version" antes é exatamente o erro que este passo pega.
       - name: Conferir versão do manifest × tag
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -55,10 +46,6 @@ jobs:
             exit 1
           fi
 
-      # Checksums vão para o CORPO do release: é de lá que o parseChecksums
-      # do módulo AutoUpdate lê (formato "sha256 <arquivo>: <hash>", coberto
-      # por tests/ReleaseUtils.test.ts). Sem esta seção, a verificação
-      # SHA-256 do update nunca rodaria para ninguém.
       - name: Gerar checksums SHA-256
         id: checksums
         run: |
@@ -66,7 +53,7 @@ jobs:
             echo "body<<EOF"
             echo "### Checksums SHA-256"
             echo ""
-            echo "Confira antes de instalar manualmente: \`sha256sum <arquivo>\`."
+            echo "Confira antes de instalar manualmente: `sha256sum <arquivo>`."
             echo ""
             echo "sha256 main.js: $(sha256sum main.js | awk '{print $1}')"
             echo "sha256 manifest.json: $(sha256sum manifest.json | awk '{print $1}')"
@@ -74,12 +61,6 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      # Assinatura GPG dos assets (opcional). O módulo Auto-update pode
-      # verificar .sig/.asc (SignatureUtils) — sem este passo o recurso não
-      # teria o que verificar em produção. Chave privada + passphrase entram
-      # como secrets (GPG_PRIVATE_KEY, GPG_PASSPHRASE); SEM eles o passo é
-      # PULADO e o release sai igual a hoje (só checksums) — configurar os
-      # secrets é o que liga a assinatura, sem quebrar releases antigos.
       - name: Assinar assets (GPG)
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -105,19 +86,9 @@ jobs:
             styles.css
           body: ${{ steps.checksums.outputs.body }}
           generate_release_notes: true
-          # Sufixo de pré-lançamento SemVer na tag (ex.: v0.2.0-beta.1) vira
-          # prerelease no GitHub — é o que faz o canal estável/beta do
-          # AutoUpdate funcionar de verdade: estável ignora prereleases,
-          # beta aceita.
           prerelease: ${{ contains(github.ref_name, '-') }}
-          # Os 3 arquivos são o contrato de instalação de um plugin do
-          # Obsidian: faltou um, o release é inútil — falhe em vez de
-          # publicar pela metade.
           fail_on_unmatched_files: true
 
-      # Assinaturas publicadas num segundo passo, SÓ quando foram geradas:
-      # assim o fail_on_unmatched_files acima continua valendo para os 3
-      # arquivos essenciais sem quebrar o release sem secrets configurados.
       - name: Anexar assinaturas ao release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         env:
