@@ -26,7 +26,7 @@ import { AuthThrottle, identityOf } from "./AuthThrottle";
  * Contrato implementado:
  *   ✔ POST / com JSON-RPC 2.0 (initialize, tools/list, tools/call)
  *   ✔ Notificações JSON-RPC (sem id) retornam 202 Accepted
- *   ✔ Negociação de versão do protocolo MCP (2025-03-26, 2025-06-18)
+ *   ✔ Negociação de versão do protocolo MCP nas duas eras
  *   ✔ Negociação de versão da API de ferramentas (toolsApiVersion)
  *   ✔ Validação de argumentos contra inputSchema (required + type)
  *   ✔ Autenticação Bearer + throttling + rate limiting
@@ -34,10 +34,9 @@ import { AuthThrottle, identityOf } from "./AuthThrottle";
  *
  * O que NÃO faz (e por quê):
  *   ✘ GET/SSE — notificações server-initiated; sem elas, GET é inútil
- *   ✘ Headers Mcp-Method/Mcp-Name — requisitos 2026; clientes atuais
- *     não os enviam, e o spec permite omiti-los no POST
- *   ✘ MCP 2025-11-25 / 2026-07-28 — era moderna (server/discover);
- *     mudança arquitetural registrada como pendência未来的工作
+ *   ✘ GET/SSE/subscriptions/listen — não implementados porque este plugin
+ *     não anuncia notificações server-initiated
+ *   ✘ resources/prompts/Tasks/MRTR — fora do escopo atual; somente Tools é anunciado
  *
  * Clientes suportados e testados:
  *   • Claude Desktop (macOS/Windows)
