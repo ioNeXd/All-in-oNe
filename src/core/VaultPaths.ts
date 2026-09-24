@@ -25,7 +25,14 @@ export async function ensureVaultFolder(app: App, path: string): Promise<void> {
 		current = current ? `${current}/${segment}` : segment;
 		const node = app.vault.getAbstractFileByPath(current);
 		if (!(node instanceof TFolder)) {
-			await app.vault.createFolder(current).catch(() => void 0);
+			try {
+				await app.vault.createFolder(current);
+			} catch (error) {
+				// Only swallow the benign TOCTOU case where another writer created
+				// this exact folder between the existence check and createFolder.
+				const after = app.vault.getAbstractFileByPath(current);
+				if (!(after instanceof TFolder)) throw error;
+			}
 		}
 	}
 }
