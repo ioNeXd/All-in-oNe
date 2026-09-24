@@ -37,7 +37,7 @@ export function uniqueNameWith(
  *   3. Colapsa `//` múltiplos em `/`.
  *   4. Rejeita paths vazios ou somente whitespace.
  *   5. Rejeita paths absolutos (`/...` ou `C:\...`).
- *   6. Rejeita `..` (tentativa de escape do vault).
+ *   6. Rejeita segmentos `..` (tentativa de escape do vault).
  *   7. Rejeita paths com caracteres de controle.
  *   8. Remove `.` (diretório atual) no início.
  *
@@ -73,8 +73,9 @@ export function validateVaultPath(raw: string): string {
 		);
 	}
 
-	// Rejeita tentativa de escape com .. 
-	if (normalized.includes("..")) {
+	// Rejeita somente segmentos de diretório ".."; nomes legítimos como
+	// "relatorio..final.md" não representam traversal e devem ser aceitos.
+	if (normalized.split("/").some((segment) => segment === "..")) {
 		throw new Error(
 			`Path inválido: "${raw}" — referências a diretório pai (..) não são permitidas.`
 		);
