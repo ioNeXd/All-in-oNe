@@ -254,7 +254,7 @@ describe("mcp:action-logged — log de atividade dedicado", () => {
 			dryRun: false,
 			isWrite: true,
 		});
-		expect(log[0].payload.result).toMatchObject({ created: true });
+		expect(log[0].payload.result).toMatchObject({ type: "metadata-only" });
 		// UM evento por ação: o genérico mcp:action NÃO é mais emitido (era o
 		// que duplicava cada ação no histórico):
 		expect(emitted.some((e) => e.name === "mcp:action")).toBe(false);
