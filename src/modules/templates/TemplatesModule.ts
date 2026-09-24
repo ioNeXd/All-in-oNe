@@ -397,31 +397,23 @@ export class TemplatesModule implements HubModule {
 	async applyRuleToNote(file: TFile, rule: FolderTemplateRule): Promise<void> {
 		const templateBody = this.buildTemplateContent(rule);
 
-		if (templateBody.trim()) {
-			await this.context!.fileWriteQueueRun(file.path, async () => {
+		// Conteúdo e frontmatter pertencem à mesma operação serializada. Isso evita
+		// que outra escrita/rename observe a nota entre as duas fases.
+		await this.context!.fileWriteQueueRun(file.path, async () => {
+			if (templateBody.trim()) {
 				const existing = await this.context!.app.vault.read(file);
 				const body = stripFrontmatter(existing).trim();
 				const merged = body ? `${templateBody}\n\n${body}` : templateBody;
 				await this.context!.app.vault.modify(file, merged);
+			}
+
+			await this.context!.app.fileManager.processFrontMatter(file, (fm) => {
+				fm.date = fm.date ?? new Date().toISOString().slice(0, 10);
+				fm.thema = this.deriveThemaFromPath(file.path);
+				fm.status = STATUS_PENDING_INITIAL;
+				fm.origem = file.path;
 			});
-		}
-
-		// processFrontMatter cria/atualiza o bloco `---` no topo corretamente,
-		// preservando o conteúdo que já está abaixo dele.
-		await this.context!.app.fileManager.processFrontMatter(file, (fm) => {
-			fm.date = fm.date ?? new Date().toISOString().slice(0, 10);
-			fm.thema = this.deriveThemaFromPath(file.path);
-			// `status` já nasce com os DOIS valores. No painel de Propriedades
-			// do Obsidian, uma lista aparece como "chips" removíveis (com um
-			// X) — o usuário só precisa clicar no X do chip "Pendente" para
-			// sobrar apenas "Completo", sem editar texto nenhum. Isso é mais
-			// robusto do que "lista vazia = completo": o Obsidian às vezes
-			// remove a propriedade inteira quando o último item de uma lista
-			// é apagado, e aí não sobraria nada pra detectar a mudança.
-			fm.status = STATUS_PENDING_INITIAL;
-			fm.origem = file.path;
 		});
-
 		await this.movePendingToCategoryFolder(file);
 		this.context?.bus.emit("templates:note-pending", { path: file.path }, "templates");
 		this.context?.log("Nota criada e marcada como Pendente", { path: file.path });
