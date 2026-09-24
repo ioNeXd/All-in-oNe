@@ -123,7 +123,8 @@ describe("MCP — handshake do protocolo (initialize + notificações)", () => {
 		expect(res.status).toBe(200);
 		const json = (await res.json()) as { id: number; result: { content: unknown } };
 		expect(json.id).toBe(9);
-		expect(json.result.content).toEqual({ eco: "read_note" });
+		expect(json.result.content).toEqual([{ type: "text", text: JSON.stringify({ eco: "read_note" }) }]);
+		expect(json.result.isError).toBeUndefined();
 	});
 });
 
