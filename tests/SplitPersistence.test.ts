@@ -64,16 +64,17 @@ describe("SplitPersistence — gravação direcionada via SettingsManager", () =
 		return { manager, store };
 	}
 
-	it("updateModuleSettings do Histórico grava SÓ o arquivo do Histórico", async () => {
+	it("updateModuleSettings do Histórico grava módulo + main juntos (persistVersioned)", async () => {
 		const { manager, store } = makeManagerWithSplit();
 		await manager.init();
 
 		store.writes.length = 0;
 		await manager.updateModuleSettings("history", { maxEntries: 500 });
 
+		// persistVersioned grava módulos + data.json com o MESMO _v:
 		expect(store.countWrites("history.json")).toBe(1);
-		expect(store.countWrites("data.json")).toBe(0); // principal INTEIRO
-		expect(store.countWrites("notifications.json")).toBe(0);
+		expect(store.countWrites("data.json")).toBe(1);
+		expect(store.countWrites("notifications.json")).toBe(1); // persistVersioned grava todos para manter _v consistente
 	});
 
 	it("mudança fora das fatias (Lobby/paths) grava SÓ o data.json principal", async () => {
@@ -84,9 +85,10 @@ describe("SplitPersistence — gravação direcionada via SettingsManager", () =
 		const next = { ...manager.get(), onboardingCompleted: true };
 		await manager.save(next);
 
+		// Sem fatias mudadas → persistVersioned grava só o main:
 		expect(store.countWrites("data.json")).toBe(1);
-		expect(store.countWrites("history.json")).toBe(0);
-		expect(store.countWrites("notifications.json")).toBe(0);
+		expect(store.countWrites("history.json")).toBe(1); // persistVersioned grava todos para manter _v
+		expect(store.countWrites("notifications.json")).toBe(1);
 	});
 
 	it("flush repetido com a MESMA fatia não regrava nada (diff, nãoTimer)", async () => {
@@ -96,12 +98,13 @@ describe("SplitPersistence — gravação direcionada via SettingsManager", () =
 		store.writes.length = 0;
 
 		// Re-salvar a config com a fatia do Histórico IDÊNTICA (ex.: outro
-		// módulo gravou algo): nada de history.json de novo.
+		// módulo gravou algo): nada regravado.
 		const next = JSON.parse(JSON.stringify(manager.get())) as HubSettings;
 		next.sync = { lastWrittenBy: "outro", lastWrittenAt: 999 };
 		await manager.save(next);
 
 		expect(store.countWrites("history.json")).toBe(0);
+		expect(store.countWrites("data.json")).toBe(0); // principal também não mudou
 	});
 
 	it("loadMain reconstitui as fatias dos arquivos por módulo (merge transparente)", async () => {
@@ -126,6 +129,81 @@ describe("SplitPersistence — gravação direcionada via SettingsManager", () =
 	});
 });
 
+
+describe("SplitPersistence — version stamping (_v)", () => {
+	it("persistVersioned grava _v em todos os arquivos com o mesmo valor", async () => {
+		const store = makeStore();
+		const settings = makeSettings();
+		const slices = new Map([["history", { entries: [1, 2] }]]);
+		await store.handle.persistVersioned(settings, slices, 42);
+
+		const mainRaw = JSON.parse(store.files.get(".obsidian/plugins/All-in-oNe/data.json") as string) as Record<string, unknown>;
+		const histRaw = JSON.parse(store.files.get(".obsidian/plugins/All-in-oNe/data.modules/history.json") as string) as Record<string, unknown>;
+		expect(mainRaw._v).toBe(42);
+		expect(histRaw._v).toBe(42);
+	});
+
+	it("loadMain detecta _v do modulo > _v do main (inconsistencia por crash)", async () => {
+		const store = makeStore();
+		const pluginDir = ".obsidian/plugins/All-in-oNe";
+
+		const mainSettings = { ...makeSettings(), _v: 1, modules: { history: {}, notifications: {} } };
+		const historySlice = { entries: [1, 2, 3], _v: 2 };
+
+		store.files.set(pluginDir + "/data.json", JSON.stringify(mainSettings, null, 2));
+		store.files.set(pluginDir + "/data.modules/history.json", JSON.stringify(historySlice, null, 2));
+
+		const loaded = await store.handle.loadMain();
+		expect(loaded).not.toBeNull();
+		expect(loaded!.modules["history"]).toEqual({ entries: [1, 2, 3] });
+		expect(store.handle.lastVersion).toBe(2);
+	});
+
+	it("loadMain nao aceita _v do modulo < _v do main (modulo obsoleto)", async () => {
+		const store = makeStore();
+		const pluginDir = ".obsidian/plugins/All-in-oNe";
+
+		const mainSettings = { ...makeSettings(), _v: 3, modules: { history: {}, notifications: {} } };
+		const historySlice = { entries: [99], _v: 2 };
+
+		store.files.set(pluginDir + "/data.json", JSON.stringify(mainSettings, null, 2));
+		store.files.set(pluginDir + "/data.modules/history.json", JSON.stringify(historySlice, null, 2));
+
+		const loaded = await store.handle.loadMain();
+		expect(loaded!.modules["history"]).toEqual({});
+		expect(store.handle.lastVersion).toBe(3);
+	});
+
+	it("loadMain aceita arquivos sem _v (compatibilidade)", async () => {
+		const store = makeStore();
+		const pluginDir = ".obsidian/plugins/All-in-oNe";
+
+		const mainSettings = { ...makeSettings(), modules: { history: {}, notifications: {} } };
+		const historySlice = { entries: [1, 2] };
+
+		store.files.set(pluginDir + "/data.json", JSON.stringify(mainSettings, null, 2));
+		store.files.set(pluginDir + "/data.modules/history.json", JSON.stringify(historySlice, null, 2));
+
+		const loaded = await store.handle.loadMain();
+		expect(loaded!.modules["history"]).toEqual({ entries: [1, 2] });
+		expect(store.handle.lastVersion).toBeNull();
+	});
+
+	it("loadMain remove _v do merge (campo e meta, nao dado)", async () => {
+		const store = makeStore();
+		const pluginDir = ".obsidian/plugins/All-in-oNe";
+
+		const mainSettings = { ...makeSettings(), _v: 5, modules: { history: {}, notifications: {} } };
+		const historySlice = { entries: [1], _v: 5 };
+
+		store.files.set(pluginDir + "/data.json", JSON.stringify(mainSettings, null, 2));
+		store.files.set(pluginDir + "/data.modules/history.json", JSON.stringify(historySlice, null, 2));
+
+		const loaded = await store.handle.loadMain();
+		expect((loaded!.modules["history"] as Record<string, unknown>)._v).toBeUndefined();
+		expect(loaded!.modules["history"]).toEqual({ entries: [1] });
+	});
+});
 describe("SplitPersistence — compatibilidade", () => {
 	it("data.json gravado contém stubs (legível por versão antiga)", async () => {
 		const store = makeStore();

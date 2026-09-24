@@ -66,6 +66,8 @@ export class SettingsManager {
 	private split?: SplitPersistenceHandle;
 	/** Última config efetivamente NO DISCO — base do diff do persistAll. */
 	private persistedSnapshot?: HubSettings;
+	/** Contador monotônico para version-stamping dos arquivos splitados. */
+	private splitVersion = 0;
 	/** Arquivos corrompidos detectados no último init (para diagnóstico). */
 	corruptedFiles: string[] = [];
 
@@ -117,6 +119,10 @@ export class SettingsManager {
 		}
 		// Estado que está no disco agora (base do diff do persistAll):
 		this.persistedSnapshot = JSON.parse(JSON.stringify(this.current)) as HubSettings;
+		// Inicializa version counter a partir do disco:
+		if (this.split?.lastVersion != null) {
+			this.splitVersion = this.split.lastVersion;
+		}
 
 		// Detecção de conflito de sync: se o arquivo no disco foi escrito por
 		// outra instância (outro dispositivo) depois da última vez que ESTA
@@ -247,6 +253,9 @@ export class SettingsManager {
 	 * só é regravado quando algo FORA das fatias splitadas mudou, e a fatia
 	 * de cada módulo splitado só quando ELA mudou (deep-equal) — o write-
 	 * behind do Histórico/Notificações deixa de regravar o JSON inteiro.
+	 *
+	 * Se persistVersioned está disponível, grava todos os arquivos com o MESMO
+	 * _v para detectar snapshots inconsistentes no boot seguinte.
 	 */
 	private async persistAll(next: HubSettings): Promise<void> {
 		if (!this.split) {
@@ -257,18 +266,15 @@ export class SettingsManager {
 		const prev = this.persistedSnapshot;
 		const splitIds = SPLIT_MODULE_IDS;
 
-		// Fatias splitadas: grava só a(s) que mudou.
+		// Colete fatias que mudaram para gravar em batch:
+		const changedSlices = new Map<string, Record<string, unknown>>();
 		for (const id of splitIds) {
 			const slice = next.modules[id] ?? {};
 			if (JSON.stringify(prev?.modules?.[id] ?? {}) === JSON.stringify(slice)) continue;
-			await this.split.persistModule(id, slice);
+			changedSlices.set(id, slice);
 		}
 
-		// Principal: grava só se algo fora das fatias splitadas mudou. O
-		// carimbo de sync NÃO entra no diff (muda em todo save — compará-lo
-		// faria qualquer save parecer mudança do principal); ele é atualizado
-		// no DISCO quando o principal de fato é regravado (persistMain), e o
-		// snapshot da memória segue o current de qualquer forma.
+		// Principal: grava só se algo fora das fatias splitadas mudou.
 		const mainChanged =
 			!prev ||
 			(() => {
@@ -278,9 +284,14 @@ export class SettingsManager {
 				void _sp;
 				return JSON.stringify(restPrev) !== JSON.stringify(restNext);
 			})();
-		if (mainChanged) {
-			await this.split.persistMain(next);
+
+		if (changedSlices.size > 0 || mainChanged) {
+			this.splitVersion++;
+			// persistVersioned grava módulos + main com o MESMO _v.
+			// Se crash no meio, _v permite detectar inconsistência no boot.
+			await this.split.persistVersioned(next, changedSlices, this.splitVersion);
 		}
+
 		this.persistedSnapshot = JSON.parse(JSON.stringify(next)) as HubSettings;
 	}
 
