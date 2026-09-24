@@ -392,9 +392,9 @@ async function handleRequest(
 			}
 			const result = await options.handleToolCall(toolName, args);
 			if (result.ok) {
-				respond(res, message.id, { content: result.result });
+				respond(res, message.id, toToolResult(result.result, false));
 			} else {
-				respondError(res, message.id, result.error ?? "Erro desconhecido.");
+				respond(res, message.id, toToolResult(result.error ?? "Erro desconhecido.", true));
 			}
 			return;
 		}
@@ -433,30 +433,32 @@ function respondError(
 
 function readBody(req: http.IncomingMessage, maxBytes: number): Promise<string> {
 	return new Promise((resolve, reject) => {
-		let data = "";
+		const chunks: Buffer[] = [];
 		let bytes = 0;
 		let settled = false;
-		req.on("data", (chunk) => {
+		const onData = (chunk: Buffer | string) => {
 			if (settled) return;
-			bytes += chunk.length;
+			const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+			bytes += buffer.length;
 			if (bytes > maxBytes) {
 				settled = true;
-				const err = new Error("Corpo da requisição grande demais.") as NodeJS.ErrnoException & {
-					tooLarge?: boolean;
-				};
+				const err = new Error("Corpo da requisição grande demais.") as NodeJS.ErrnoException & { tooLarge?: boolean };
 				err.tooLarge = true;
-				req.destroy(); // para de acumular memória já
+				req.removeListener("data", onData);
+				req.removeListener("end", onEnd);
+				req.resume();
 				reject(err);
 				return;
 			}
-			data += chunk;
-		});
-		req.on("end", () => {
-			if (!settled) {
-				settled = true;
-				resolve(data);
-			}
-		});
+			chunks.push(buffer);
+		};
+		const onEnd = () => {
+			if (settled) return;
+			settled = true;
+			resolve(Buffer.concat(chunks).toString("utf8"));
+		};
+		req.on("data", onData);
+		req.on("end", onEnd);
 		req.on("error", (err) => {
 			if (!settled) {
 				settled = true;
@@ -464,6 +466,20 @@ function readBody(req: http.IncomingMessage, maxBytes: number): Promise<string> 
 			}
 		});
 	});
+}
+
+/** Converte o resultado interno para o CallToolResult definido pelo MCP. */
+function toToolResult(value: unknown, isError: boolean): {
+	content: Array<{ type: "text"; text: string }>;
+	isError?: boolean;
+} {
+	let text: string;
+	if (typeof value === "string") text = value;
+	else {
+		try { text = JSON.stringify(value) ?? String(value); }
+		catch { text = String(value); }
+	}
+	return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
 }
 
 /** 10 MB — nenhuma ferramenta atual precisa de mais que isso num POST. */
