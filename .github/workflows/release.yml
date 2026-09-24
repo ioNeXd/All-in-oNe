@@ -84,7 +84,7 @@ jobs:
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        if: ${{ env.GPG_PRIVATE_KEY != '' }}
         run: |
           export GNUPGHOME=$(mktemp -d)
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
@@ -120,7 +120,9 @@ jobs:
       # arquivos essenciais sem quebrar o release sem secrets configurados.
       - name: Anexar assinaturas ao release
         uses: softprops/action-gh-release@v2
-        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        if: ${{ env.GPG_PRIVATE_KEY != '' }}
         with:
           files: |
             main.js.sig.asc
