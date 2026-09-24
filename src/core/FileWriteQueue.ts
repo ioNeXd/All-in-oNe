@@ -21,49 +21,50 @@
 export class FileWriteQueue {
 	private queues = new Map<string, Promise<unknown>>();
 
-	async run<T>(path: string, operation: () => Promise<T>): Promise<T> {
-		const previous = this.queues.get(path) ?? Promise.resolve();
-		const current = previous.then(operation, operation); // roda mesmo se a anterior falhou
-		// Encadeia a fila com a promise blindada (a falha de `operation` não
-		// pode travar os runs seguintes do mesmo caminho).
-		const chained = current.catch(() => undefined);
-		this.queues.set(path, chained);
-		// Limpeza da chave: quando ESTA promessa da fila resolver (sem nenhum
-		// run novo encadeado na frente), o caminho drenou — apagar evita que
-		// o Map cresça sem limite numa sessão longa (o plugin vive no
-		// processo do Obsidian por horas; cada caminho tocado deixava uma
-		// entrada para sempre). A conferência `still === chained` só permite
-		// a remoção se NENHUM run novo assumiu a chave nesse meio-tempo: se
-		// assumiu, a chave pertence à nova promessa da fila.
-		void chained.then(() => {
-			if (this.queues.get(path) === chained) this.queues.delete(path);
-		});
-		return current;
+	/**
+	 * Serializa uma operação num caminho único. Delega a runMany para
+	 * compartilhar o mecanismo de locking — a aquisição é atômica porque
+	 * todas as .set() no Map são síncronas (sem await) antes do return.
+	 */
+	run<T>(path: string, operation: () => Promise<T>): Promise<T> {
+		return this.runMany([path], operation);
 	}
 
 	/**
 	 * Serializa uma operação que toca múltiplos paths (ex.: rename A→B).
-	 * Adquire locks de todos os paths em ordem canônica (sort) para evitar
-	 * deadlock entre renames cruzados (A→B e B→A). A operação roda quando
-	 * NENHUM dos paths tiver outra operação pendente.
+	 *
+	 * LOCKING ATÔMICO: todas as leituras (.get) e escritas (.set) no Map
+	 * de filas ocorrem no mesmo tick síncrono — sem await entre elas.
+	 * Qualquer chamada concorrente (run ou runMany) que execute no próximo
+	 * microtask já vê os locks registrados e espera a resolução.
+	 *
+	 * Chaves ordenadas (sort) para deadlock-free entre renames cruzados.
+	 * Duplicatas removidas (Set) para não encadear a mesma fila duas vezes.
 	 */
 	runMany<T>(paths: string[], operation: () => Promise<T>): Promise<T> {
 		const keys = [...new Set(paths)].sort();
 
+		// 1) Leitura atômica: coleta o estado atual das filas para todas as chaves.
+		//    Tudo síncrono — nenhum await aqui.
 		let previous = Promise.resolve();
 		for (const key of keys) {
 			const queued = this.queues.get(key) ?? Promise.resolve();
 			previous = Promise.all([previous, queued]).then(() => undefined);
 		}
 
+		// 2) Encadeia a operação: só roda quando TODAS as filas anteriores drenaram.
 		const current = previous.then(operation, operation);
 		const chained = current.catch(() => undefined);
 
+		// 3) Escrita atômica: registra os locks ANTES de qualquer coisa observar.
+		//    Mesmo tick síncrono das leituras — impossível interleaving.
 		for (const key of keys) {
 			this.queues.set(key, chained);
 		}
 
-		// Drena todas as chaves — só remove se NENHUM run novo assumiu.
+		// 4) Limpeza: remove do Map quando ESTA promessa drenar e ninguém mais
+			//    assumiu a chave. Condição `still === chained` garante que um run
+		//    novo encadeado na frente não é apagado acidentalmente.
 		void chained.then(() => {
 			for (const key of keys) {
 				if (this.queues.get(key) === chained) this.queues.delete(key);
