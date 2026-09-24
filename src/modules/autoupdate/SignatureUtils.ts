@@ -124,7 +124,7 @@ export function interpretGpgStatusOutput(output: string): SignatureCheckOutcome 
 				sawNoPubkey = true;
 				break;
 			case "VALIDSIG":
-				if (parts[7]) fingerprint = parts[7];
+				if (parts[10]) fingerprint = parts[10];
 				else if (parts[1]) fingerprint = parts[1];
 				break;
 		}
