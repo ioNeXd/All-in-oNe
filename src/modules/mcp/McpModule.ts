@@ -629,7 +629,7 @@ export class McpModule implements HubModule {
 			case "delete_note": {
 				const path = validateVaultPath(String(args.path));
 				const file = vault.getAbstractFileByPath(path);
-				if (!file) throw new Error("Nota não encontrada.");
+				if (!(file instanceof TFileClass) || file.extension.toLowerCase() !== "md") throw new Error("Nota não encontrada.");
 				await write(path, () => vault.trash(file, true)); // vai para a lixeira, nunca exclusão direta (rede de segurança)
 				return { path };
 			}
@@ -637,7 +637,8 @@ export class McpModule implements HubModule {
 				const listPath = args.path ? validateVaultPath(String(args.path)) : "";
 				const normalized = listPath ? normalizePath(listPath) : "/";
 				const folder = vault.getAbstractFileByPath(normalized);
-				const children = (folder as TFolder | null)?.children ?? vault.getRoot().children;
+				if (listPath && (!(folder) || !("children" in folder))) throw new Error("Pasta não encontrada.");
+				const children = folder && "children" in folder ? folder.children : vault.getRoot().children;
 				return { items: children.map((c) => c.path) };
 			}
 			case "search_vault": {
@@ -694,11 +695,12 @@ export class McpModule implements HubModule {
 			case "rename_note": {
 				const path = validateVaultPath(String(args.path));
 				const newPath = validateVaultPath(String(args.newPath));
+				if (!newPath.toLowerCase().endsWith(".md")) throw new Error("O destino deve ser uma nota Markdown (.md).");
 				// Lookup + validação + mutação DENTRO do lock —
 				// outro módulo poderia renomear/mover o arquivo no intervalo.
 				await writeMany([path, newPath], async () => {
 					const file = vault.getAbstractFileByPath(path);
-					if (!file) throw new Error("Nota não encontrada.");
+					if (!(file instanceof TFileClass) || file.extension.toLowerCase() !== "md") throw new Error("Nota não encontrada.");
 					await app.fileManager.renameFile(file, newPath);
 				});
 				return { from: path, to: newPath };
@@ -835,6 +837,9 @@ export class McpModule implements HubModule {
 			case "split_note": {
 				// Divide a nota em várias, quebrando nos headings do nível indicado.
 				const path = validateVaultPath(String(args.path));
+				const source = vault.getAbstractFileByPath(path);
+				if (!(source instanceof TFileClass) || source.extension.toLowerCase() !== "md") throw new Error("Nota não encontrada.");
+				const content = await vault.read(source as TFile);
 				const level = Number(args.headingLevel ?? 2);
 				const marker = "#".repeat(level) + " ";
 				const folder = path.substring(0, path.lastIndexOf("/"));
