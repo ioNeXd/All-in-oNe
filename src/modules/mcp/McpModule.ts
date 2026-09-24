@@ -542,7 +542,7 @@ export class McpModule implements HubModule {
 			// distribuição; o MCP não conhece quem escuta.
 			this.context?.bus.emit(
 				"mcp:action-logged",
-				{ tool: toolName, path: args.path, dryRun, isWrite, result },
+				{ tool: toolName, path: args.path, dryRun, isWrite, result: { type: "metadata-only" } },
 				"mcp"
 			);
 			return { ok: true, result };
@@ -552,7 +552,7 @@ export class McpModule implements HubModule {
 			// pelo vault etc.). Sem isto, o log contaria só os acertos.
 			this.context?.bus.emit(
 				"mcp:action-logged",
-				{ tool: toolName, path: args.path, dryRun, isWrite, error: String(err) },
+				{ tool: toolName, path: args.path, dryRun, isWrite, error: sanitizeMcpError(String(err)) },
 				"mcp"
 			);
 			return { ok: false, error: String(err) };
