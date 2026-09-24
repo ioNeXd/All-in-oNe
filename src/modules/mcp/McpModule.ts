@@ -667,9 +667,13 @@ export class McpModule implements HubModule {
 			case "rename_note": {
 				const path = normalizePath(String(args.path));
 				const newPath = normalizePath(String(args.newPath));
-				const file = vault.getAbstractFileByPath(path);
-				if (!file) throw new Error("Nota não encontrada.");
-				await writeMany([path, newPath], () => app.fileManager.renameFile(file, newPath));
+				// Lookup + validação + mutação DENTRO do lock —
+				// outro módulo poderia renomear/mover o arquivo no intervalo.
+				await writeMany([path, newPath], async () => {
+					const file = vault.getAbstractFileByPath(path);
+					if (!file) throw new Error("Nota não encontrada.");
+					await app.fileManager.renameFile(file, newPath);
+				});
 				return { from: path, to: newPath };
 			}
 			case "patch_note": {
@@ -758,19 +762,21 @@ export class McpModule implements HubModule {
 			case "put_attachment": {
 				const path = normalizePath(String(args.path));
 				const bytes = decodeBase64(args.base64);
-				const existing = vault.getAbstractFileByPath(path);
-				if (existing instanceof TFileClass) {
-					// Sobrescrever: o Obsidian reescreve o arquivo inteiro — a fila
-					// serializa com qualquer outra escrita no mesmo caminho.
-					await write(path, () => vault.modifyBinary(existing as TFile, toArrayBuffer(bytes)));
-				} else {
-					// Criar: a pasta-pai pode não existir (o createBinary não cria
-					// pastas-pai — mesma armadilha do vault.createFolder).
-					const folder = path.substring(0, path.lastIndexOf("/"));
-					if (folder) await ensureVaultFolder(app, folder);
-					await write(path, () => vault.createBinary(path, toArrayBuffer(bytes)));
-				}
-				return { path, sizeBytes: bytes.byteLength, created: !(existing instanceof TFileClass) };
+				// Decisão create/modify DENTRO do lock —
+				// outro processo pode criar/remover/substituir o arquivo.
+				const result = await write(path, async () => {
+					const existing = vault.getAbstractFileByPath(path);
+					if (existing instanceof TFileClass) {
+						await vault.modifyBinary(existing as TFile, toArrayBuffer(bytes));
+						return false;
+					} else {
+						const folder = path.substring(0, path.lastIndexOf("/"));
+						if (folder) await ensureVaultFolder(app, folder);
+						await vault.createBinary(path, toArrayBuffer(bytes));
+						return true;
+					}
+				});
+				return { path, sizeBytes: bytes.byteLength, created: result };
 			}
 			case "delete_attachment": {
 				const path = normalizePath(String(args.path));

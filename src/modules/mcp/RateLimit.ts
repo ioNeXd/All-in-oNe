@@ -35,7 +35,7 @@ export interface RateLimiter {
 	/** Registra UM evento e devolve false se a janela já estiver cheia. */
 	tryConsume(now: number): boolean;
 	/** Devolve um slot previamente consumido (cancelamento pós-reserva). */
-	release(now: number): void;
+	release(ts: number): void;
 	/** Eventos válidos na janela (para diagnóstico/painel). */
 	count(now: number): number;
 }
@@ -57,11 +57,11 @@ export function createRateLimiter(limit: number): RateLimiter {
 			timestamps.push(now);
 			return true;
 		},
-		release: () => {
-			// Remove o timestamp MAIS ANTIGO reservado.
-			// Em corrida benigna pode remover slot alheio — sub-contagem,
-			// não super-contagem; aceitável.
-			if (timestamps.length > 0) timestamps.pop();
+		release: (ts: number) => {
+			// Remove o timestamp EXATO — cada reservation carrega
+			// o seu, nunca remove slot alheio.
+			const idx = timestamps.indexOf(ts);
+			if (idx !== -1) timestamps.splice(idx, 1);
 		},
 	};
 }
