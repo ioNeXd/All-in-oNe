@@ -384,7 +384,7 @@ export class AutoUpdateModule implements HubModule {
 
 		updateBtn.onclick = () => {
 			notice.hide();
-			void this.applyUpdate(release);
+			void this.applyUpdate(release).catch((err) => new Notice(`Falha na atualização: ${err instanceof Error ? err.message : String(err)}`, 8000));
 		};
 		dismissBtn.onclick = () => {
 			notice.hide();
