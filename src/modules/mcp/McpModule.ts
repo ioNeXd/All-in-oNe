@@ -53,7 +53,7 @@ export const MCP_DEFAULTS: McpModuleSettings = {
  * MÓDULO MCP
  * ----------
  * Servidor MCP embutido no plugin, vivo apenas enquanto o Obsidian está
- * aberto (ver decisão de arquitetura: o modo "Obsidian fechado" fica de fora
+ * aberto (MCP 2026-07-28 + era 2025; ver decisão de arquitetura: o modo "Obsidian fechado" fica de fora
  * deste plugin, é responsabilidade do projeto de gateway MCP separado do
  * usuário). Transporte: Streamable HTTP (não o HTTP+SSE legado).
  *
@@ -83,7 +83,7 @@ export class McpModule implements HubModule {
 		description:
 			"Expõe o vault para clientes MCP (Claude Desktop, Cursor, etc.) enquanto o Obsidian estiver aberto.",
 		icon: "server",
-		version: "0.2.0",
+		version: "0.3.0",
 		contractVersion: "2.0.0",
 		desktopOnly: true,
 		emits: ["mcp:action-logged", "mcp:server-started", "mcp:server-stopped"],
