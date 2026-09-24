@@ -364,6 +364,13 @@ async function handleRequest(
 				}
 				const args = (rawArgs ?? {}) as Record<string, unknown>;
 				const def = TOOL_DEFINITIONS.find((d) => d.name === toolName);
+				if (!def) {
+					respondError(res, message.id, `Ferramenta desconhecida: ${toolName}`, {
+						jsonRpcCode: JSONRPC_ERRORS.INVALID_PARAMS,
+						httpStatus: 400,
+					});
+					return;
+				}
 				if (def) {
 					const validationError = validateToolArgs(args, def.inputSchema);
 					if (validationError) {
