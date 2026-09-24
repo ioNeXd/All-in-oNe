@@ -49,7 +49,7 @@ src/
 
   main.ts                ← cola com a API real do Obsidian (Plugin)
 
-tests/                   ← 23 suítes, 258 testes — todos importam código real
+tests/                    ← suítes vitest — todos importam código real
   mocks/obsidian.ts      ← stub do pacote "obsidian" (types-only), via alias no vitest
 ```
 
@@ -220,8 +220,8 @@ comando funcional na Paleta — um caminho fora do ciclo de vida. A ponte
 O pacote `obsidian` é **types-only** (sem entry executável — só existe
 dentro do app). Um alias no `vitest.config.ts` aponta `obsidian` para um
 stub mínimo (`tests/mocks/obsidian.ts`) **apenas em runtime de teste**;
-o `tsc` continua nos tipos oficiais e a build não muda. Com isso, as 23
-suítes (258 testes) importam as implementações de verdade — regras como
+o `tsc` continua nos tipos oficiais e a build não muda. Com isso, as
+suítes de teste importam as implementações de verdade — regras como
 `NoteStatus`, `WriteRules`, `pathMatchesFolder` e `validateMcpDraft` são
 testadas contra o código real, e mudanças de comportamento quebram o
 teste na hora, em vez de divergir em silêncio de uma cópia espelhada.
