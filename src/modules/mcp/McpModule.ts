@@ -514,7 +514,7 @@ export class McpModule implements HubModule {
 		}
 
 		try {
-			const result = await this.executeTool(toolName, args);
+			const result = await this.executeTool(toolName, args, settings);
 			this.context?.log(`Ferramenta MCP executada: ${toolName}`, { path: args.path as string });
 			// UM evento por ação (o log de atividade DEDICADO, com o desfecho).
 			// Antes emitia TAMBÉM mcp:action: com os dois em TRACKED_EVENTS do
@@ -558,7 +558,7 @@ export class McpModule implements HubModule {
 	 * ela existe para evitar (ex.: Templates movendo a nota no meio de um
 	 * patch_note vindo de um cliente MCP).
 	 */
-	private async executeTool(toolName: string, args: Record<string, unknown>): Promise<unknown> {
+	private async executeTool(toolName: string, args: Record<string, unknown>, settings: McpModuleSettings): Promise<unknown> {
 		const app = this.context!.app;
 		const vault = app.vault;
 		const write = <T>(path: string, op: () => Promise<T>): Promise<T> =>
@@ -823,6 +823,15 @@ export class McpModule implements HubModule {
 					const newPath = await uniqueVaultPath(app, normalizePath(`${folder}/${safeTitle}.md`));
 					planned.push({ section, newPath });
 				}
+				// Validação de permissão dos destinos GERADOS antes de qualquer
+				// vault.create() — os destinos não estão nos args do usuário,
+				// então collectWriteTargets não os alcança.
+				for (const { newPath } of planned) {
+					if (!this.isWriteAllowed(newPath, settings)) {
+						throw new Error(`split_note: escrita não permitida no destino gerado "${newPath}".`);
+					}
+				}
+
 				// Lock atômico: fonte + todos os destinos.
 				const allPaths = [path, ...planned.map((p) => p.newPath)];
 				await writeMany(allPaths, async () => {

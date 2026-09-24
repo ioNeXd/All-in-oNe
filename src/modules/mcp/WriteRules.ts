@@ -34,7 +34,23 @@ export function pathMatchesFolder(normalizedPath: string, normalizedBase: string
  * uma única fonte da verdade.
  */
 export function collectWriteTargets(args: Record<string, unknown>): string[] {
-	return ["path", ...Object.keys(EXTRA_PATH_ARGS)]
+	// 1) Campos escalares: path, newPath, targetPath (via EXTRA_PATH_ARGS).
+	const scalars = ["path", ...Object.keys(EXTRA_PATH_ARGS)]
 		.map((k) => (args[k] === undefined || args[k] === null ? "" : String(args[k])))
 		.filter(Boolean);
+
+	// 2) Arrays de caminhos: combine_notes.paths[], etc.
+	// Cada elemento é um caminho que a ferramenta pode ler/modificar.
+	const arrays: string[] = [];
+	for (const v of Object.values(args)) {
+		if (Array.isArray(v)) {
+			for (const item of v) {
+				if (item !== undefined && item !== null && item !== "") {
+					arrays.push(String(item));
+				}
+			}
+		}
+	}
+
+	return [...scalars, ...arrays];
 }

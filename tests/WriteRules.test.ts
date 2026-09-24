@@ -52,6 +52,44 @@ describe("collectWriteTargets — alvos das ferramentas de anexo", () => {
 	});
 });
 
+
+describe("collectWriteTargets — arrays de caminhos (combine_notes.paths[])", () => {
+	it("extrai cada elemento de args.paths como alvo", () => {
+		const targets = collectWriteTargets({
+			path: "origem.md",
+			paths: ["Fontes/a.md", "Fontes/b.md", "Fontes/c.md"],
+			targetPath: "Saida/merged.md",
+		});
+		expect(targets).toContain("Fontes/a.md");
+		expect(targets).toContain("Fontes/b.md");
+		expect(targets).toContain("Fontes/c.md");
+		expect(targets).toContain("origem.md");
+		expect(targets).toContain("Saida/merged.md");
+	});
+
+	it("filtra elementos vazios/null do array", () => {
+		const targets = collectWriteTargets({
+			paths: ["a.md", "", null, "b.md"],
+		});
+		expect(targets).toEqual(["a.md", "b.md"]);
+	});
+
+	it("arrays vazios não geram alvos extras", () => {
+		const targets = collectWriteTargets({
+			path: "nota.md",
+			paths: [],
+		});
+		expect(targets).toEqual(["nota.md"]);
+	});
+
+	it("array com paths em pasta bloqueada é detectado", () => {
+		const targets = collectWriteTargets({
+			paths: ["Secretas/note.md", "OK/note.md"],
+		});
+		expect(targets.some((t) => pathMatchesFolder(t, "Secretas"))).toBe(true);
+	});
+});
+
 describe("collectWriteTargets — todos os caminhos que uma chamada pode tocar", () => {
 	it("coleta path, newPath e targetPath presentes", () => {
 		expect(
