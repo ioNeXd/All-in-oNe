@@ -40,7 +40,7 @@ describe("CommandBridge — registro único", () => {
 		bridge.registerCommand("mcp", "restart", "MCP: Reiniciar servidor", () => {});
 
 		expect(commands).toHaveLength(1);
-		expect(commands[0].id).toBe("mcp-restart");
+		expect(commands[0].id).toBe(JSON.stringify(["mcp", "restart"]));
 		expect(commands[0].name).toBe("MCP: Reiniciar servidor");
 		expect(bridge.size).toBe(1);
 	});
@@ -62,9 +62,9 @@ describe("CommandBridge — registro único", () => {
 		bridge.registerCommand("calendar", "today", "Calendário: Hoje", () => {});
 
 		expect(commands.map((c) => c.id)).toEqual([
-			"mcp-restart",
-			"mcp-test",
-			"calendar-today",
+			JSON.stringify(["mcp", "restart"]),
+			JSON.stringify(["mcp", "test"]),
+			JSON.stringify(["calendar", "today"]),
 		]);
 	});
 });
@@ -125,5 +125,18 @@ describe("CommandBridge — callback sempre o MAIS RECENTE", () => {
 
 		expect(first).not.toHaveBeenCalled(); // callback velho NUNCA roda
 		expect(second).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("CommandBridge — chave sem colisão (JSON.stringify)", () => {
+	it("moduleId='a', cmdId='b-c' ≠ moduleId='a-b', cmdId='c'", () => {
+		const { bridge } = makeBridge(["a", "a-b"]);
+		bridge.registerCommand("a", "b-c", "Cmd A", () => {});
+		bridge.registerCommand("a-b", "c", "Cmd B", () => {});
+
+		expect(bridge.size).toBe(2); // duas entradas distintas
+		expect(bridge.has("a", "b-c")).toBe(true);
+		expect(bridge.has("a-b", "c")).toBe(true);
+		expect(bridge.has("a", "c")).toBe(false); // não há colisão
 	});
 });

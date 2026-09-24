@@ -8,6 +8,7 @@ import type { HubModule, ModuleId } from "../src/core/ModuleContract";
 export interface TestModuleOptions {
 	id: ModuleId;
 	contractVersion?: string;
+	onRegister?: (ctx: unknown) => void;
 	onEnable?: () => Promise<void> | void;
 	onDisable?: () => Promise<void> | void;
 	onSettingsChange?: (settings: unknown) => void;
@@ -28,7 +29,7 @@ export function makeTestModule(options: TestModuleOptions): HubModule {
 			emits: [],
 			listensTo: [],
 		},
-		onRegister() {},
+		onRegister: options.onRegister ?? (() => {}),
 		onEnable: options.onEnable ?? (() => {}),
 		onDisable: options.onDisable ?? (() => {}),
 		onSettingsChange: options.onSettingsChange,

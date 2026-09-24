@@ -1,5 +1,6 @@
 import type { TFile, TFolder } from "obsidian";
 import { TFile as TFileClass, normalizePath, Setting, Notice } from "obsidian";
+import * as crypto from "crypto";
 import type {
 	ConfigValidationIssue,
 	HubModule,
@@ -750,6 +751,7 @@ export class McpModule implements HubModule {
 			}
 			case "get_attachment": {
 				const path = normalizePath(String(args.path));
+				assertAttachmentPath(path);
 				const file = vault.getAbstractFileByPath(path);
 				if (!(file instanceof TFileClass)) throw new Error("Anexo não encontrado.");
 				const buffer = await vault.readBinary(file as TFile);
@@ -761,6 +763,7 @@ export class McpModule implements HubModule {
 			}
 			case "put_attachment": {
 				const path = normalizePath(String(args.path));
+				assertAttachmentPath(path);
 				const bytes = decodeBase64(args.base64);
 				// Decisão create/modify DENTRO do lock —
 				// outro processo pode criar/remover/substituir o arquivo.
@@ -841,14 +844,30 @@ export class McpModule implements HubModule {
 				// Lock atômico: fonte + todos os destinos.
 				const allPaths = [path, ...planned.map((p) => p.newPath)];
 				await writeMany(allPaths, async () => {
-					for (const { section, newPath } of planned) {
-						try {
+					// Revalide colisões DENTRO do lock — o estado pode ter mudado.
+					const actuallyCreated: string[] = [];
+					try {
+						for (const { section, newPath } of planned) {
+							// Checa se o arquivo já existe (colisão pós-lock).
+							const existing = vault.getAbstractFileByPath(newPath);
+							if (existing instanceof TFileClass) {
+								throw new Error(
+									`split_note: colisão — "${newPath}" já existe após aquisição do lock.`
+								);
+							}
 							await vault.create(newPath, `${marker}${section}`);
-						} catch (err) {
-							throw new Error(`split_note: falha ao criar "${newPath}": ${describe(err)}`);
+							actuallyCreated.push(newPath);
 						}
-						created.push(newPath);
+					} catch (err) {
+						// Rollback: remove SOMENTE os arquivos criados por ESTA
+						// operação — nunca toque em arquivos pré-existentes.
+						for (const p of actuallyCreated) {
+							const f = vault.getAbstractFileByPath(p);
+							if (f) await vault.trash(f, true).catch(() => void 0);
+						}
+						throw err; // preserva o erro original
 					}
+					created.push(...actuallyCreated);
 				});
 				return { created, skipped };
 			}
@@ -857,8 +876,15 @@ export class McpModule implements HubModule {
 				const target = normalizePath(String(args.targetPath));
 				if (paths.length === 0) throw new Error("combine_notes: informe ao menos uma nota em `paths`.");
 
+				// Dedup preservando a ordem original.
+				const normalizedPaths = [...new Set(paths.map((p) => normalizePath(String(p))))];
+
+				// O destino não pode ser uma das entradas — operação ambígua.
+				if (normalizedPaths.includes(target)) {
+					throw new Error(`combine_notes: o destino "${target}" não pode ser uma das notas de entrada.`);
+				}
+
 				// Lock atômico: todas as fontes + destino.
-				const normalizedPaths = paths.map((p) => normalizePath(String(p)));
 				const allPaths = [...normalizedPaths, target];
 				const result = await writeMany(allPaths, async () => {
 					// Re-lê fontes DENTRO do lock — entre a primeira leitura
@@ -971,6 +997,19 @@ function toArrayBuffer(buffer: Buffer): ArrayBuffer {
 	return out;
 }
 
+
+/**
+ * Validação centralizada de caminhos de attachment.
+ * Rejeita extensão `.md` (case-insensitive) — put_attachment e get_attachment
+ * não devem operar em notas Markdown (usar read_note/edit_note/append_note).
+ */
+export function assertAttachmentPath(path: string): void {
+	if (path.toLowerCase().endsWith(".md")) {
+		throw new Error(
+			`Caminho de attachment inválido: "${path}" — notas Markdown não são anexos. Use read_note, edit_note ou append_note.`
+		);
+	}
+}
 
 function describe(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);

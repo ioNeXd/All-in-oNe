@@ -1,4 +1,5 @@
 import * as http from "http";
+import * as crypto from "crypto";
 import { negotiateToolsApiVersion } from "./ToolsApiVersion";
 import { TOOL_DEFINITIONS } from "./ToolSchemas";
 import { AuthThrottle, identityOf } from "./AuthThrottle";
@@ -195,10 +196,33 @@ async function handleRequest(
 		}
 	}
 
-	if (hasAuthGate && authHeader !== `Bearer ${expectedToken}`) {
-		if (throttled) authThrottle.recordFailure(identity!);
-		res.writeHead(401).end(JSON.stringify({ error: "Token inválido." }));
-		return;
+	if (hasAuthGate) {
+		// Extração do token recebido e comparação em tempo constante.
+		// Validação do prefixo Bearer ANTES — rejeita qualquer formato diferente
+		// (bearer, token-only, schema desconhecido) sem comparar o segredo.
+		const BEARER_PREFIX = "Bearer ";
+		if (!authHeader.startsWith(BEARER_PREFIX)) {
+			if (throttled) authThrottle.recordFailure(identity!);
+			res.writeHead(401).end(JSON.stringify({ error: "Token inválido." }));
+			return;
+		}
+		const receivedToken = authHeader.slice(BEARER_PREFIX.length);
+		const expectedBuf = Buffer.from(expectedToken, "utf8");
+		const receivedBuf = Buffer.from(receivedToken, "utf8");
+		// Tamanho diferente → inválido, mas comparação em tempo constante
+		// precisa de buffers do mesmo tamanho. Usa um buffer do tamanho
+		// do esperado (preenchido com zeros) para ambos.
+		const maxLen = Math.max(expectedBuf.length, receivedBuf.length);
+		const a = Buffer.alloc(maxLen);
+		const b = Buffer.alloc(maxLen);
+		expectedBuf.copy(a);
+		receivedBuf.copy(b);
+		const match = crypto.timingSafeEqual(a, b) && expectedBuf.length === receivedBuf.length;
+		if (!match) {
+			if (throttled) authThrottle.recordFailure(identity!);
+			res.writeHead(401).end(JSON.stringify({ error: "Token inválido." }));
+			return;
+		}
 	}
 	if (throttled) authThrottle.recordSuccess(identity!);
 

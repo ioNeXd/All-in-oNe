@@ -107,7 +107,20 @@ export class HubCore {
 
 		const context = this.buildContext(module.manifest.id);
 		this.moduleContexts.set(module.manifest.id, context);
-		module.onRegister(context);
+
+		try {
+			module.onRegister(context);
+		} catch (err) {
+			console.error(`[All iₙ oNe] Módulo "${module.manifest.id}" falhou no onRegister:`, err);
+			this.lastEnableErrors.set(module.manifest.id, describeError(err));
+			void this.bus.emit(
+				"core:module-error",
+				{ moduleId: module.manifest.id, eventName: "onRegister", error: describeError(err) },
+				"core"
+			);
+			// Módulo continua registrado (para diagnóstico), mas NÃO habilitado.
+			return;
+		}
 
 		const shouldEnable = this.enabledModuleIds.has(module.manifest.id) && !this.safeMode;
 		if (shouldEnable) {

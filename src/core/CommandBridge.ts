@@ -27,7 +27,7 @@ import type { ModuleId } from "./ModuleContract";
  * via `context.registerCommand` (HubCore.buildContext).
  */
 export class CommandBridge {
-	/** Chave "moduleId-cmdId" -> callback mais recente registrado pelo módulo. */
+	/** Chave [moduleId, cmdId] -> callback mais recente registrado pelo módulo. */
 	private callbacks = new Map<string, () => void>();
 
 	constructor(
@@ -46,7 +46,7 @@ export class CommandBridge {
 
 	/** Chamado pelo HubCore via context.registerCommand(id, name, callback). */
 	registerCommand(moduleId: ModuleId, cmdId: string, name: string, callback: () => void): void {
-		const key = `${moduleId}-${cmdId}`;
+		const key = JSON.stringify([moduleId, cmdId]);
 		const isNew = !this.callbacks.has(key);
 		this.callbacks.set(key, callback);
 		if (!isNew) return; // re-registro: só o callback é atualizado, sem duplicar entrada
@@ -68,6 +68,6 @@ export class CommandBridge {
 	}
 
 	has(moduleId: ModuleId, cmdId: string): boolean {
-		return this.callbacks.has(`${moduleId}-${cmdId}`);
+		return this.callbacks.has(JSON.stringify([moduleId, cmdId]));
 	}
 }
