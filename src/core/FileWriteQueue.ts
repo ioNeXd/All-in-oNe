@@ -12,19 +12,31 @@
  * rodem em sequência, nunca em paralelo — sem bloquear operações em arquivos
  * diferentes, que continuam concorrentes normalmente.
  *
- * `runMany(paths, operation)` serializa uma operação que toca MÚLTIPLOS
- * caminhos simultaneamente (rename/move A→B adquire ambos os locks).
- * Chaves são ordenadas para evitar deadlock entre renames cruzados.
+ * MECANISMO: claim-first + delegate.
  *
- * Uso: `await fileWriteQueue.run(path, () => app.vault.modify(file, novoConteudo))`
+ *   run(path, op) delega a runMany([path], op) — mecanismo idêntico.
+ *   runMany(paths, op):
+ *     1. Dedup + sort das chaves (deadlock-free, determinístico).
+ *     2. REGISTRA claims no Map PRIMEIRO (write-before-read).
+ *        Claims são promises que resolvem quando a operação encadeada
+ *        (não a imediata) termina — incluindo a fila existente da chave.
+ *     3. LÊ filas existentes e encadeia atrás delas (read-after-write).
+ *     4. operation() roda só quando TODA fila anterior drou + claim drou.
+ *     5. Limpeza automática quando a fila drou sem novo claim.
+ *
+ * Por que claim-first:
+ *   No passo 2, os claims já estão no Map antes do passo 3 ler. Qualquer
+ *   chamada concorrente que execute no mesmo tick síncrono encontra os claims
+ *   e se encadeia — nunca há duas chamadas lendo o Map vazio ao mesmo tempo.
+ *
+ * Uso: await fileWriteQueue.run(path, () => app.vault.modify(file, content))
  */
 export class FileWriteQueue {
 	private queues = new Map<string, Promise<unknown>>();
 
 	/**
-	 * Serializa uma operação num caminho único. Delega a runMany para
-	 * compartilhar o mecanismo de locking — a aquisição é atômica porque
-	 * todas as .set() no Map são síncronas (sem await) antes do return.
+	 * Serializa uma operação num caminho único. Delega a runMany —
+	 * mesmo mecanismo de locking, sem código duplicado.
 	 */
 	run<T>(path: string, operation: () => Promise<T>): Promise<T> {
 		return this.runMany([path], operation);
@@ -33,38 +45,46 @@ export class FileWriteQueue {
 	/**
 	 * Serializa uma operação que toca múltiplos paths (ex.: rename A→B).
 	 *
-	 * LOCKING ATÔMICO: todas as leituras (.get) e escritas (.set) no Map
-	 * de filas ocorrem no mesmo tick síncrono — sem await entre elas.
-	 * Qualquer chamada concorrente (run ou runMany) que execute no próximo
-	 * microtask já vê os locks registrados e espera a resolução.
+	 * CLAIM-FIRST: o Map é atualizado ANTES de ler filas existentes.
+	 * Isso garante que chamadas concorrentes veem os claims e se encadeiam.
 	 *
-	 * Chaves ordenadas (sort) para deadlock-free entre renames cruzados.
-	 * Duplicatas removidas (Set) para não encadear a mesma fila duas vezes.
+	 * Dedup + sort: [B, A] e [A, B] produzem a mesma ordem → sem deadlock.
 	 */
 	runMany<T>(paths: string[], operation: () => Promise<T>): Promise<T> {
 		const keys = [...new Set(paths)].sort();
 
-		// 1) Leitura atômica: coleta o estado atual das filas para todas as chaves.
-		//    Tudo síncrono — nenhum await aqui.
-		let previous = Promise.resolve();
+		// --- FASE 1-2: CLAIM (write-before-read) ---
+		// Monta claims encadeando na ordem das chaves, depois registra no Map.
+		// Cada claim aguarda: (a) a fila existente da chave E (b) o claim
+		// anterior dentro do mesmo conjunto. Isso serializa internamente.
+		const claimPromises: Promise<unknown>[] = [];
+		let chainHead: Promise<unknown> = Promise.resolve();
 		for (const key of keys) {
-			const queued = this.queues.get(key) ?? Promise.resolve();
-			previous = Promise.all([previous, queued]).then(() => undefined);
+			const existing = this.queues.get(key);
+			const base = existing ?? Promise.resolve();
+			chainHead = chainHead.then(() => base).then(() => undefined);
+			claimPromises.push(chainHead);
 		}
 
-		// 2) Encadeia a operação: só roda quando TODAS as filas anteriores drenaram.
-		const current = previous.then(operation, operation);
+		// Registra claims no Map ANTES de qualquer leitura futura.
+		// Chamadas concorrentes neste mesmo tick síncrono verão os claims.
+		for (let i = 0; i < keys.length; i++) {
+			this.queues.set(keys[i], claimPromises[i]);
+		}
+
+		// --- FASE 3: OPERAÇÃO ---
+		// chainHead aguarda todas as filas existentes + claims anteriores.
+		const current = chainHead.then(operation, operation);
 		const chained = current.catch(() => undefined);
 
-		// 3) Escrita atômica: registra os locks ANTES de qualquer coisa observar.
-		//    Mesmo tick síncrono das leituras — impossível interleaving.
+		// Substitui claims pela promise final (inclui a operação).
+		// Qualquer run/runMany futuro encontra chained e se encadeia.
 		for (const key of keys) {
 			this.queues.set(key, chained);
 		}
 
-		// 4) Limpeza: remove do Map quando ESTA promessa drenar e ninguém mais
-			//    assumiu a chave. Condição `still === chained` garante que um run
-		//    novo encadeado na frente não é apagado acidentalmente.
+		// --- FASE 4: CLEANUP ---
+		// Remove do Map quando ESTA promessa drou e ninguém mais assumiu.
 		void chained.then(() => {
 			for (const key of keys) {
 				if (this.queues.get(key) === chained) this.queues.delete(key);
