@@ -424,6 +424,46 @@ function respond(res: http.ServerResponse, id: unknown, result: unknown): void {
 	res.writeHead(200).end(JSON.stringify({ jsonrpc: "2.0", id, result }));
 }
 
+function validateModernRequest(req: http.IncomingMessage, message: { method?: string; params?: Record<string, unknown> }): string | null {
+	if (req.headers["mcp-protocol-version"] !== MODERN_PROTOCOL_VERSION) return "MCP-Protocol-Version inválido.";
+	if (req.headers["mcp-method"] !== message.method) return "Mcp-Method deve corresponder ao método JSON-RPC.";
+	const meta = message.params?._meta;
+	if (meta === null || typeof meta !== "object" || Array.isArray(meta)) return "params._meta é obrigatório na era MCP 2026-07-28.";
+	const m = meta as Record<string, unknown>;
+	if (m[CLIENT_PROTOCOL_META_KEY] !== MODERN_PROTOCOL_VERSION) return "A versão em params._meta não corresponde a 2026-07-28.";
+	const caps = m[CLIENT_CAPABILITIES_META_KEY];
+	if (caps === null || typeof caps !== "object" || Array.isArray(caps)) return "clientCapabilities deve ser um objeto.";
+	const info = m[CLIENT_INFO_META_KEY];
+	if (info !== undefined && (info === null || typeof info !== "object" || Array.isArray(info) ||
+		typeof (info as Record<string, unknown>).name !== "string" ||
+		typeof (info as Record<string, unknown>).version !== "string")) return "clientInfo inválido.";
+	if (message.method === "tools/call") {
+		const name = message.params?.name;
+		if (typeof name !== "string" || req.headers["mcp-name"] !== name) return "Mcp-Name deve corresponder a params.name.";
+	} else if (req.headers["mcp-name"] !== undefined) {
+		return "Mcp-Name não é permitido neste método.";
+	}
+	const accept = req.headers["accept"] ?? "";
+	const parts = accept.split(",").map((p) => p.split(";")[0].trim().toLowerCase());
+	if (!parts.includes("application/json") || !parts.includes("text/event-stream")) {
+		return "Accept deve incluir application/json e text/event-stream.";
+	}
+	return null;
+}
+
+function respondModern(res: http.ServerResponse, id: unknown, result: Record<string, unknown>): void {
+	res.writeHead(200).end(JSON.stringify({
+		jsonrpc: "2.0",
+		id,
+		result: {
+			...result,
+			_meta: { ...(result._meta as Record<string, unknown> | undefined), [SERVER_INFO_META_KEY]: MODERN_SERVER_INFO },
+		},
+	}));
+}
+
+const MODERN_SERVER_INFO = Object.freeze({ name: "All iₙ oNe", version: "0.2.0" });
+
 function respondError(
 	res: http.ServerResponse,
 	id: unknown,
