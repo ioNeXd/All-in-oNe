@@ -648,9 +648,11 @@ export class McpModule implements HubModule {
 			}
 			case "delete_note": {
 				const path = validateVaultPath(String(args.path));
-				const file = vault.getAbstractFileByPath(path);
-				if (!(file instanceof TFileClass) || file.extension.toLowerCase() !== "md") throw new Error("Nota não encontrada.");
-				await write(path, () => vault.trash(file, true)); // vai para a lixeira, nunca exclusão direta (rede de segurança)
+				await write(path, async () => {
+					const file = vault.getAbstractFileByPath(path);
+					if (!(file instanceof TFileClass) || file.extension.toLowerCase() !== "md") throw new Error("Nota não encontrada.");
+					await vault.trash(file, true); // vai para a lixeira, nunca exclusão direta
+				});
 				return { path };
 			}
 			case "list_folder": {
