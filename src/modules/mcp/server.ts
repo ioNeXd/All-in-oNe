@@ -22,13 +22,12 @@ import { AuthThrottle, identityOf } from "./AuthThrottle";
  *   ✔ Negociação de versão da API de ferramentas (toolsApiVersion)
  *   ✔ Validação de argumentos contra inputSchema (required + type)
  *   ✔ Autenticação Bearer + throttling + rate limiting
+ *   ✔ Validação de Content-Type (415) e Accept (406)
  *
  * O que NÃO faz (e por quê):
  *   ✘ GET/SSE — notificações server-initiated; sem elas, GET é inútil
  *   ✘ Headers Mcp-Method/Mcp-Name — requisitos 2026; clientes atuais
  *     não os enviam, e o spec permite omiti-los no POST
- *   ✘ Accept/Content-Type validation — o spec exige, mas clientes
- *     reais (Claude Desktop, Cursor) já mandam os headers corretos
  *
  * Clientes suportados e testados:
  *   • Claude Desktop (macOS/Windows)
