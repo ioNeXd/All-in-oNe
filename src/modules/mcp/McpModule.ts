@@ -566,6 +566,15 @@ export class McpModule implements HubModule {
 				? this.context!.fileWriteQueueRun(path, op)
 				: op();
 
+		// Lock multi-path: adquire locks de TODOS os paths antes de executar.
+		// rename_note precisa proteger A e B; combine_notes precisa proteger
+		// todas as fontes + destino. Sem isso, um módulo concorrente pode
+		// mexer no destino enquanto a operação composta ainda está acontecendo.
+		const writeMany = <T>(paths: string[], op: () => Promise<T>): Promise<T> =>
+			WRITE_TOOLS.has(toolName)
+				? this.context!.fileWriteQueueRunMany(paths, op)
+				: op();
+
 		switch (toolName) {
 			case "read_note": {
 				const file = vault.getAbstractFileByPath(normalizePath(String(args.path)));
@@ -660,7 +669,7 @@ export class McpModule implements HubModule {
 				const newPath = normalizePath(String(args.newPath));
 				const file = vault.getAbstractFileByPath(path);
 				if (!file) throw new Error("Nota não encontrada.");
-				await write(path, () => app.fileManager.renameFile(file, newPath));
+				await writeMany([path, newPath], () => app.fileManager.renameFile(file, newPath));
 				return { from: path, to: newPath };
 			}
 			case "patch_note": {
@@ -800,6 +809,10 @@ export class McpModule implements HubModule {
 				const skipped: { title: string; reason: string }[] = [];
 
 				const sections = content.split(new RegExp(`^${"#".repeat(level)} `, "m")).slice(1);
+				// Pré-computa todos os destinos antes de qualquer escrita —
+				// uniqueVaultPath pode ser assíncrono, mas não precisa de lock
+				// porque ainda não estamos escrevendo (só resolvendo nomes).
+				const planned: { section: string; newPath: string }[] = [];
 				for (const section of sections) {
 					const title = section.split("\n")[0].trim();
 					if (!title) {
@@ -807,18 +820,21 @@ export class McpModule implements HubModule {
 						continue;
 					}
 					const safeTitle = title.replace(/[\\/:*?"<>|]/g, "-");
-					// Colisão de destino: em vez de vault.create falhar (e o catch
-					// antigo engolir o motivo), deriva "Título 2.md" — a mesma
-					// regra do Ciclo de Vida/Templates. Falha real (permissão,
-					// disco) NÃO é engolida: vira erro da tool com o título nela.
 					const newPath = await uniqueVaultPath(app, normalizePath(`${folder}/${safeTitle}.md`));
-					try {
-						await write(newPath, () => vault.create(newPath, `${marker}${section}`));
-					} catch (err) {
-						throw new Error(`split_note: falha ao criar "${newPath}": ${describe(err)}`);
-					}
-					created.push(newPath);
+					planned.push({ section, newPath });
 				}
+				// Lock atômico: fonte + todos os destinos.
+				const allPaths = [path, ...planned.map((p) => p.newPath)];
+				await writeMany(allPaths, async () => {
+					for (const { section, newPath } of planned) {
+						try {
+							await vault.create(newPath, `${marker}${section}`);
+						} catch (err) {
+							throw new Error(`split_note: falha ao criar "${newPath}": ${describe(err)}`);
+						}
+						created.push(newPath);
+					}
+				});
 				return { created, skipped };
 			}
 			case "combine_notes": {
@@ -826,36 +842,41 @@ export class McpModule implements HubModule {
 				const target = normalizePath(String(args.targetPath));
 				if (paths.length === 0) throw new Error("combine_notes: informe ao menos uma nota em `paths`.");
 
-				const parts: string[] = [];
-				const missing: string[] = [];
-				for (const raw of paths) {
-					const file = vault.getAbstractFileByPath(normalizePath(raw));
-					if (file instanceof TFileClass) parts.push(await vault.read(file as TFile));
-					else missing.push(raw);
-				}
-				if (parts.length === 0) {
-					throw new Error(
-						`combine_notes: nenhuma das notas informadas foi encontrada (${missing.join(", ")}).`
-					);
-				}
-
-				// Destino existente era o pior caso do caminho antigo: vault.create
-				// lançava "file already exists" de forma opaca. Agora: existente é
-				// SOBRESCRITO de forma explícita (modify, com created/overwritten
-				// na resposta); inexistente cria (com pasta-pai garantida).
-				const existing = vault.getAbstractFileByPath(target);
-				if (existing instanceof TFileClass) {
-					await write(target, () => vault.modify(existing as TFile, parts.join("\n\n---\n\n")));
-				} else {
-					const folder = target.substring(0, target.lastIndexOf("/"));
-					if (folder) await ensureVaultFolder(app, folder);
-					await write(target, () => vault.create(target, parts.join("\n\n---\n\n")));
-				}
+				// Lock atômico: todas as fontes + destino.
+				const normalizedPaths = paths.map((p) => normalizePath(String(p)));
+				const allPaths = [...normalizedPaths, target];
+				const result = await writeMany(allPaths, async () => {
+					// Re-lê fontes DENTRO do lock — entre a primeira leitura
+					// e o lock podia ter mudado. Leitura sob lock garante
+					// consistência: as fontes que combinamos são as que
+					// existiam quando o lock foi adquirido.
+					const lockedParts: string[] = [];
+					const lockedMissing: string[] = [];
+					for (const raw of normalizedPaths) {
+						const f = vault.getAbstractFileByPath(raw);
+						if (f instanceof TFileClass) lockedParts.push(await vault.read(f as TFile));
+						else lockedMissing.push(raw);
+					}
+					if (lockedParts.length === 0) {
+						throw new Error(
+							`combine_notes: nenhuma das notas informadas foi encontrada (${lockedMissing.join(", ")}).`
+						);
+					}
+					const existing = vault.getAbstractFileByPath(target);
+					if (existing instanceof TFileClass) {
+						await vault.modify(existing as TFile, lockedParts.join("\n\n---\n\n"));
+					} else {
+						const folder = target.substring(0, target.lastIndexOf("/"));
+						if (folder) await ensureVaultFolder(app, folder);
+						await vault.create(target, lockedParts.join("\n\n---\n\n"));
+					}
+					return { lockedParts, lockedMissing, overwritten: existing instanceof TFileClass };
+				});
 				return {
 					target,
-					combined: parts.length,
-					missing,
-					overwritten: existing instanceof TFileClass,
+					combined: result.lockedParts.length,
+					missing: result.lockedMissing,
+					overwritten: result.overwritten,
 				};
 			}
 			case "dataview_query": {

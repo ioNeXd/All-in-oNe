@@ -145,6 +145,7 @@ export class HubCore {
 				this.onRegisterCommand?.(id, cmdId, name, callback);
 			},
 			fileWriteQueueRun: (path, operation) => this.fileWriteQueue.run(path, operation),
+			fileWriteQueueRunMany: (paths, operation) => this.fileWriteQueue.runMany(paths, operation),
 			updatePaths: async (patch) => {
 				const current = this.settings.get();
 				return this.settings.save({ ...current, paths: { ...current.paths, ...patch } });

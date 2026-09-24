@@ -137,6 +137,13 @@ export interface ModuleContext {
 	 */
 	fileWriteQueueRun: <T>(path: string, operation: () => Promise<T>) => Promise<T>;
 	/**
+	 * Serializa operações que tocam MÚLTIPLOS caminhos (ex.: rename A→B).
+	 * Adquire locks de todos os paths antes de executar a operação —
+	 * previne race conditions onde outro módulo mexe em B enquanto o rename
+	 * ainda está acontecendo. Ver FileWriteQueue.runMany.
+	 */
+	fileWriteQueueRunMany: <T>(paths: string[], operation: () => Promise<T>) => Promise<T>;
+	/**
 	 * Atualiza `settings.paths` (caminhos globais, compartilhados entre
 	 * módulos) com a mesma validação de conflito usada pela tela geral do
 	 * Lobby. Permite que um módulo ofereça, dentro do seu próprio painel, a
