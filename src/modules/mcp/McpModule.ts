@@ -70,7 +70,7 @@ function sanitizeMcpError(msg: string): string {
 	let safe = msg.replace(/[A-Z]:\\[^\s"']+/gi, "[caminho interno]");
 	safe = safe.replace(/(?<!https?:)\/[^\s"']+/g, "[caminho interno]");
 	// Remove stack traces (linhas que começam com "at " ou "Error:")
-	safe = safe.split("\n").filter(l => !l.trim().startsWith("at ") && !l.trim().startsWith("Error:")).join(" ");
+	safe = safe.split("\n").filter(l => !l.trim().startsWith("at ")).join(" ").replace(/^Error:\s*/i, "");
 	// Trunca se ainda muito longo
 	if (safe.length > 200) safe = safe.slice(0, 200) + "...";
 	return safe || "Erro interno na execução da ferramenta.";
