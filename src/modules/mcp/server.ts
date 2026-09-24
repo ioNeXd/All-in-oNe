@@ -311,16 +311,88 @@ async function handleRequest(
 		return;
 	}
 
-	// Notificação JSON-RPC (requisição SEM id — ex.: notifications/initialized,
-	// que clientes reais mandam logo após o initialize): por definição não tem
-	// resposta. O Streamable HTTP usa 202 Accepted sem corpo — responder com
-	// um erro aqui confundiria o cliente no meio do handshake.
+	// Notificações não têm resposta. Na era moderna ainda validamos o envelope
+	// antes de aceitar a notificação, pois cada requisição é autocontida.
 	if (message.id === undefined) {
+		if (req.headers["mcp-protocol-version"] === MODERN_PROTOCOL_VERSION) {
+			const modernError = validateModernRequest(req, message);
+			if (modernError) {
+				res.writeHead(400).end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32020, message: modernError } }));
+				return;
+			}
+		}
 		res.writeHead(202).end();
 		return;
 	}
 
 	res.setHeader("Content-Type", "application/json");
+
+	if (req.headers["mcp-protocol-version"] === MODERN_PROTOCOL_VERSION) {
+		const modernError = validateModernRequest(req, message);
+		if (modernError) {
+			respondError(res, message.id, modernError, { code: "HEADER_MISMATCH", jsonRpcCode: -32020 });
+			return;
+		}
+
+		switch (message.method) {
+			case "server/discover":
+				respondModern(res, message.id, {
+					resultType: "complete",
+					supportedVersions: [MODERN_PROTOCOL_VERSION],
+					capabilities: { tools: { listChanged: false } },
+					ttlMs: 60 * 60 * 1000,
+					cacheScope: "private",
+				});
+				return;
+			case "tools/list":
+				respondModern(res, message.id, {
+					resultType: "complete",
+					tools: TOOL_DEFINITIONS,
+					ttlMs: MODERN_TTL_MS,
+					cacheScope: "private",
+				});
+				return;
+			case "tools/call": {
+				const toolName = String(message.params?.name ?? "");
+				const rawArgs = message.params?.arguments;
+				if (rawArgs !== undefined && rawArgs !== null && (typeof rawArgs !== "object" || Array.isArray(rawArgs))) {
+					respondError(res, message.id, "O campo 'arguments' deve ser um objeto.", {
+						code: "INVALID_PARAMS",
+						jsonRpcCode: JSONRPC_ERRORS.INVALID_PARAMS,
+					});
+					return;
+				}
+				const args = (rawArgs ?? {}) as Record<string, unknown>;
+				const def = TOOL_DEFINITIONS.find((d) => d.name === toolName);
+				if (def) {
+					const validationError = validateToolArgs(args, def.inputSchema);
+					if (validationError) {
+						respondError(res, message.id, validationError, {
+							code: "INVALID_PARAMS",
+							jsonRpcCode: JSONRPC_ERRORS.INVALID_PARAMS,
+						});
+						return;
+					}
+				}
+				const result = await options.handleToolCall(toolName, args);
+				respondModern(res, message.id, toToolResult(result.ok ? result.result : (result.error ?? "Erro desconhecido."), !result.ok));
+				return;
+			}
+			default:
+				respondError(res, message.id, `Método não suportado na era MCP 2026-07-28: ${message.method}`, {
+					jsonRpcCode: JSONRPC_ERRORS.METHOD_NOT_FOUND,
+				});
+		}
+		return;
+	}
+
+	if (req.headers["mcp-protocol-version"] && !(SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(req.headers["mcp-protocol-version"]!)) {
+		respondError(res, message.id, "Versão do protocolo não suportada.", {
+			code: "UNSUPPORTED_PROTOCOL_VERSION",
+			jsonRpcCode: -32022,
+		});
+		return;
+	}
 
 	switch (message.method) {
 		case "initialize": {
