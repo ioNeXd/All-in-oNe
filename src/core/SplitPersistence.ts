@@ -4,87 +4,63 @@ import { createDefaultSettings, type HubSettings } from "./types";
 /**
  * PERSISTÊNCIA SPLIT — data.json PRINCIPAL + UM ARQUIVO POR MÓDULO
  * ------------------------------------------------------------------
- * Todo updateSettings regravava o data.json INTEIRO. Com o write-behind do
- * Histórico e das Notificações (flush a cada ~2s com arrays grandes dentro
- * de modules.*), um vault ativo reescrevia o JSON completo — config de todos
- * os outros módulos, paths, sync — várias vezes por minuto: I/O desnecessário
- * e data.json inchado para o sync do vault.
- *
  * Layout:
- *   data.json                    → tudo, MENOS as fatias dos módulos
- *                                  splitados (chaves com `{}` de stub —
- *                                  compatibilidade de leitura e rollback)
- *   data.modules/<moduleId>.json → a fatia do módulo, gravada só quando
- *                                  aquela fatia muda
+ *   data.json                    → tudo, MENOS as fatias dos módulos splitados
+ *   data.modules/<moduleId>.json → a fatia do módulo, gravada só quando muda
  *
  * VERSION STAMPING (_v):
- *   Cada arquivo (data.json + cada módulo) carrega um campo _v (number).
- *   persistVersioned grava todos com o MESMO _v. Se crash no meio, _v
- *   permite detectar qual arquivo ficou para trás. No loadMain, se um
- *   módulo tem _v > data.json, o dado do módulo é mais recente e aceito
- *   (merge overlays o stub). Se _v < data.json, o módulo é obsoleto e
- *   o stub do main prevalece.
+ *   Cada arquivo carrega um campo _v (number). persistVersioned grava todos
+ *   com o MESMO _v. Se crash no meio, _v permite detectar inconsistência.
  *
- * Os arquivos vivem na PASTA DO PLUGIN (`<vault>/.obsidian/plugins/<id>/`) —
- * fora do vault do usuário, não poluem o sync das notas e seguem no mesmo
- * lugar do data.json.
+ *   Na leitura:
+ *     - Calcula o _v MÁXIMO entre data.json e todos os arquivos splitados.
+ *     - Qualquer arquivo com _v < máximo é descartado (stale after crash).
+ *     - Se algum arquivo tem _v significativamente diferente, sinaliza
+ *       corrupção potencial mas aceita o snapshot mais recente.
+ *     - Arquivos sem _v são aceitos (backward compat).
+ *
+ *   NUNCA monta silenciosamente uma config híbrida de versões incompatíveis.
  */
 
 export const MODULES_DIR = "data.modules";
-/** Campo de versão em cada arquivo persistido — detecta snapshots inconsistentes. */
 export const VERSION_KEY = "_v";
 
-/** Módulos cuja fatia vai para arquivo próprio (os de write-behind pesado). */
 export const SPLIT_MODULE_IDS = ["history", "notifications"] as const;
 
 export interface SplitPersistenceHandle {
-	/** data.json inteiro, SEM as fatias splitadas (stubs `{}` no lugar). */
 	loadMain: () => Promise<HubSettings | null>;
 	persistMain: (data: HubSettings) => Promise<void>;
-	/** Fatia do módulo — null se o arquivo ainda não existe. */
 	loadModule: (moduleId: string) => Promise<Record<string, unknown> | null>;
 	persistModule: (moduleId: string, slice: Record<string, unknown>) => Promise<void>;
-	/**
-	 * Grava main + todas as fatias com o MESMO _v. Se crash no meio,
-	 * _v permite detectar inconsistência no próximo boot.
-	 */
 	persistVersioned: (main: HubSettings, slices: Map<string, Record<string, unknown>>, version: number) => Promise<void>;
-	/** Versão detectada no último loadMain (null = sem versão no disco). */
 	lastVersion: number | null;
-	/** Se true, algum arquivo de dados existe mas não pôde ser lido. */
 	readCorrupted: boolean;
-	/** Caminhos dos arquivos que falharam ao ler (para diagnóstico/backup). */
 	corruptedPaths: string[];
+	/**
+	 * true quando a última leitura detectou arquivos com versões incompatíveis.
+	 * A config carregada usa o snapshot mais recente, mas o flag sinaliza
+	 * que algum arquivo ficou para trás (crash entre gravações).
+	 */
+	versionInconsistencyDetected: boolean;
 }
 
-/** Caminho do arquivo de um módulo, relativo à pasta do plugin. */
 export function moduleFilePath(moduleId: string): string {
 	return `${MODULES_DIR}/${moduleId}.json`;
 }
 
-/**
- * Substitui as fatias splitadas por stubs `{}` no objeto a gravar no
- * data.json — versões antigas (ou um rollback) continuam lendo o arquivo
- * sem quebrar, só sem os dados grandes (que estão nos arquivos por módulo).
- */
 export function stubSlices(settings: HubSettings, ids: readonly string[]): HubSettings {
 	const modules = { ...settings.modules };
 	for (const id of ids) modules[id] = {};
 	return { ...settings, modules };
 }
 
-/**
- * Cria o handle de persistência split sobre o DataAdapter do Obsidian.
- * A pasta do plugin (`this.plugin.manifest.dir`) é o mesmo lugar do
- * data.json — o adapter do app resolve caminhos relativos a ele a partir
- * da raiz do vault, então o caminho completo é montado aqui.
- */
 export function createSplitPersistence(app: App, pluginDir: string): SplitPersistenceHandle {
 	const adapter = app.vault.adapter;
 
 	let readCorrupted = false;
 	const corruptedPaths: string[] = [];
 	let detectedVersion: number | null = null;
+	let versionInconsistency = false;
 
 	const readFile = async <T>(path: string): Promise<T | null> => {
 		if (!(await adapter.exists(path))) return null;
@@ -111,7 +87,8 @@ export function createSplitPersistence(app: App, pluginDir: string): SplitPersis
 			return null;
 		}
 	};
-	const writeFile = async (path: string, data: unknown): Promise<void> => {
+
+	const writeFileSafe = async (path: string, data: unknown): Promise<void> => {
 		const folder = path.substring(0, path.lastIndexOf("/"));
 		if (folder && !(await adapter.exists(folder))) {
 			await adapter.mkdir(folder);
@@ -126,31 +103,60 @@ export function createSplitPersistence(app: App, pluginDir: string): SplitPersis
 			const main = await readFile<Record<string, unknown>>(absolute("data.json"));
 			if (!main) return null;
 
-			detectedVersion = (main[VERSION_KEY] as number | undefined) ?? null;
+			const mainVersion = (main[VERSION_KEY] as number | undefined) ?? null;
 
-			// Reconstitui as fatias a partir dos arquivos por módulo.
-			// Version check: se um módulo tem _v > main, o crash ocorreu
-			// entre a gravação do módulo e do principal — o dado do módulo
-			// é mais recente e aceito (merge overlays o stub).
-			// Se _v do módulo < _v do main, módulo obsoleto — usa stub.
-			const modules: Record<string, Record<string, unknown>> = { ...(main.modules as Record<string, Record<string, unknown>> ?? {}) };
+			// FASE 1: Coleta versões de TODOS os arquivos.
+			const sliceData = new Map<string, { raw: Record<string, unknown> | null; version: number | null }>();
 			for (const id of SPLIT_MODULE_IDS) {
-				const slice = (await readFile<Record<string, unknown>>(absolute(moduleFilePath(id)))) ?? {};
-				const sliceVersion = (slice[VERSION_KEY] as number | undefined) ?? null;
+				const sliceRaw = await readFile<Record<string, unknown>>(absolute(moduleFilePath(id)));
+				const sliceVersion = (sliceRaw?.[VERSION_KEY] as number | undefined) ?? null;
+				sliceData.set(id, { raw: sliceRaw, version: sliceVersion });
+			}
 
-				if (sliceVersion != null && detectedVersion != null && sliceVersion > detectedVersion) {
+			// FASE 2: Calcula o _v MÁXIMO entre todos os arquivos.
+			const allVersions: number[] = [];
+			if (mainVersion != null) allVersions.push(mainVersion);
+			for (const entry of sliceData.values()) {
+				if (entry.version != null) allVersions.push(entry.version);
+			}
+			const maxVersion = allVersions.length > 0 ? Math.max(...allVersions) : null;
+			const minVersion = allVersions.length > 0 ? Math.min(...allVersions) : null;
+
+			// FASE 3: Detecta inconsistência — algum arquivo ficou para trás.
+			if (maxVersion != null && minVersion != null && maxVersion !== minVersion) {
+				versionInconsistency = true;
+				console.warn(
+					`[SplitPersistence] Inconsistência de versão detectada: ` +
+					`máximo=${maxVersion}, mínimo=${minVersion}. ` +
+					`Usando snapshot mais recente (máximo=${maxVersion}).`
+				);
+			}
+
+			detectedVersion = maxVersion;
+
+			// FASE 4: Reconstitui fatias — aceita APENAS versão == máximo.
+			const modules: Record<string, Record<string, unknown>> = {
+				...(main.modules as Record<string, Record<string, unknown>> ?? {}),
+			};
+
+			for (const id of SPLIT_MODULE_IDS) {
+				const info = sliceData.get(id);
+				const slice = info?.raw ?? {};
+				const sliceVersion = info?.version ?? null;
+
+				if (maxVersion != null && sliceVersion != null && sliceVersion < maxVersion) {
+					// Módulo ficou para trás — usa stub do principal (descarta).
 					console.warn(
-						`[SplitPersistence] Inconsistência detectada: ${id}.json _v=${sliceVersion} > data.json _v=${detectedVersion}. ` +
-						"Dado do módulo aceito (mais recente)."
-					);
-					detectedVersion = sliceVersion;
-				} else if (sliceVersion != null && detectedVersion != null && sliceVersion < detectedVersion) {
-					console.warn(
-						`[SplitPersistence] Módulo ${id}.json obsoleto: _v=${sliceVersion} < data.json _v=${detectedVersion}. ` +
+						`[SplitPersistence] Módulo ${id}.json obsoleto: _v=${sliceVersion} < máximo=${maxVersion}. ` +
 						"Usando stub do principal."
 					);
 					modules[id] = {};
 					continue;
+				}
+
+				if (sliceVersion != null && mainVersion != null && sliceVersion > mainVersion) {
+					// Módulo mais recente que main — aceita (crash entre gravações).
+					detectedVersion = sliceVersion;
 				}
 
 				// Remove _v antes de merge — campo é meta, não dado do módulo.
@@ -159,32 +165,31 @@ export function createSplitPersistence(app: App, pluginDir: string): SplitPersis
 				modules[id] = cleanSlice;
 			}
 
-			return { ...createDefaultSettings(), ...(main as unknown as HubSettings), modules };
+			const { [VERSION_KEY]: _mainV, ...mainWithoutVersion } = main as Record<string, unknown>;
+			void _mainV;
+			return { ...createDefaultSettings(), ...mainWithoutVersion, modules } as HubSettings;
 		},
 
 		persistMain: async (data) => {
-			await writeFile(absolute("data.json"), stubSlices(data, SPLIT_MODULE_IDS));
+			await writeFileSafe(absolute("data.json"), stubSlices(data, SPLIT_MODULE_IDS));
 		},
 
 		loadModule: (moduleId) => readFile(absolute(moduleFilePath(moduleId))),
 
-		persistModule: (moduleId, slice) => writeFile(absolute(moduleFilePath(moduleId)), slice),
+		persistModule: (moduleId, slice) => writeFileSafe(absolute(moduleFilePath(moduleId)), slice),
 
 		persistVersioned: async (main, slices, version) => {
-			// Grava todos os arquivos com o MESMO _v. Se crash no meio,
-			// _v permite detectar qual arquivo ficou para trás no boot seguinte.
-			// Atualiza _v em TODOS os arquivos de módulo (mesmo os que não mudaram)
-			// para manter consistência de versão entre todos os arquivos.
 			for (const id of SPLIT_MODULE_IDS) {
 				const slice = slices.get(id) ?? (await readFile<Record<string, unknown>>(absolute(moduleFilePath(id)))) ?? {};
-				await writeFile(absolute(moduleFilePath(id)), { ...slice, [VERSION_KEY]: version });
+				await writeFileSafe(absolute(moduleFilePath(id)), { ...slice, [VERSION_KEY]: version });
 			}
 			const versionedMain = { ...stubSlices(main, SPLIT_MODULE_IDS), [VERSION_KEY]: version } as Record<string, unknown>;
-			await writeFile(absolute("data.json"), versionedMain);
+			await writeFileSafe(absolute("data.json"), versionedMain);
 		},
 
 		get readCorrupted() { return readCorrupted; },
 		get corruptedPaths() { return corruptedPaths; },
 		get lastVersion() { return detectedVersion; },
+		get versionInconsistencyDetected() { return versionInconsistency; },
 	};
 }

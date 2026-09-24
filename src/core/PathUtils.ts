@@ -5,15 +5,14 @@
  * CalendarModule e FileLifecycleModule (fatoração, sem mudança de
  * comportamento). A função de existência é injetada, o que permite
  * testar sem vault.
+ *
+ * CORREÇÃO R2: centraliza normalização e validação defensiva de paths.
+ * Rejeita paths vazios, com `..`, absolutos ou que escapem do vault.
  */
 
 /**
  * Deriva o primeiro nome livre a partir de `desired`, acrescentando
  * " 2", " 3", ... antes da extensão.
- *
- * Ex.: "Nota.md" existente → "Nota 2.md"; "Relatório" (sem extensão)
- * → "Relatório 2" — o guard de `dot === -1` evita que o slice coma o
- * último caractere (bug "Nota 2t" corrigido na v0.6.x).
  */
 export function uniqueNameWith(
 	desired: string,
@@ -26,4 +25,87 @@ export function uniqueNameWith(
 	let counter = 2;
 	while (exists(`${base} ${counter}${ext}`)) counter++;
 	return `${base} ${counter}${ext}`;
+}
+
+/**
+ * Normaliza um path externo para uso seguro dentro do vault.
+ * Aplica as mesmas regras em todas as operações MCP que recebem paths.
+ *
+ * Regras:
+ *   1. Remove espaços no início/fim.
+ *   2. Normaliza separadores para `/` (Windows `\` → `/`).
+ *   3. Colapsa `//` múltiplos em `/`.
+ *   4. Rejeita paths vazios ou somente whitespace.
+ *   5. Rejeita paths absolutos (`/...` ou `C:\...`).
+ *   6. Rejeita `..` (tentativa de escape do vault).
+ *   7. Rejeita paths com caracteres de controle.
+ *   8. Remove `.` (diretório atual) no início.
+ *
+ * @param raw Path bruto recebido de fonte externa.
+ * @returns Path normalizado e validado.
+ * @throws Error com mensagem clara se o path for inválido.
+ */
+export function validateVaultPath(raw: string): string {
+	if (typeof raw !== "string") {
+		throw new Error("Path deve ser uma string.");
+	}
+
+	const trimmed = raw.trim();
+	if (trimmed.length === 0) {
+		throw new Error("Path não pode ser vazio.");
+	}
+
+	// Normaliza separadores.
+	let normalized = trimmed.replace(/\\/g, "/");
+
+	// Colapsa slashes múltiplos (preserva o slash inicial se houver).
+	normalized = normalized.replace(/\/{2,}/g, "/");
+
+	// Remove ./ no início (diretório atual implícito).
+	if (normalized.startsWith("./")) {
+		normalized = normalized.slice(2);
+	}
+
+	// Rejeita paths absolutos ( Unix: /...  Windows: C:\... ).
+	if (/^[a-zA-Z]:/.test(normalized) || normalized.startsWith("/")) {
+		throw new Error(
+			`Path inválido: "${raw}" — paths absolutos não são permitidos. Use um caminho relativo ao vault.`
+		);
+	}
+
+	// Rejeita tentativa de escape com .. 
+	if (normalized.includes("..")) {
+		throw new Error(
+			`Path inválido: "${raw}" — referências a diretório pai (..) não são permitidas.`
+		);
+	}
+
+	// Rejeita caracteres de controle (0x00-0x1F).
+	if (/[\x00-\x1f]/.test(normalized)) {
+		throw new Error(
+			`Path inválido: "${raw}" — contém caracteres de controle.`
+		);
+	}
+
+	// Remove trailing slash (pastas não precisam de / final em paths de arquivo).
+	if (normalized.endsWith("/") && normalized.length > 1) {
+		normalized = normalized.slice(0, -1);
+	}
+
+	return normalized;
+}
+
+/**
+ * Valida que um path não escapa de um diretório base (vault root).
+ * Útil para operações que operam sobre paths derivados de inputs do usuário
+ * onde o path pode ser construído programaticamente.
+ */
+export function isPathWithinBase(path: string, base: string): boolean {
+	const normalizedPath = path.replace(/\\/g, "/").toLowerCase();
+	const normalizedBase = base.replace(/\\/g, "/").toLowerCase();
+	// Rejeita paths com .. — não é seguro inferir se "escapam" sem resolver
+	// os .. primeiro. Se o caller quer validação, use validateVaultPath antes.
+	if (normalizedPath.includes("..")) return false;
+	const baseWithSlash = normalizedBase.endsWith("/") ? normalizedBase : normalizedBase + "/";
+	return normalizedPath === normalizedBase || normalizedPath.startsWith(baseWithSlash);
 }

@@ -17,6 +17,7 @@ import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
 import { randomId, cryptoRandomToken } from "../../core/types";
 import { searchVault, normalizeQuery } from "./SearchVault";
 import { createRateLimiter, wouldAllow, reserve } from "./RateLimit";
+import { validateVaultPath } from "../../core/PathUtils";
 
 export interface McpModuleSettings {
 	enabled: boolean;
@@ -63,6 +64,18 @@ export const MCP_DEFAULTS: McpModuleSettings = {
  * tocar no núcleo — é exatamente o que o contrato de módulo foi desenhado
  * para permitir.
  */
+/** Sanitiza mensagem de erro: remove caminhos internos, stack traces, detalhes de implementação. */
+function sanitizeMcpError(msg: string): string {
+	// Remove qualquer path que pareça caminho de arquivo
+	let safe = msg.replace(/[A-Z]:\\[^s"']+/gi, "[caminho interno]");
+	safe = safe.replace(/(?<!https?:)\/[^\s"']+/g, "[caminho interno]");
+	// Remove stack traces (linhas que começam com "at " ou "Error:")
+	safe = safe.split("\n").filter(l => !l.trim().startsWith("at ") && !l.trim().startsWith("Error:")).join(" ");
+	// Trunca se ainda muito longo
+	if (safe.length > 200) safe = safe.slice(0, 200) + "...";
+	return safe || "Erro interno na execução da ferramenta.";
+}
+
 export class McpModule implements HubModule {
 	readonly manifest: ModuleManifest = {
 		id: "mcp",
@@ -107,6 +120,11 @@ export class McpModule implements HubModule {
 	private lastServerError?: string;
 	/** Escopo temporário: libera escrita até este timestamp, mesmo com readOnly ligado. */
 	private temporaryWriteUntil = 0;
+
+	/** Limites centralizados para entrada e saída de ferramentas MCP. */
+	static readonly MAX_INPUT_CONTENT_CHARS = 1_000_000;
+	static readonly MAX_INPUT_BASE64_BYTES = 10 * 1024 * 1024;
+	static readonly MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
 
 	onRegister(context: ModuleContext): void {
 		this.context = context;
@@ -578,39 +596,41 @@ export class McpModule implements HubModule {
 
 		switch (toolName) {
 			case "read_note": {
-				const file = vault.getAbstractFileByPath(normalizePath(String(args.path)));
+				const readPath = validateVaultPath(String(args.path));
+				const file = vault.getAbstractFileByPath(normalizePath(readPath));
 				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
 				return { content: await vault.read(file as TFile) };
 			}
 			case "create_note": {
-				const path = normalizePath(String(args.path));
+				const path = validateVaultPath(String(args.path));
 				await write(path, () => vault.create(path, String(args.content ?? "")));
 				return { path };
 			}
 			case "append_note": {
-				const path = normalizePath(String(args.path));
+				const path = validateVaultPath(String(args.path));
 				const file = vault.getAbstractFileByPath(path);
 				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
 				await write(path, () => vault.append(file as TFile, String(args.content ?? "")));
 				return { path };
 			}
 			case "edit_note": {
-				const path = normalizePath(String(args.path));
+				const path = validateVaultPath(String(args.path));
 				const file = vault.getAbstractFileByPath(path);
 				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
 				await write(path, () => vault.modify(file as TFile, String(args.content ?? "")));
 				return { path };
 			}
 			case "delete_note": {
-				const path = normalizePath(String(args.path));
+				const path = validateVaultPath(String(args.path));
 				const file = vault.getAbstractFileByPath(path);
 				if (!file) throw new Error("Nota não encontrada.");
 				await write(path, () => vault.trash(file, true)); // vai para a lixeira, nunca exclusão direta (rede de segurança)
 				return { path };
 			}
 			case "list_folder": {
-				const path = normalizePath(String(args.path ?? "/"));
-				const folder = vault.getAbstractFileByPath(path);
+				const listPath = args.path ? validateVaultPath(String(args.path)) : "";
+				const normalized = listPath ? normalizePath(listPath) : "/";
+				const folder = vault.getAbstractFileByPath(normalized);
 				const children = (folder as TFolder | null)?.children ?? vault.getRoot().children;
 				return { items: children.map((c) => c.path) };
 			}
@@ -653,7 +673,7 @@ export class McpModule implements HubModule {
 				};
 			}
 			case "get_note_metadata": {
-				const path = normalizePath(String(args.path));
+				const path = validateVaultPath(String(args.path));
 				const file = vault.getAbstractFileByPath(path);
 				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
 				const cache = app.metadataCache.getFileCache(file as TFile);
@@ -666,8 +686,8 @@ export class McpModule implements HubModule {
 				};
 			}
 			case "rename_note": {
-				const path = normalizePath(String(args.path));
-				const newPath = normalizePath(String(args.newPath));
+				const path = validateVaultPath(String(args.path));
+				const newPath = validateVaultPath(String(args.newPath));
 				// Lookup + validação + mutação DENTRO do lock —
 				// outro módulo poderia renomear/mover o arquivo no intervalo.
 				await writeMany([path, newPath], async () => {
@@ -682,7 +702,7 @@ export class McpModule implements HubModule {
 				// (leitura + busca + gravação) acontece DENTRO do lock para
 				// evitar race condition: outro módulo pode alterar o arquivo
 				// entre a leitura e a escrita se o lock não proteger ambos.
-				const path = normalizePath(String(args.path));
+				const path = validateVaultPath(String(args.path));
 				const search = String(args.search ?? "");
 				const replace = String(args.replace ?? "");
 				await write(path, async () => {
@@ -695,7 +715,7 @@ export class McpModule implements HubModule {
 				return { path };
 			}
 			case "get_links": {
-				const path = normalizePath(String(args.path));
+				const path = validateVaultPath(String(args.path));
 				const file = vault.getAbstractFileByPath(path);
 				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
 				const cache = app.metadataCache.getFileCache(file as TFile);
@@ -705,7 +725,8 @@ export class McpModule implements HubModule {
 				};
 			}
 			case "get_backlinks": {
-				const target = normalizePath(String(args.path));
+				const backlinksPath = validateVaultPath(String(args.path));
+				const target = normalizePath(backlinksPath);
 				const backlinks: string[] = [];
 				for (const file of vault.getMarkdownFiles()) {
 					const cache = app.metadataCache.getFileCache(file);
@@ -750,7 +771,7 @@ export class McpModule implements HubModule {
 				return { attachments };
 			}
 			case "get_attachment": {
-				const path = normalizePath(String(args.path));
+				const path = validateVaultPath(String(args.path));
 				assertAttachmentPath(path);
 				const file = vault.getAbstractFileByPath(path);
 				if (!(file instanceof TFileClass)) throw new Error("Anexo não encontrado.");
@@ -762,7 +783,7 @@ export class McpModule implements HubModule {
 				};
 			}
 			case "put_attachment": {
-				const path = normalizePath(String(args.path));
+				const path = validateVaultPath(String(args.path));
 				assertAttachmentPath(path);
 				const bytes = decodeBase64(args.base64);
 				// Decisão create/modify DENTRO do lock —
@@ -782,7 +803,7 @@ export class McpModule implements HubModule {
 				return { path, sizeBytes: bytes.byteLength, created: result };
 			}
 			case "delete_attachment": {
-				const path = normalizePath(String(args.path));
+				const path = validateVaultPath(String(args.path));
 				const file = vault.getAbstractFileByPath(path);
 				if (!(file instanceof TFileClass)) throw new Error("Anexo não encontrado.");
 				if (file.extension === "md") {
@@ -807,7 +828,7 @@ export class McpModule implements HubModule {
 			}
 			case "split_note": {
 				// Divide a nota em várias, quebrando nos headings do nível indicado.
-				const path = normalizePath(String(args.path));
+				const path = validateVaultPath(String(args.path));
 				const file = vault.getAbstractFileByPath(path);
 				if (!(file instanceof TFileClass)) throw new Error("Nota não encontrada.");
 				const level = Number(args.headingLevel ?? 2);

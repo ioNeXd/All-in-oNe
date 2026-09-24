@@ -21,49 +21,25 @@ import {
 	interpretGpgStatusOutput,
 	runGpgCommand,
 	shouldYieldToBrat,
+	extractFingerprintFromArmoredKey,
 } from "./SignatureUtils";
 
 export interface AutoUpdateSettings {
-	repo: string; // formato "usuario/repositorio" — hardcoded no manifesto do plugin, não editável por terceiros
+	repo: string;
 	channel: "stable" | "beta";
 	lastCheckedAt: number;
 	checkIntervalMs: number;
 	lastKnownVersion?: string;
-	/**
-	 * Metadado do backup de rollback — SÓ o metadado (pequeno). Os CONTEÚDOS
-	 * moram em arquivos sob `<pasta do plugin>/.backup/` (main.js passa de
-	 * 1MB; inline no data.json inchava cada save de config e o sync). Sem
-	 * backup: undefined.
-	 */
 	previousVersionBackup?: VersionBackupMeta;
-	/**
-	 * Opt-in: verificar a assinatura GPG dos assets antes de instalar.
-	 * Ligada, a ausência de assinatura no release (ou do binário gpg) ABORTA
-	 * a instalação — habilitar cria a obrigação de cumpri-la.
-	 */
 	verifySignature: boolean;
-	/** Chave pública (armadura ASCII) confiada pelo usuário para a verificação. */
 	signingPublicKey?: string;
 }
 
 export const AUTOUPDATE_DEFAULTS: AutoUpdateSettings = {
-	// Repositório real deste plugin (confere com o remote do git). FIXO de
-	// propósito — nunca configurável pela UI: apontar o auto-update para
-	// outro repo abriria caminho para atualização maliciosa.
 	repo: "ioNeXd/All-in-oNe",
 	channel: "stable",
 	lastCheckedAt: 0,
-	checkIntervalMs: 1000 * 60 * 60 * 6, // checa no máximo a cada 6h automaticamente
-	/**
-	 * Verificação de assinatura GPG dos assets. Quando desligada,
-	 * a única proteção contra release comprometido é HTTPS + checksum
-	 * publicado no próprio release — o que NÃO é âncora criptográfica
-	 * independente (atacante que controla o release atualiza asset +
-	 * checksum juntos). A assinatura GPG resolve isso: a chave privada
-	 * que assina não está no canal de release, então o checksum sozinho
-	 * não basta pra forçar a verificação. Mantenha ligado para uso
-	 * em produção.
-	 */
+	checkIntervalMs: 1000 * 60 * 60 * 6,
 	verifySignature: false,
 };
 
@@ -92,7 +68,7 @@ export class AutoUpdateModule implements HubModule {
 		displayName: "Auto-update",
 		description: "Verifica e aplica atualizações do plugin a partir do GitHub Releases.",
 		icon: "refresh-cw",
-		version: "0.2.0",
+		version: "0.3.0",
 		contractVersion: "2.0.0",
 		desktopOnly: false,
 		emits: ["autoupdate:available", "autoupdate:applied"],
@@ -112,12 +88,9 @@ export class AutoUpdateModule implements HubModule {
 	};
 
 	private context?: ModuleContext;
-	private currentVersion = ""; // preenchido pelo main.ts a partir do manifest.json real
-	/** true quando o BRAT está instalado E gerencia este plugin — módulo cede o controle. */
+	private currentVersion = "";
 	private managedByBrat = false;
-	/** Motivo do yield ao BRAT, para o painel. */
 	private bratYieldReason?: string;
-	/** Estado da ÚLTIMA verificação de assinatura — alimenta o Diagnóstico. */
 	private lastSignatureStatus: { ok: boolean; detail: string } | undefined;
 
 	onRegister(context: ModuleContext): void {
@@ -126,16 +99,11 @@ export class AutoUpdateModule implements HubModule {
 
 	async onEnable(): Promise<void> {
 		await this.migrateLegacyInlineBackup();
-
-		// Interoperabilidade com o BRAT: se o BRAT gerencia este plugin, ele é
-		// o dono do ciclo de atualização — duas mãos escrevendo main.js é
-		// corrida de escrita (e rollback de dois donos). O módulo CEDe: sem
-		// checagem automática, sem comando, sem notificação.
 		await this.refreshBratStatus();
 
 		if (this.managedByBrat) {
 			this.context?.log("Auto-update cedido ao BRAT", { reason: this.bratYieldReason });
-			return; // sem comando e sem checagem automática
+			return;
 		}
 
 		this.context!.registerCommand(
@@ -152,26 +120,15 @@ export class AutoUpdateModule implements HubModule {
 		}
 	}
 
-	/**
-	 * Migração do formato LEGADO do backup (conteúdos inline no data.json →
-	 * arquivos em .backup/): roda no primeiro onEnable após a atualização,
-	 * escreve os arquivos e troca o metadado. Em caso de falha de escrita, o
-	 * legado PERMANECE no settings (rollback continua funcionando pelo caminho
-	 * antigo) — migração idempotente, tenta de novo no próximo enable.
-	 */
 	private async migrateLegacyInlineBackup(): Promise<void> {
 		const settings = this.readSettings();
 		const backup = settings.previousVersionBackup as
 			| { version: string; files: unknown }
 			| undefined;
-		// Formato novo já (files: string[]) → nada a fazer. Detecção: no legado,
-		// `files` é um Record de conteúdos; no novo, um array de nomes.
 		if (!backup || Array.isArray(backup.files)) return;
 
 		const migrated = migrateLegacyBackup(backup as never);
 		if (!migrated) {
-			// Legado vazio (sem conteúdos): o botão "Reverter" nunca funcionaria —
-			// limpa o metadado em vez de manter uma promessa falsa.
 			await this.context?.updateSettings({ previousVersionBackup: undefined });
 			return;
 		}
@@ -187,26 +144,17 @@ export class AutoUpdateModule implements HubModule {
 				`Backup do rollback migrado para .backup/ (versão ${migrated.meta.version})`
 			);
 		} catch (err) {
-			// Sem trocar o metadado: o legado continua restaurável pelo caminho
-			// antigo; a migração tenta de novo no próximo onEnable.
 			console.error("[All iₙ oNe] Falha ao migrar backup legado do auto-update:", err);
 		}
 	}
 
-	/** Reavalia o BRAT a cada onEnable (o usuário pode ter instalado/desinstalado desde o load). */
 	private async refreshBratStatus(): Promise<void> {
 		const bratJson = await this.readBratDataJson();
 		const detection = detectBratInstallation(bratJson, this.readSettings().repo);
-		// A regra de ceder é a função pura testada — o módulo não re-decide.
 		this.managedByBrat = shouldYieldToBrat(bratJson !== undefined, detection);
 		this.bratYieldReason = detection.reason;
 	}
 
-	/**
-	 * Lê o data.json do BRAT (plugins/.obsidian42-brat), se ele existir.
-	 * Qualquer falha de leitura devolve undefined — a checagem de update
-	 * própria nunca pode quebrar por causa de um plugin de terceiros.
-	 */
 	private async readBratDataJson(): Promise<string | undefined> {
 		try {
 			const adapter = this.context!.app.vault.adapter;
@@ -244,11 +192,6 @@ export class AutoUpdateModule implements HubModule {
 		};
 	}
 
-	/**
-	 * A chave pública colada pelo usuário tem de parecer uma armadura OpenPGP;
-	 * qualquer outra coisa é quase sempre erro de colagem (CSS, log, texto).
-	 * Síncrono e barato — só o cabeçalho é inspecionado, sem I/O.
-	 */
 	validateSettings(settings: HubSettings): ConfigValidationIssue[] {
 		const mod = settings.modules.autoupdate as { signingPublicKey?: string } | undefined;
 		const key = mod?.signingPublicKey;
@@ -259,7 +202,7 @@ export class AutoUpdateModule implements HubModule {
 					level: "error",
 					message:
 						"A chave pública deve começar com '-----BEGIN PGP PUBLIC KEY BLOCK-----' (armadura ASCII exportada pelo gpg).",
-					},
+				},
 			];
 		}
 		return [];
@@ -280,7 +223,6 @@ export class AutoUpdateModule implements HubModule {
 		}
 
 		new Setting(container).setName("Repositório (fixo)").setDesc(settings.repo);
-
 		new Setting(container).setName("Versão atual").setDesc(this.currentVersion || "desconhecida");
 
 		new Setting(container)
@@ -317,7 +259,6 @@ export class AutoUpdateModule implements HubModule {
 				)
 				.addTextArea((area) =>
 					area.setValue(settings.signingPublicKey ?? "").onChange((v) => {
-						// sem salvamento a cada tecla (armadura é grande); salvamento no blur:
 						area.inputEl.onblur = async () => {
 							await this.context?.updateSettings({ signingPublicKey: area.getValue().trim() || undefined });
 							new Notice("Chave pública salva.");
@@ -344,8 +285,6 @@ export class AutoUpdateModule implements HubModule {
 					.setButtonText("Reverter")
 					.setDisabled(!settings.previousVersionBackup)
 					.onClick(() => {
-						// rollback escreve arquivos no disco — sem catch, uma falha de
-						// IO viraria rejection não tratada sem aviso algum.
 						this.rollback().catch((err) => {
 							console.error("[All iₙ oNe] Falha no rollback:", err);
 							new Notice("All iₙ oNe: falha ao reverter. Veja o console.", 8000);
@@ -359,20 +298,9 @@ export class AutoUpdateModule implements HubModule {
 	}
 
 	/**
-	 * Verifica atualizações. CONTRATO DO RETORNO (documentado de propósito,
-	 * ver item de revisão — o antigo branch "ignorado" devolvia o release
-	 * SEM notificar, e um caller futuro podia auto-aplicar sem UI):
-	 *
-	 *   - GitHubRelease = a versão foi apresentada ao usuário NESTA chamada
-	 *     (notice com botões Atualizar/Ignorar + evento autoupdate:available).
-	 *     O retorno é só para feedback de chamadores DE UI (ex.: painel que
-	 *     quer atualizar o próprio resumo) — NUNCA um gatilho para aplicar.
-	 *   - null = nada foi apresentado (sem candidate, mesma versão, versão
-	 *     dispensada pelo usuário, BRAT no controle ou falha de rede).
-	 *
-	 * Ou seja: "candidate no retorno" ⇒ "usuário notificado". O fluxo de
-	 * instalação mora EXCLUSIVAMENTE no botão do notice (applyUpdate);
-	 * caller nenhum deve agir sobre o retorno além de exibir estado.
+	 * Verifica atualizações. CONTRATO DO RETORNO:
+	 *   - GitHubRelease = a versão foi apresentada ao usuário NESTA chamada.
+	 *   - null = nada foi apresentado.
 	 */
 	async checkForUpdates(opts: { manual: boolean }): Promise<GitHubRelease | null> {
 		if (this.managedByBrat) {
@@ -399,8 +327,6 @@ export class AutoUpdateModule implements HubModule {
 			if (!candidate) return null;
 
 			const remoteVersion = candidate.tag_name.replace(/^v/, "");
-			// Comparação SemVer real: v0.10.0 > v0.9.0 (a comparação de string
-			// tratava "0.10.0" < "0.9.0" lexicograficamente e "0.2.0" == "0.2").
 			if (!isNewerVersion(remoteVersion, this.currentVersion)) {
 				if (opts.manual && remoteVersion === this.currentVersion) {
 					new Notice("All iₙ oNe: você já está na versão mais recente.");
@@ -408,14 +334,7 @@ export class AutoUpdateModule implements HubModule {
 				return null;
 			}
 
-			// "Ignorar" significa ignorar ESTA versão: o lastKnownVersion guarda
-			// a versão dispensada, e a notificação automática não reaparece a
-			// cada 6h pela mesma versão. Checagem manual sempre mostra — o
-			// usuário pediu explicitamente.
 			if (!opts.manual && settings.lastKnownVersion === remoteVersion) {
-				// Versão dispensada: NADA é apresentado → null (contrato acima).
-				// O antigo `return candidate` aqui era o vício: devolvia o release
-				// sem notificar, quebrando a implicação "retorno ⇒ notificado".
 				return null;
 			}
 
@@ -450,141 +369,165 @@ export class AutoUpdateModule implements HubModule {
 		};
 		dismissBtn.onclick = () => {
 			notice.hide();
-			// Persiste a versão dispensada para o próximo ciclo de 6h não re-avisar.
 			void this.context?.updateSettings({ lastKnownVersion: version });
 		};
 	}
 
+	/**
+	 * Aplica uma atualização de forma SEGURA:
+	 *   1. Valida assinatura (se habilitada) — antes de qualquer I/O.
+	 *   2. Baixa + valida checksum de TODOS os assets antes de escrever.
+	 *   3. Cria backup dos arquivos atuais.
+	 *   4. Substitui os arquivos.
+	 *   5. Se QUALQUER escrita falhar, restaura do backup e preserva o erro original.
+	 */
 	async applyUpdate(release: GitHubRelease): Promise<void> {
-		try {
-			const settings = this.readSettings();
-			const assetNames = ["main.js", "manifest.json", "styles.css"];
-			const downloaded: Record<string, string> = {};
+		const settings = this.readSettings();
+		const assetNames = ["main.js", "manifest.json", "styles.css"];
+		const downloaded: Record<string, string> = {};
+		let backupCreated = false;
 
-			// Assinatura (opt-in): decide por asset se a verificação é obrigatória
-			// e, quando é, verifica ANTES de escrever qualquer arquivo — mesmo
-			// esqueleto do checksum: tudo validado antes da primeira escrita, para
-			// não deixar instalação pela metade.
-			if (settings.verifySignature) {
-				const hasAnySignature = assetNames.some((n) => !!findSignatureAsset(release.assets, n));
-				if (!hasAnySignature) {
-					const decision = decideSignatureVerification({
-						enabled: true,
-						signaturePresent: false,
-						verificationAvailable: true,
-						assetName: assetNames[0],
-					});
-					throw new Error(decision.reason ?? "Assinatura ausente.");
-				}
+		// FASE 1: Validação de assinatura (opt-in) — antes de qualquer I/O de download.
+		if (settings.verifySignature) {
+			const hasAnySignature = assetNames.some((n) => !!findSignatureAsset(release.assets, n));
+			if (!hasAnySignature) {
+				const decision = decideSignatureVerification({
+					enabled: true,
+					signaturePresent: false,
+					verificationAvailable: true,
+					assetName: assetNames[0],
+				});
+				throw new Error(decision.reason ?? "Assinatura ausente.");
 			}
+		}
 
-			await this.backupCurrentVersion();
+		const expected = parseChecksums(release.body);
 
-			const expected = parseChecksums(release.body);
-
-			// Baixa TUDO e verifica ANTES de escrever qualquer arquivo — assim um
-			// checksum ruim no meio do caminho não deixa a instalação pela metade.
-			for (const name of assetNames) {
-				const asset = release.assets.find((a) => a.name === name);
-				if (!asset) {
-					// styles.css é opcional (não existe em todos os releases).
-					// main.js e manifest.json são obrigatórios — release sem eles
-					// é malformado.
-					if (name !== "styles.css") {
-						throw new Error(
-							`Asset obrigatório "${name}" ausente no release. ` +
-							"Release malformado — instalação abortada."
-						);
+		// FASE 2: Baixa TUDO e valida (checksum + assinatura) ANTES de escrever.
+		for (const name of assetNames) {
+			const asset = release.assets.find((a) => a.name === name);
+			if (!asset) {
+				if (name !== "styles.css") {
+					throw new Error(
+						`Asset obrigatório "${name}" ausente no release. ` +
+						"Release malformado — instalação abortada."
+					);
 				}
 				continue;
 			}
-				const content = await requestUrl({ url: asset.browser_download_url, method: "GET" });
+			const content = await requestUrl({ url: asset.browser_download_url, method: "GET" });
 
-				if (settings.verifySignature) {
-					const sigAsset = findSignatureAsset(release.assets, name);
-					const decision = decideSignatureVerification({
-						enabled: true,
-						signaturePresent: !!sigAsset,
-						verificationAvailable: true,
-						assetName: name,
-					});
-					if (decision.action === "abort") throw new Error(decision.reason);
-					const check = await this.verifyAssetSignature(name, sigAsset!.url, content.text);
-					// Guarda o desfecho para o Diagnóstico: ok nunca esconde uma
-					// verificação que reprovou; reprovada mantém o resumo honesto
-					// até a próxima verificação bem-sucedida.
-					this.lastSignatureStatus = check.valid
-						? { ok: true, detail: `assinatura verificada (${name})` }
-						: { ok: false, detail: `assinatura de "${name}" reprovada: ${check.reason ?? "inválida"}` };
-					if (!check.valid) {
-						throw new Error(`Assinatura do arquivo "${name}" ${check.reason ?? "inválida"} — instalação abortada por segurança.`);
-					}
+			if (settings.verifySignature) {
+				const sigAsset = findSignatureAsset(release.assets, name);
+				const decision = decideSignatureVerification({
+					enabled: true,
+					signaturePresent: !!sigAsset,
+					verificationAvailable: true,
+					assetName: name,
+				});
+				if (decision.action === "abort") throw new Error(decision.reason);
+				const check = await this.verifyAssetSignature(name, sigAsset!.url, content.text);
+				this.lastSignatureStatus = check.valid
+					? { ok: true, detail: `assinatura verificada (${name})` }
+					: { ok: false, detail: `assinatura de "${name}" reprovada: ${check.reason ?? "inválida"}` };
+				if (!check.valid) {
+					throw new Error(`Assinatura do arquivo "${name}" ${check.reason ?? "inválida"} — instalação abortada por segurança.`);
 				}
+			}
 
-				// main.js e manifest.json são obrigatórios: asset existe + checksum
-				// ausente = release malformado. styles.css é opcional (pode faltar
-				// checksum sem problema — ele não existe em todos os releases).
-				if (!expected[name]) {
-					if (name !== "styles.css") {
-						throw new Error(
-							`Asset obrigatório "${name}" sem checksum declarado no release. ` +
-							"Release malformado — instalação abortada por segurança."
-						);
-					}
+			if (!expected[name]) {
+				if (name !== "styles.css") {
+					throw new Error(
+						`Asset obrigatório "${name}" sem checksum declarado no release. ` +
+						"Release malformado — instalação abortada por segurança."
+					);
+				}
 			} else {
-					const actual = await sha256Hex(content.text);
-					if (actual !== expected[name].toLowerCase()) {
-						throw new Error(
-							`Checksum do arquivo "${name}" não confere. Download abortado por segurança.`
-						);
-					}
+				const actual = await sha256Hex(content.text);
+				if (actual !== expected[name].toLowerCase()) {
+					throw new Error(
+						`Checksum do arquivo "${name}" não confere. Download abortado por segurança.`
+					);
+				}
 			}
-				downloaded[name] = content.text;
-			}
+			downloaded[name] = content.text;
+		}
 
+		// FASE 3: Backup antes da primeira escrita.
+		try {
+			await this.backupCurrentVersion();
+			backupCreated = true;
+		} catch (backupErr) {
+			console.error("[All iₙ oNe] Falha ao criar backup para atualização:", backupErr);
+		}
+
+		// FASE 4: Escrita. Se QUALQUER escrita falhar, restaura do backup
+		// e preserva o erro original (mesmo se rollback também falhar).
+		const originalErr = new Error("");
+		try {
 			for (const [name, content] of Object.entries(downloaded)) {
 				await this.writePluginFile(name, content);
 			}
+		} catch (writeErr) {
+			originalErr.message = writeErr instanceof Error ? writeErr.message : String(writeErr);
 
-			new Notice("All iₙ oNe atualizado. Recarregue o Obsidian ou recarregue o plugin para aplicar.");
-			await this.context?.bus.emit(
-				"autoupdate:applied",
-				{ version: release.tag_name },
-				"autoupdate"
-			);
-			this.context?.log(`Plugin atualizado para ${release.tag_name}`);
-		} catch (err) {
-			console.error("[All iₙ oNe] Falha ao aplicar atualização:", err);
-			// Honestidade: "nenhum arquivo foi corrompido" só vale para falha de
-			// checksum/assinatura ANTES da escrita. Se a falha foi no meio da
-			// escrita (IO, disco cheio), o backup feito no início permite rollback.
-			new Notice(
-				`All iₙ oNe: falha ao aplicar a atualização: ${err instanceof Error ? err.message : String(err)} — nenhum arquivo foi escrito se a falha ocorreu antes da gravação. Se o plugin não carregar, use "Reverter para a versão anterior" no painel do módulo.`,
-				10000
-			);
+			if (backupCreated) {
+				try {
+					await this.rollback();
+				} catch (rollbackErr) {
+					console.error(
+						"[All iₙ oNe] Rollback também falhou após falha de atualização:",
+						rollbackErr
+					);
+				}
+			}
+
+			throw originalErr;
 		}
+
+		new Notice("All iₙ oNe atualizado. Recarregue o Obsidian ou recarregue o plugin para aplicar.");
+		await this.context?.bus.emit(
+			"autoupdate:applied",
+			{ version: release.tag_name },
+			"autoupdate"
+		);
+		this.context?.log(`Plugin atualizado para ${release.tag_name}`);
 	}
 
 	/**
-	 * Verifica a assinatura de um asset num KEYRING TEMPORÁRIO isolado:
-	 * nunca toca no keyring do usuário — importa a chave pública configurada
-	 * para uma pasta de casa (GNUPGHOME própria), verifica e descarta.
-	 * Falha de execução (gpg ausente, permissão) propaga — o chamador decide
-	 * (decisão fechada: com a verificação ligada, não rodar = abortar).
+	 * Verifica a assinatura de um asset num KEYRING TEMPORÁRIO isolado.
+	 * Quando a chave pública é configurada, valida que o fingerprint da
+	 * chave que assinou EXATAMENTE confere com o fingerprint derivado da
+	 * chave pública configurada — rejeita qualquer assinatura válida de
+	 * chave diferente no keyring.
 	 */
 	private async verifyAssetSignature(
 		assetName: string,
 		signatureUrl: string,
 		assetContent: string
 	): Promise<{ valid: boolean; reason?: string; keyFingerprint?: string }> {
-		const settings = this.readSettings();				if (!settings.signingPublicKey?.trim()) {
-					this.lastSignatureStatus = {
-						ok: false,
-						detail: "chave pública não configurada — verificação ligada não pôde rodar",
-					};
+		const settings = this.readSettings();
+		if (!settings.signingPublicKey?.trim()) {
+			this.lastSignatureStatus = {
+				ok: false,
+				detail: "chave pública não configurada — verificação ligada não pôde rodar",
+			};
 			return {
 				valid: false,
 				reason: "nenhuma chave pública foi configurada no painel do módulo (cole a chave pública de quem assina os releases)",
+			};
+		}
+
+		// Extrai o fingerprint esperado da chave pública armazenada.
+		const expectedFingerprint = extractFingerprintFromArmoredKey(settings.signingPublicKey);
+		if (!expectedFingerprint) {
+			this.lastSignatureStatus = {
+				ok: false,
+				detail: "não foi possível extrair fingerprint da chave pública configurada",
+			};
+			return {
+				valid: false,
+				reason: "não foi possível extrair o fingerprint da chave pública configurada. Verifique se a armadura está completa.",
 			};
 		}
 
@@ -595,8 +538,6 @@ export class AutoUpdateModule implements HubModule {
 			const dataPath = path.join(tempDir, assetName);
 			await writeFile(keyPath, settings.signingPublicKey);
 
-			// O .sig é BINÁRIO (formato OpenPGP) — lê como arrayBuffer, nunca como
-			// texto (a conversão para string corromperia os bytes da assinatura).
 			const sigResponse = await requestUrl({ url: signatureUrl, method: "GET" });
 			await writeFile(sigPath, new Uint8Array(sigResponse.arrayBuffer));
 			await writeFile(dataPath, assetContent);
@@ -609,18 +550,33 @@ export class AutoUpdateModule implements HubModule {
 				return { valid: false, reason: `falha ao importar a chave pública no keyring temporário: ${importRun.stderr.slice(0, 200)}` };
 			}
 			const verifyRun = await runGpgCommand(["--batch", "--status-fd", "1", "--verify", sigPath, dataPath], env);
-			return interpretGpgStatusOutput(verifyRun.stdout);
+			const outcome = interpretGpgStatusOutput(verifyRun.stdout);
+
+			// Validação de identidade: mesmo que o gpg diga GOODSIG, o
+			// fingerprint da chave que assinou deve bater com o configurado.
+			if (outcome.valid && outcome.keyFingerprint) {
+				const normalizedSigning = normalizeFingerprint(outcome.keyFingerprint);
+				const normalizedExpected = normalizeFingerprint(expectedFingerprint);
+				if (normalizedSigning !== normalizedExpected) {
+					return {
+						valid: false,
+						reason: `a assinatura foi feita pela chave ${outcome.keyFingerprint} mas a chave confiada é ${expectedFingerprint} — assinatura de chave não confiada rejeitada`,
+						keyFingerprint: outcome.keyFingerprint,
+					};
+				}
+			} else if (outcome.valid && !outcome.keyFingerprint) {
+				return {
+					valid: false,
+					reason: "gpg reportou assinatura válida mas não forneceu fingerprint para validação de identidade",
+				};
+			}
+
+			return outcome;
 		} finally {
 			await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
 		}
 	}
 
-	/**
-	 * Guarda uma cópia dos arquivos atuais antes de sobrescrever — permite
-	 * rollback. Os CONTEÚDOS vão para arquivos em `.backup/` (na pasta do
-	 * plugin); no settings entra só o metadado — o data.json deixou de
-	 * carregar main.js inteiro a cada save.
-	 */
 	private async backupCurrentVersion(): Promise<void> {
 		const adapter = this.context!.app.vault.adapter;
 		const pluginDir = this.getPluginDir();
@@ -629,9 +585,9 @@ export class AutoUpdateModule implements HubModule {
 			existence[name] = await adapter.exists(`${pluginDir}/${name}`);
 		}
 		const toCopy = pickExisting(existence);
-		if (toCopy.length === 0) return; // nada a copiar — sem metadado mentiroso
+		if (toCopy.length === 0) return;
 
-		await adapter.mkdir(`${pluginDir}/${BACKUP_DIR}`).catch(() => undefined); // já existe = ok
+		await adapter.mkdir(`${pluginDir}/${BACKUP_DIR}`).catch(() => undefined);
 		for (const name of toCopy) {
 			const content = await adapter.read(`${pluginDir}/${name}`);
 			await adapter.write(backupFilePath(pluginDir, name), content);
@@ -645,10 +601,6 @@ export class AutoUpdateModule implements HubModule {
 		});
 	}
 
-	/**
-	 * Restaura a versão anterior: lê os conteúdos de `.backup/` e reescreve
-	 * os arquivos do plugin. Backup em ARQUIVOS (metadado pequeno no settings).
-	 */
 	async rollback(): Promise<void> {
 		const settings = this.readSettings();
 		const backup = settings.previousVersionBackup;
@@ -666,9 +618,6 @@ export class AutoUpdateModule implements HubModule {
 		}
 		const toRestore = readBackFromDisk(backup, diskContents);
 		if (Object.keys(toRestore).length === 0) {
-			// Metadado sem nenhum arquivo legível: o backup apodreceu (usuário
-			// apagou a pasta, sync conflitante). O botão morre COM aviso claro —
-			// nunca um rollback que escreve nada e "funciona".
 			await this.context?.updateSettings({ previousVersionBackup: undefined });
 			new Notice(
 				"All iₙ oNe: o backup da versão anterior não está mais legível (pasta .backup apagada?). Não há como reverter."
@@ -682,10 +631,6 @@ export class AutoUpdateModule implements HubModule {
 	}
 
 	private getPluginDir(): string {
-		// Deve bater com o `id` do manifest.json — o Obsidian instala o plugin
-		// em plugins/<id>/. Se o id mudar um dia, mudar aqui JUNTO (a Rodada 7
-		// já trocou o id uma vez; atualizar só um dos lados faria o update
-		// gravar main.js/manifest.json numa pasta que o Obsidian não lê).
 		return `${this.context!.app.vault.configDir}/plugins/All-in-oNe`;
 	}
 
@@ -699,8 +644,6 @@ export class AutoUpdateModule implements HubModule {
 /**
  * Lê checksums declarados no corpo do release, em linhas no formato:
  *   `sha256 main.js: <hash>`
- * Se o release não declarar nenhum, a verificação é simplesmente pulada
- * (não é obrigatório — mas quando existe, precisa bater).
  */
 async function sha256Hex(text: string): Promise<string> {
 	const bytes = new TextEncoder().encode(text);
@@ -708,4 +651,13 @@ async function sha256Hex(text: string): Promise<string> {
 	return Array.from(new Uint8Array(digest))
 		.map((b) => b.toString(16).padStart(2, "0"))
 		.join("");
+}
+
+/**
+ * Normaliza fingerprint GPG: remove espaços, maiúsculas, prefixo 0x.
+ * GPG pode reportar "0x ABCD 1234" ou "ABCD1234" — a comparação deve
+ * ser insensível a essas variações.
+ */
+function normalizeFingerprint(fp: string): string {
+	return fp.replace(/\s+/g, "").replace(/^0x/i, "").toLowerCase();
 }
