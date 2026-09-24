@@ -238,7 +238,10 @@ export class FileLifecycleModule implements HubModule {
 				normalizePath(`${folder ? folder + "/" : ""}${name}.md`)
 			);
 			const oldPath = file.path;
-			await this.context!.app.fileManager.renameFile(file, target);
+			await this.context!.fileWriteQueueRunMany(
+				[oldPath, target],
+				() => this.context!.app.fileManager.renameFile(file, target)
+			);
 			await this.context?.bus.emit(
 				"lifecycle:note-renamed",
 				{ path: target, oldPath },
@@ -261,7 +264,10 @@ export class FileLifecycleModule implements HubModule {
 
 	async promptDelete(file: TFile): Promise<void> {
 		if (!this.readSettings().confirmOnDelete) {
-			await this.context!.app.vault.trash(file, true);
+			await this.context!.fileWriteQueueRun(
+				file.path,
+				() => this.context!.app.vault.trash(file, true)
+			);
 			return;
 		}
 		new ConfirmModal(
@@ -270,7 +276,10 @@ export class FileLifecycleModule implements HubModule {
 			`Mandar "${file.path}" para a lixeira? Dá para recuperar de lá depois.`,
 			async () => {
 				// Sempre lixeira, nunca exclusão direta — rede de segurança.
-				await this.context!.app.vault.trash(file, true);
+				await this.context!.fileWriteQueueRun(
+					file.path,
+					() => this.context!.app.vault.trash(file, true)
+				);
 				new Notice("Nota movida para a lixeira.");
 			}
 		).open();
@@ -284,7 +293,10 @@ export class FileLifecycleModule implements HubModule {
 				const finalPath = await uniqueVaultPath(this.context!.app, desired);
 				await ensureVaultFolder(this.context!.app, targetFolder);
 				const oldPath = file.path;
-				await this.context!.app.fileManager.renameFile(file, finalPath);
+				await this.context!.fileWriteQueueRunMany(
+					[oldPath, finalPath],
+					() => this.context!.app.fileManager.renameFile(file, finalPath)
+				);
 				await this.context?.bus.emit(
 					"lifecycle:note-renamed",
 					{ path: finalPath, oldPath },
