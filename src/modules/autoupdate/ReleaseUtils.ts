@@ -39,7 +39,23 @@ export function compareVersions(a: string, b: string): number {
 	if (!A.pre && B.pre) return 1;
 	if (A.pre && B.pre) {
 		if (A.pre === B.pre) return 0;
-		const ap = A.pre.split("."); const bp = B.pre.split("."); for (let i = 0; i < Math.max(ap.length, bp.length); i++) { if (ap[i] === undefined) return -1; if (bp[i] === undefined) return 1; const an = String(Number(ap[i])) === ap[i]; const bn = String(Number(bp[i])) === bp[i]; if (an && bn) { const d = Number(ap[i]) - Number(bp[i]); if (d) return d; } else if (an !== bn) return an ? -1 : 1; else if (ap[i] !== bp[i]) return ap[i] < bp[i] ? -1 : 1; } return 0;
+		const ap = A.pre.split(".");
+		const bp = B.pre.split(".");
+		for (let i = 0; i < Math.max(ap.length, bp.length); i++) {
+			if (ap[i] === undefined) return -1;
+			if (bp[i] === undefined) return 1;
+			const an = /^\\d+$/.test(ap[i]);
+			const bn = /^\\d+$/.test(bp[i]);
+			if (an && bn) {
+				const diff = Number(ap[i]) - Number(bp[i]);
+				if (diff !== 0) return diff;
+			} else if (an !== bn) {
+				return an ? -1 : 1;
+			} else if (ap[i] !== bp[i]) {
+				return ap[i] < bp[i] ? -1 : 1;
+			}
+		}
+		return 0;
 	}
 	return 0;
 }
