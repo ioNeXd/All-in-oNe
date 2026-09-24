@@ -14,7 +14,7 @@ núcleo comum de eventos, e todos configuráveis pelo usuário.
 
 | Módulo | O que faz |
 |---|---|
-| **Servidor MCP** | Expõe o vault (leitura e escrita) para clientes MCP como Claude Desktop, Cursor ou Claude Code, via HTTP POST (subset stateless do Streamable HTTP), enquanto o Obsidian estiver aberto. Permissões por pasta, modo dry-run, rate limiting, split/combine de notas, liberação temporária de escrita, anexos (listar/ler/upload/excluir para a lixeira). |
+| **Servidor MCP** | Expõe o vault (leitura e escrita) para clientes MCP como Claude Desktop, Cursor ou Claude Code, via HTTP POST (Streamable HTTP stateless), com suporte a MCP 2026-07-28 e compatibilidade com a era 2025, enquanto o Obsidian estiver aberto. Permissões por pasta, modo dry-run, rate limiting, split/combine de notas, liberação temporária de escrita, anexos (listar/ler/upload/excluir para a lixeira). |
 | **Ciclo de vida de arquivos** | Pergunta o nome ao criar qualquer nota antes dos outros módulos reagirem; confirmação opcional para renomear/mover/excluir. |
 | **Estilos** | Editor de CSS livre + painel visual (~40 variáveis), 7 temas prontos, preview antes de aplicar, undo, export/import — estiliza o próprio Obsidian e os outros módulos (ex.: o Calendário). |
 | **Auto-update** | Verifica e aplica atualizações a partir dos Releases do repositório no GitHub (o plugin não está na loja oficial). Canal estável/beta, checksum SHA-256, verificação opcional de assinatura GPG, cedência automática ao BRAT, backup automático e rollback. |

@@ -48,6 +48,22 @@ afterAll(async () => {
 	for (const h of handles) await h.stop();
 });
 
+function postModern(port: number, body: unknown, name?: string) {
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+		Accept: "application/json, text/event-stream",
+		"MCP-Protocol-Version": "2026-07-28",
+		"Mcp-Method": (body as { method: string }).method,
+		Authorization: "Bearer tok",
+	};
+	if (name !== undefined) headers["Mcp-Name"] = name;
+	return fetch(`http://127.0.0.1:${port}`, {
+		method: "POST",
+		headers,
+		body: JSON.stringify(body),
+	});
+}
+
 describe("MCP — handshake do protocolo (initialize + notificações)", () => {
 	it("initialize responde protocolVersion (ecoando a pedida), capabilities e serverInfo", async () => {
 		const h = await start();
@@ -685,5 +701,106 @@ describe("MCP — códigos de erro JSON-RPC padronizados", () => {
 		const json = (await res.json()) as { result: { content: { type: string; text: string }[]; isError?: boolean } };
 		expect(json.result.isError).toBe(true);
 		expect(json.result.content[0].text).toBe("explodiu");
+	});
+});
+
+
+describe("MCP 2026-07-28 — era moderna stateless", () => {
+	it("server/discover anuncia a era moderna, capabilities e identidade em _meta", async () => {
+		const h = await start();
+		const res = await postModern(h.port, {
+			jsonrpc: "2.0",
+			id: 1,
+			method: "server/discover",
+			params: { _meta: {
+				"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+				"io.modelcontextprotocol/clientCapabilities": {},
+			} },
+		});
+		const json = await res.json();
+		expect(res.status).toBe(200);
+		expect(json.result.resultType).toBe("complete");
+		expect(json.result.supportedVersions).toEqual(["2026-07-28"]);
+		expect(json.result.capabilities.tools).toEqual({ listChanged: false });
+		expect(json.result._meta["io.modelcontextprotocol/serverInfo"]).toEqual({ name: "All iₙ oNe", version: "0.1.0" });
+		expect(json.result.ttlMs).toBeGreaterThan(0);
+		expect(json.result.cacheScope).toBe("private");
+	});
+
+	it("tools/list funciona sem initialize e retorna o contrato cacheável moderno", async () => {
+		const h = await start();
+		const res = await postModern(h.port, {
+			jsonrpc: "2.0",
+			id: 2,
+			method: "tools/list",
+			params: { _meta: {
+				"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+				"io.modelcontextprotocol/clientCapabilities": {},
+			} },
+		});
+		const json = await res.json();
+		expect(res.status).toBe(200);
+		expect(json.result.resultType).toBe("complete");
+		expect(json.result.tools.length).toBeGreaterThan(0);
+		expect(json.result.ttlMs).toBe(300000);
+		expect(json.result.cacheScope).toBe("private");
+	});
+
+	it("tools/call funciona de forma autocontida e sem sessão", async () => {
+		const h = await start();
+		const res = await postModern(h.port, {
+			jsonrpc: "2.0",
+			id: 3,
+			method: "tools/call",
+			params: {
+				name: "read_note",
+				arguments: { path: "x.md" },
+				_meta: {
+					"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+					"io.modelcontextprotocol/clientCapabilities": {},
+				},
+			},
+		}, "read_note");
+		const json = await res.json();
+		expect(res.status).toBe(200);
+		expect(json.result.resultType).toBe("complete");
+		expect(json.result.content).toEqual([{ type: "text", text: JSON.stringify({ eco: "read_note" }) }]);
+		expect(json.result._meta["io.modelcontextprotocol/serverInfo"]).toEqual({ name: "All iₙ oNe", version: "0.1.0" });
+	});
+
+	it("rejeita mismatch entre Mcp-Name e params.name", async () => {
+		const h = await start();
+		const res = await postModern(h.port, {
+			jsonrpc: "2.0",
+			id: 4,
+			method: "tools/call",
+			params: {
+				name: "read_note",
+				arguments: {},
+				_meta: {
+					"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+					"io.modelcontextprotocol/clientCapabilities": {},
+				},
+			},
+		}, "outro");
+		expect(res.status).toBe(400);
+		const json = await res.json();
+		expect(json.error.code).toBe(-32020);
+	});
+
+	it("rejeita initialize quando o cliente declara a era moderna", async () => {
+		const h = await start();
+		const res = await postModern(h.port, {
+			jsonrpc: "2.0",
+			id: 5,
+			method: "initialize",
+			params: { _meta: {
+				"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+				"io.modelcontextprotocol/clientCapabilities": {},
+			} },
+		});
+		expect(res.status).toBe(404);
+		const json = await res.json();
+		expect(json.error.code).toBe(-32601);
 	});
 });

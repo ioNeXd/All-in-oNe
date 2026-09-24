@@ -25,7 +25,7 @@ seções seguintes detalham cada módulo em seu estado atual.
 
 | Módulo | v0.1.0 (baseline) | v0.1.1 (2026-09-17) | v0.2.0 (2026-09-22) |
 |---|---|---|---|
-| MCP | `0.1.0` — ferramentas base de leitura e escrita | `0.1.0` | `0.2.0` — anexos completos (`put_attachment`/`delete_attachment`), log de atividade dedicado (`mcp:action-logged`), negociação de `toolsApiVersion` no handshake e `get_server_info` |
+| MCP | `0.1.0` — ferramentas base de leitura e escrita | `0.1.0` | `0.3.0` — MCP 2026-07-28 stateless + compatibilidade com a era 2025, além das features de anexos/log/toolsApiVersion |
 | Ciclo de vida de arquivos | `0.1.0` — nome ao criar, confirmação opcional de renome/mover/exclusão | `0.1.0` | `0.1.0` — sem mudanças |
 | Estilos | `0.1.0` — temas, painel visual, preview/undo/export | `0.1.0` | `0.2.0` — realce de sintaxe no editor livre (overlay + `CssHighlight.ts`) |
 | Templates por pasta | `0.1.0` — regras por pasta, herança, status, movimentação | `0.1.0` | `0.1.0` — sem mudanças de código (a Parte 0 do plano corrigiu apenas docs) |
@@ -70,8 +70,7 @@ código, apenas com rótulos de versão diferentes.
 
 ## Módulo MCP — funcional
 
-**Versão do módulo:** `0.2.0` — anexos completos, log de atividade
-dedicado e negociação de versão são os marcos desta versão do módulo
+**Versão do módulo:** `0.3.0` — suporte ao MCP 2026-07-28 (server/discover, envelope _meta, headers de roteamento, respostas cacheáveis e ausência de sessão) mantendo a era 2025
 (ver tabela acima).
 
 **Funciona:** servidor Streamable HTTP real (Node `http`), autenticação
@@ -95,7 +94,7 @@ escuta** (não a configurada), reinício automático quando a porta configurada
 muda, painel completo no Lobby (porta, somente-leitura, dry-run, listas de
 permissão, regenerar token, reiniciar — tudo usável com o módulo desligado).
 
-**Não implementado ainda:** ferramentas de backlinks/links; integração com
+**Compatibilidade MCP:** a era moderna 2026-07-28 é suportada para `server/discover`, `tools/list` e `tools/call`. A implementação continua deliberadamente limitada a Tools: `resources/*`, `prompts/*`, `subscriptions/listen`, Tasks e MRTR não são anunciados nem implementados. A era 2025 continua disponível pelo handshake legado.\n\n**Não implementado ainda:** ferramentas de backlinks/links; integração com
 Dataview/Bases — dependência externa, não implementável dentro do plugin:
 `dataview_query` exige o plugin Dataview instalado e habilitado; sem ele,
 a ferramenta responde com erro que aponta o pré-requisito em vez de falhar

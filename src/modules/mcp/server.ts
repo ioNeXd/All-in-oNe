@@ -8,25 +8,23 @@ import { AuthThrottle, identityOf } from "./AuthThrottle";
  * TRANSPORTE: HTTP POST (subconjunto deliberado do Streamable HTTP)
  * ---------------------------------------------------------------
  * Implementação stateless, POST-only: recebe JSON-RPC via POST e responde
- * com JSON. GET/SSE, headers MCP (Mcp-Method, Mcp-Name) e notificações
- * server-initiated NÃO são implementados — e não precisam ser.
+ * com JSON. A era moderna usa os headers MCP de roteamento; GET/SSE e
+ * notificações server-initiated não são implementados.
  *
  * ERA / COMPATIBILIDADE:
- *   Este servidor implementa o transporte HTTP stateless da era MCP 2025,
- *   usando o handshake initialize. Versões suportadas: 2025-03-26 e
- *   2025-06-18. NÃO é compatível com MCP 2025-11-25 ou 2026-07-28
- *   (server/discover). Migração para a era moderna é trabalho de upgrade
- *   arquitetural, não correção — registrado como pendência.
+ *   Este servidor implementa duas eras MCP no mesmo endpoint: a era legada
+ *   via initialize (2025-03-26, 2025-06-18 e 2025-11-25) e a era moderna
+ *   2026-07-28 via server/discover, envelope _meta e headers MCP por requisição.
  *
  * DECISÃO DE DESIGN: este servidor é deliberadamente um transport subset.
- * O spec MCP Streamable HTTP (2025-06-18) permite estado puro POST-only
- * quando o servidor não suporta notificações server-initiated. Este plugin
- * declara listChanged: false no handshake → SSE não é necessário.
+ * O subset HTTP deste plugin usa POST-only
+ * e declara listChanged: false → SSE/subscriptions não são necessários para
+ * a superfície de Tools implementada.
  *
  * Contrato implementado:
- *   ✔ POST / com JSON-RPC 2.0 (initialize, tools/list, tools/call)
+ *   ✔ POST / com JSON-RPC 2.0 (server/discover, initialize, tools/list, tools/call)
  *   ✔ Notificações JSON-RPC (sem id) retornam 202 Accepted
- *   ✔ Negociação de versão do protocolo MCP (2025-03-26, 2025-06-18)
+ *   ✔ Negociação de versão do protocolo MCP nas duas eras
  *   ✔ Negociação de versão da API de ferramentas (toolsApiVersion)
  *   ✔ Validação de argumentos contra inputSchema (required + type)
  *   ✔ Autenticação Bearer + throttling + rate limiting
@@ -34,10 +32,9 @@ import { AuthThrottle, identityOf } from "./AuthThrottle";
  *
  * O que NÃO faz (e por quê):
  *   ✘ GET/SSE — notificações server-initiated; sem elas, GET é inútil
- *   ✘ Headers Mcp-Method/Mcp-Name — requisitos 2026; clientes atuais
- *     não os enviam, e o spec permite omiti-los no POST
- *   ✘ MCP 2025-11-25 / 2026-07-28 — era moderna (server/discover);
- *     mudança arquitetural registrada como pendência未来的工作
+ *   ✘ GET/SSE/subscriptions/listen — não implementados porque este plugin
+ *     não anuncia notificações server-initiated
+ *   ✘ resources/prompts/Tasks/MRTR — fora do escopo atual; somente Tools é anunciado
  *
  * Clientes suportados e testados:
  *   • Claude Desktop (macOS/Windows)
@@ -78,8 +75,14 @@ export interface McpServerHandle {
 }
 
 /** Versões do protocolo MCP que este servidor implementa de fato. */
-const SUPPORTED_PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18"] as const;
-const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[SUPPORTED_PROTOCOL_VERSIONS.length - 1];
+const SUPPORTED_PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"] as const;
+const LATEST_PROTOCOL_VERSION = "2025-11-25";
+const MODERN_PROTOCOL_VERSION = "2026-07-28";
+const MODERN_TTL_MS = 5 * 60 * 1000;
+const SERVER_INFO_META_KEY = "io.modelcontextprotocol/serverInfo";
+const CLIENT_PROTOCOL_META_KEY = "io.modelcontextprotocol/protocolVersion";
+const CLIENT_CAPABILITIES_META_KEY = "io.modelcontextprotocol/clientCapabilities";
+const CLIENT_INFO_META_KEY = "io.modelcontextprotocol/clientInfo";
 const PROTOCOL_VERSION_INCOMPATIBLE = "PROTOCOL_VERSION_INCOMPATIBLE";
 
 /** Erro enviado ao cliente quando a negociação de versão da API rejeita o pedido. */
@@ -305,16 +308,99 @@ async function handleRequest(
 		return;
 	}
 
-	// Notificação JSON-RPC (requisição SEM id — ex.: notifications/initialized,
-	// que clientes reais mandam logo após o initialize): por definição não tem
-	// resposta. O Streamable HTTP usa 202 Accepted sem corpo — responder com
-	// um erro aqui confundiria o cliente no meio do handshake.
+	// Notificações não têm resposta. Na era moderna ainda validamos o envelope
+	// antes de aceitar a notificação, pois cada requisição é autocontida.
 	if (message.id === undefined) {
+		if (req.headers["mcp-protocol-version"] === MODERN_PROTOCOL_VERSION) {
+			const modernError = validateModernRequest(req, message);
+			if (modernError) {
+				res.writeHead(400).end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32020, message: modernError } }));
+				return;
+			}
+		}
 		res.writeHead(202).end();
 		return;
 	}
 
 	res.setHeader("Content-Type", "application/json");
+
+	if (req.headers["mcp-protocol-version"] === MODERN_PROTOCOL_VERSION) {
+		const modernError = validateModernRequest(req, message);
+		if (modernError) {
+			respondError(res, message.id, modernError, { code: "HEADER_MISMATCH", jsonRpcCode: -32020, httpStatus: 400 });
+			return;
+		}
+
+		switch (message.method) {
+			case "server/discover":
+				respondModern(res, message.id, {
+					resultType: "complete",
+					supportedVersions: [MODERN_PROTOCOL_VERSION],
+					capabilities: { tools: { listChanged: false } },
+					ttlMs: 60 * 60 * 1000,
+					cacheScope: "private",
+				}, options.serverInfo);
+				return;
+			case "tools/list":
+				respondModern(res, message.id, {
+					resultType: "complete",
+					tools: TOOL_DEFINITIONS,
+					ttlMs: MODERN_TTL_MS,
+					cacheScope: "private",
+				}, options.serverInfo);
+				return;
+			case "tools/call": {
+				const toolName = String(message.params?.name ?? "");
+				const rawArgs = message.params?.arguments;
+				if (rawArgs !== undefined && rawArgs !== null && (typeof rawArgs !== "object" || Array.isArray(rawArgs))) {
+					respondError(res, message.id, "O campo 'arguments' deve ser um objeto.", {
+						code: "INVALID_PARAMS",
+						httpStatus: 400,
+						jsonRpcCode: JSONRPC_ERRORS.INVALID_PARAMS,
+					});
+					return;
+				}
+				const args = (rawArgs ?? {}) as Record<string, unknown>;
+				const def = TOOL_DEFINITIONS.find((d) => d.name === toolName);
+				if (!def) {
+					respondError(res, message.id, `Ferramenta desconhecida: ${toolName}`, {
+						jsonRpcCode: JSONRPC_ERRORS.INVALID_PARAMS,
+						httpStatus: 400,
+					});
+					return;
+				}
+				if (def) {
+					const validationError = validateToolArgs(args, def.inputSchema);
+					if (validationError) {
+						respondError(res, message.id, validationError, {
+							code: "INVALID_PARAMS",
+							jsonRpcCode: JSONRPC_ERRORS.INVALID_PARAMS,
+						});
+						return;
+					}
+				}
+				const result = await options.handleToolCall(toolName, args);
+				respondModern(res, message.id, toToolResult(result.ok ? result.result : (result.error ?? "Erro desconhecido."), !result.ok), options.serverInfo);
+				return;
+			}
+			default:
+				respondError(res, message.id, `Método não suportado na era MCP 2026-07-28: ${message.method}`, {
+					jsonRpcCode: JSONRPC_ERRORS.METHOD_NOT_FOUND,
+					httpStatus: 404,
+				});
+		}
+		return;
+	}
+
+	const requestProtocolHeader = Array.isArray(req.headers["mcp-protocol-version"]) ? req.headers["mcp-protocol-version"][0] : req.headers["mcp-protocol-version"];
+	if (requestProtocolHeader && !(SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(requestProtocolHeader)) {
+		respondError(res, message.id, "Versão do protocolo não suportada.", {
+			code: "UNSUPPORTED_PROTOCOL_VERSION",
+			httpStatus: 400,
+			jsonRpcCode: -32022,
+		});
+		return;
+	}
 
 	switch (message.method) {
 		case "initialize": {
@@ -418,13 +504,55 @@ function respond(res: http.ServerResponse, id: unknown, result: unknown): void {
 	res.writeHead(200).end(JSON.stringify({ jsonrpc: "2.0", id, result }));
 }
 
+function validateModernRequest(req: http.IncomingMessage, message: { method?: string; params?: Record<string, unknown> }): string | null {
+	const protocolHeader = Array.isArray(req.headers["mcp-protocol-version"]) ? req.headers["mcp-protocol-version"][0] : req.headers["mcp-protocol-version"];
+	const methodHeader = Array.isArray(req.headers["mcp-method"]) ? req.headers["mcp-method"][0] : req.headers["mcp-method"];
+	const nameHeader = Array.isArray(req.headers["mcp-name"]) ? req.headers["mcp-name"][0] : req.headers["mcp-name"];
+	if (protocolHeader !== MODERN_PROTOCOL_VERSION) return "MCP-Protocol-Version inválido.";
+	if (methodHeader !== message.method) return "Mcp-Method deve corresponder ao método JSON-RPC.";
+	const meta = message.params?._meta;
+	if (meta === null || typeof meta !== "object" || Array.isArray(meta)) return "params._meta é obrigatório na era MCP 2026-07-28.";
+	const m = meta as Record<string, unknown>;
+	if (m[CLIENT_PROTOCOL_META_KEY] !== MODERN_PROTOCOL_VERSION) return "A versão em params._meta não corresponde a 2026-07-28.";
+	const caps = m[CLIENT_CAPABILITIES_META_KEY];
+	if (caps === null || typeof caps !== "object" || Array.isArray(caps)) return "clientCapabilities deve ser um objeto.";
+	const info = m[CLIENT_INFO_META_KEY];
+	if (info !== undefined && (info === null || typeof info !== "object" || Array.isArray(info) ||
+		typeof (info as Record<string, unknown>).name !== "string" ||
+		typeof (info as Record<string, unknown>).version !== "string")) return "clientInfo inválido.";
+	if (message.method === "tools/call") {
+		const name = message.params?.name;
+		if (typeof name !== "string" || nameHeader !== name) return "Mcp-Name deve corresponder a params.name.";
+	} else if (nameHeader !== undefined) {
+		return "Mcp-Name não é permitido neste método.";
+	}
+	const accept = req.headers["accept"] ?? "";
+	const parts = accept.split(",").map((p) => p.split(";")[0].trim().toLowerCase());
+	if (!parts.includes("application/json") || !parts.includes("text/event-stream")) {
+		return "Accept deve incluir application/json e text/event-stream.";
+	}
+	return null;
+}
+
+function respondModern(res: http.ServerResponse, id: unknown, result: Record<string, unknown>, serverInfo: { name: string; version: string }): void {
+	res.writeHead(200).end(JSON.stringify({
+		jsonrpc: "2.0",
+		id,
+		result: {
+			resultType: "complete",
+			...result,
+			_meta: { ...(result._meta as Record<string, unknown> | undefined), [SERVER_INFO_META_KEY]: serverInfo },
+		},
+	}));
+}
+
 function respondError(
 	res: http.ServerResponse,
 	id: unknown,
 	error: string,
-	opts?: { code?: string; jsonRpcCode?: number }
+	opts?: { code?: string; jsonRpcCode?: number; httpStatus?: number }
 ): void {
-	res.writeHead(200).end(
+	res.writeHead(opts?.httpStatus ?? 200).end(
 		JSON.stringify({
 			jsonrpc: "2.0",
 			id,
