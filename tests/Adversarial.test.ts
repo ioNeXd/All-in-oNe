@@ -178,7 +178,6 @@ describe("Adversarial — FileWriteQueue concorrência", () => {
 describe("Adversarial — SplitPersistence crash/falha", () => {
 	const dir = ".obsidian/plugins/All-in-oNe";
 
-	/** Cria store em memória e devolve handle + referência ao Map de arquivos. */
 	function makeStore(initial: Record<string, string> = {}) {
 		const files = new Map<string, string>(Object.entries(initial));
 		const adapter = {
@@ -288,14 +287,13 @@ describe("Adversarial — GPG fingerprint", () => {
 
 	it("extractFingerprintFromArmoredKey: armadura inválida → null", async () => {
 		const key = [
-		"-----BEGIN PGP PUBLIC KEY BLOCK-----",
-		"Version: GnuPG v2",
-		"",
-		"-----END PGP PUBLIC KEY BLOCK-----",
-	].join("\\n");
+			"-----BEGIN PGP PUBLIC KEY BLOCK-----",
+			"Version: GnuPG v2",
+			"",
+			"-----END PGP PUBLIC KEY BLOCK-----",
+		].join("\n");
 		const fp = await extractFingerprintFromArmoredKey(key);
-		expect(fp).not.toBeNull();
-		expect(fp).toMatch(/^keyhash:/);
+		expect(fp).toBeNull();
 	});
 
 	it("extractFingerprintFromArmoredKey: string vazia → null", async () => {
