@@ -910,7 +910,7 @@ class DateActionModal extends Modal {
 					this.callbacks.editEvent(event);
 				};
 				actions.createEl("button", { text: "Excluir" }).onclick = () => {
-					void this.callbacks.deleteEvent(event).then(() => {
+					void Promise.resolve(this.callbacks.deleteEvent(event)).then(() => {
 						this.events = this.events.filter((item) => item.id !== event.id);
 						this.onOpen();
 					});
