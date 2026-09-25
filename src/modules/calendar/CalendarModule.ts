@@ -557,8 +557,37 @@ export class CalendarModule implements HubModule {
 
 	/** Clique num dia: abre a nota existente, ou pergunta o que fazer. */
 	private async handleDayClick(date: Date): Promise<void> {
-		const notes=this.findNotesForDate(date),events=this.eventsForDate(date),templates=await this.listAvailableTemplates();
-		new DateActionModal(this.context!.app,date,notes,events,templates,{openNote:file=>this.context!.app.workspace.getLeaf(false).openFile(file),createDaily:async()=>{const f=await this.createDailyNote(date);await this.context!.app.workspace.getLeaf(false).openFile(f)},createTemplate:async t=>{const f=await this.createTemplateNote(date,t);await this.context!.app.workspace.getLeaf(false).openFile(f)},createEvent:()=>this.openEventEditor(date),editEvent:e=>this.editEvent(e)}).open();
+		const notes = this.findNotesForDate(date);
+		const dailyNote = this.findDailyNote(date);
+		const events = this.eventsForDate(date);
+		const templates = await this.listAvailableTemplates();
+		const additionalNotes = notes.filter((note) => note.path !== dailyNote?.path);
+
+		new DateActionModal(
+			this.context!.app,
+			date,
+			dailyNote,
+			additionalNotes,
+			events,
+			templates,
+			{
+				openNote: (file) => this.context!.app.workspace.getLeaf(false).openFile(file),
+				createDaily: async () => {
+					const file = await this.createDailyNote(date);
+					await this.context!.app.workspace.getLeaf(false).openFile(file);
+				},
+				createTemplate: async (template) => {
+					const file = await this.createTemplateNote(date, template);
+					await this.context!.app.workspace.getLeaf(false).openFile(file);
+				},
+				createEvent: () => this.openEventEditor(date),
+				editEvent: (event) => this.editEvent(event),
+				deleteEvent: async (event) => {
+					await this.removeEvent(event.id);
+					this.refreshPanel();
+				},
+			}
+		).open();
 	}
 
 	private async updateGlobalPath(key: string, value: string): Promise<void> {
@@ -825,59 +854,110 @@ interface DateActionCallbacks {
 	createTemplate(template: string): void | Promise<void>;
 	createEvent(): void;
 	editEvent(event: CalendarEvent): void;
+	deleteEvent(event: CalendarEvent): void | Promise<void>;
 }
 
 class DateActionModal extends Modal {
 	constructor(
 		app: App,
 		private date: Date,
-		private notes: TFile[],
+		private dailyNote: TFile | null,
+		private additionalNotes: TFile[],
 		private events: CalendarEvent[],
 		private templates: string[],
 		private callbacks: DateActionCallbacks
 	) { super(app); }
 
 	onOpen(): void {
-		this.contentEl.createEl("h2", { text: this.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" }) });
-		if (this.notes.length === 0) this.button("📝 Nota diária", () => this.callbacks.createDaily());
-		else if (this.notes.length === 1) this.button("📝 Nota atual", () => this.callbacks.openNote(this.notes[0]));
-		else {
-			this.contentEl.createEl("h3", { text: "📝 Notas do dia" });
-			for (const note of this.notes) this.button(note.basename, () => this.callbacks.openNote(note));
+		this.contentEl.empty();
+		this.contentEl.createEl("h2", {
+			text: this.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" }),
+		});
+
+		this.contentEl.createEl("h3", { text: "📝 Nota diária" });
+		if (this.dailyNote) {
+			this.button("Abrir nota diária", () => this.callbacks.openNote(this.dailyNote!));
+		} else {
+			this.button("Criar nota diária", () => this.callbacks.createDaily());
 		}
+
 		this.contentEl.createEl("h3", { text: "📋 Nota template" });
-		this.renderTemplates();
+		this.button("➕ Criar nota adicional", () => this.renderTemplatePicker());
+		if (this.additionalNotes.length > 0) {
+			this.contentEl.createEl("p", {
+				cls: "ione-hub-lobby__description",
+				text: "Notas adicionais deste dia:",
+			});
+			for (const note of this.additionalNotes) {
+				this.button(note.basename, () => this.callbacks.openNote(note));
+			}
+		}
+
 		this.contentEl.createEl("h3", { text: "🔔 Eventos" });
-		if (this.events.length === 0) this.button("Criar evento", this.callbacks.createEvent);
-		else {
+		if (this.events.length === 0) {
+			this.button("Criar evento", this.callbacks.createEvent);
+		} else {
 			for (const event of this.events) {
 				const row = this.contentEl.createDiv({ cls: "ione-hub-calendar__event-row" });
 				row.createEl("strong", { text: event.title });
-				row.createSpan({ text: (event.time ? " · " + event.time : "") + (event.description ? " · " + event.description : "") });
-				row.createEl("button", { text: "Editar" }).onclick = () => { this.close(); this.callbacks.editEvent(event); };
+				row.createSpan({
+					text: (event.time ? " · " + event.time : "") +
+						(event.description ? " · " + event.description : ""),
+				});
+				const actions = row.createDiv({ cls: "ione-hub-calendar__event-actions" });
+				actions.createEl("button", { text: "Editar" }).onclick = () => {
+					this.close();
+					this.callbacks.editEvent(event);
+				};
+				actions.createEl("button", { text: "Excluir" }).onclick = () => {
+					void this.callbacks.deleteEvent(event).then(() => {
+						this.events = this.events.filter((item) => item.id !== event.id);
+						this.onOpen();
+					});
+				};
 			}
 			this.button("➕ Criar evento", this.callbacks.createEvent);
 		}
 	}
 
-	private renderTemplates(): void {
-		const input = this.contentEl.createEl("input", { type: "search", placeholder: "Pesquisar template..." });
-		const list = this.contentEl.createDiv({ cls: "ione-hub-calendar__template-list" });
+	private renderTemplatePicker(): void {
+		const wrapper = this.contentEl.createDiv({ cls: "ione-hub-calendar__template-picker" });
+		wrapper.createEl("h4", { text: "Escolha o template" });
+		const input = wrapper.createEl("input", {
+			type: "search",
+			placeholder: "Pesquisar template...",
+		});
+		const list = wrapper.createDiv({ cls: "ione-hub-calendar__template-list" });
 		const render = () => {
 			list.empty();
 			const q = input.value.trim().toLowerCase();
-			for (const template of this.templates.filter((x) => !q || x.toLowerCase().includes(q))) this.buttonInto(list, template, () => this.callbacks.createTemplate(template));
+			const matches = this.templates.filter((x) => !q || x.toLowerCase().includes(q));
+			for (const template of matches) {
+				this.buttonInto(list, template, () => this.callbacks.createTemplate(template));
+			}
+			if (matches.length === 0) {
+				list.createEl("p", {
+					cls: "ione-hub-lobby__description",
+					text: "Nenhum template encontrado.",
+				});
+			}
 		};
 		input.oninput = render;
 		render();
 	}
 
-	private button(label: string, action: () => void | Promise<void>): void { this.buttonInto(this.contentEl, label, action); }
+	private button(label: string, action: () => void | Promise<void>): void {
+		this.buttonInto(this.contentEl, label, action);
+	}
+
 	private buttonInto(parent: HTMLElement, label: string, action: () => void | Promise<void>): void {
 		const button = parent.createEl("button", { text: label });
-		button.style.display = "block"; button.style.width = "100%"; button.style.marginBottom = "6px";
+		button.style.display = "block";
+		button.style.width = "100%";
+		button.style.marginBottom = "6px";
 		button.onclick = () => { void action(); this.close(); };
 	}
+
 	onClose(): void { this.contentEl.empty(); }
 }
 
