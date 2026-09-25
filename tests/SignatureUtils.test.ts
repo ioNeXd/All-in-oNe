@@ -68,20 +68,18 @@ describe("interpretGpgStatusOutput — veredicto", () => {
 		expect(r.reason).toContain("NO_PUBKEY");
 	});
 
-	it("ERRSIG com reason code 4 → algoritmo não suportado", () => {
+	it("ERRSIG → falha de verificação", () => {
 		const r = interpretGpgStatusOutput(
 			"[GNUPG:] ERRSIG 9C1B 1 10 00 1756700000 4 -"
 		);
 		expect(r.valid).toBe(false);
-		expect(r.reason).toContain("algoritmo não suportado");
+		expect(r.reason).toContain("erro ao processar");
 	});
 
-	it("ERRSIG com reason code 5 → dados criptográficos inválidos", () => {
-		const r = interpretGpgStatusOutput(
-			"[GNUPG:] ERRSIG 9C1B 1 10 00 1756700000 5 -"
-		);
+	it("GOODSIG sem VALIDSIG nunca é aceito como assinatura criptograficamente válida", () => {
+		const r = interpretGpgStatusOutput("[GNUPG:] GOODSIG 9C1B Nome");
 		expect(r.valid).toBe(false);
-		expect(r.reason).toContain("inválidos");
+		expect(r.reason).toContain("VALIDSIG");
 	});
 
 	it("saída sem veredicto nenhum → inválida por indeterminação", () => {
