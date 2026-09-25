@@ -14,8 +14,8 @@ src/
     CommandBridge.ts     ← ponte módulos→Command Palette (registro único + checkCallback)
     PathUtils.ts         ← regras puras de caminho (testadas sem vault)
     VaultPaths.ts        ← operações de vault: pastas recursivas, nome único
-    NoteStatus.ts        ← regra pura: pendente/completo (testada) — compartilhada
-                           por templates/calendar/Lobby, sem acoplamento entre módulos
+    NoteMetadata.ts      ← escrita centralizada de frontmatter/status
+    PathResolver.ts       ← resolve raízes e caminhos derivados configuráveis
     secureStore.ts       ← ofuscação de campos sensíveis (ex.: token MCP)
     types.ts             ← formato de HubSettings
 
@@ -29,7 +29,7 @@ src/
     autoupdate/          ← auto-update via GitHub Releases
       ReleaseUtils.ts    ← regra pura: SemVer/assets/checksums (testada)
       SignatureUtils.ts  ← regra pura: decisão/parse da verificação GPG (testada)
-    templates/           ← templates por pasta + fluxo Pendente
+    templates/           ← templates por pasta + fluxo de notas incompletas
     calendar/            ← calendário, eventos recorrentes e lembretes
       IcsParser.ts       ← parser puro de iCalendar (testado)
     notifications/       ← pop-ups com som e não-perturbe
@@ -171,7 +171,7 @@ criação recursiva de pastas (o `vault.createFolder` do Obsidian NÃO cria
 pastas-pai) e nome único com extensão preservada.
 
 O mesmo princípio gerou módulos puras ao lado dos módulos de vault:
-`NoteStatus.ts` (pendente/completo), `WriteRules.ts` (permissões de pasta
+`NoteMetadata.ts` (frontmatter/status), `WriteRules.ts` (permissões de pasta
 do MCP) e `ReleaseUtils.ts` (SemVer). Na v0.2.0 o padrão virou a norma:
 `ToolsApiVersion`, `SignatureUtils`, `IcsParser`, `NotificationList`,
 `HistoryFilter`, `CssHighlight` e `lobbyOrder` — toda regra de decisão
@@ -192,8 +192,7 @@ módulos continuam funcionando normalmente.
 
 Como todos os caminhos são configuráveis pelo usuário (decisão de design),
 existe risco real de dois módulos apontarem, sem querer, para a mesma pasta
-(ex.: pasta de templates do calendário = pasta de Pendente do módulo de
-Templates). Centralizar essa checagem em `SettingsManager.validate()`
+(ex.: pasta de templates do calendário = pasta física `Pendente` do módulo de Templates). Centralizar essa checagem em `SettingsManager.validate()`
 garante que ela rode toda vez que QUALQUER configuração for salva, de
 qualquer módulo, sem cada módulo precisar reimplementar essa lógica. A
 fronteira é por **segmento** ("Secretas2" não casa com um bloqueio de
