@@ -50,6 +50,11 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
 		expect(shouldFire(event, new Date(2026, 8, 15, 23, 0))).toBe(true);
 	});
 
+	it("horário inválido nunca dispara", () => {
+		const event = makeEvent({ time: "25:99" });
+		expect(shouldFire(event, new Date(2026, 8, 15, 23, 59))).toBe(false);
+	});
+
 	/**
 	 * Contrato do evento SEM horário — decisão de produto explicitada no item
 	 * 19 da auditoria: "a qualquer hora do dia", NÃO um default 00:00.
@@ -94,6 +99,12 @@ describe("pasta do mês", () => {
 		expect(monthFolderName(0)).toBe("01 - Janeiro");
 		expect(monthFolderName(8)).toBe("09 - Setembro");
 		expect(monthFolderName(11)).toBe("12 - Dezembro");
+	});
+
+	it("rejeita índice de mês fora do intervalo", () => {
+		expect(() => monthFolderName(-1)).toThrow(RangeError);
+		expect(() => monthFolderName(12)).toThrow(RangeError);
+		expect(() => monthFolderName(1.5)).toThrow(RangeError);
 	});
 });
 
@@ -189,6 +200,16 @@ describe("nextEventDelayMs — agendamento por evento (em vez de polling)", () =
 		expect(nextEventDelayMs(events, NOW)).toBe(30 * 60 * 1000);
 	});
 
+	it("usa a data do evento, não a data de hoje, para a próxima ocorrência", () => {
+		const events = [makeEvent({ day: 24, month: 9, time: "10:30" })];
+		expect(nextEventDelayMs(events, NOW)).toBe(MAX_SCHEDULE_DELAY_MS);
+	});
+
+	it("evento anual em outro mês é agendado na próxima ocorrência", () => {
+		const events = [makeEvent({ day: 23, month: 10, time: "10:30" })];
+		expect(nextEventDelayMs(events, NOW)).toBe(MAX_SCHEDULE_DELAY_MS);
+	});
+
 	it("horário de hoje que JÁ PASSOU: o candidato amanhã entra na conta (preciso se < 1h)", () => {
 		const lateNight = new Date(2026, 8, 23, 23, 40, 0, 0); // 23:40
 		const events = [makeEvent({ day: 23, month: 9, time: "00:10" })];
@@ -217,6 +238,11 @@ describe("nextEventDelayMs — agendamento por evento (em vez de polling)", () =
 
 	it("time malformado é ignorado (sem agendar para NaN)", () => {
 		const events = [makeEvent({ day: 23, month: 9, time: " bananas " })];
+		expect(nextEventDelayMs(events, NOW)).toBe(MAX_SCHEDULE_DELAY_MS);
+	});
+
+	it("time fora do intervalo também é ignorado", () => {
+		const events = [makeEvent({ day: 23, month: 9, time: "25:99" })];
 		expect(nextEventDelayMs(events, NOW)).toBe(MAX_SCHEDULE_DELAY_MS);
 	});
 
