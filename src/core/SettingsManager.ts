@@ -1,7 +1,7 @@
-import { createDefaultSettings, randomId, HubSettings, SETTINGS_SCHEMA_VERSION } from "./types";
+import { createDefaultSettings, randomId, HubSettings, SETTINGS_SCHEMA_VERSION, DEFAULT_PATHS } from "./types";
 import type { ConfigValidationIssue, HubModule, ModuleId } from "./ModuleContract";
 import { SPLIT_MODULE_IDS, type SplitPersistenceHandle } from "./SplitPersistence";
-import { resolvePaths, updateDerivedPaths, syncModuleDerivedPaths } from "./PathResolver";
+import { resolvePaths, updateDerivedPaths } from "./PathResolver";
 
 type Persist = (data: HubSettings) => Promise<void>;
 type Load = () => Promise<HubSettings | null>;
@@ -29,6 +29,25 @@ const migrations: Record<number, (old: HubSettings) => HubSettings> = {
 		void _a;
 		void _p;
 		return { ...rest, schemaVersion: 2 };
+	},
+	// v2 -> v3: o caminho das notas de evento deixa de ser duplicado na fatia
+	// do Calendário. Preserva o valor antigo quando o caminho global ainda
+	// estava no padrão; depois disso, settings.paths é a única fonte de verdade.
+	2: (old) => {
+		const oldCalendar = (old.modules.calendar ?? {}) as Record<string, unknown>;
+		const legacy = typeof oldCalendar.eventNotesFolder === "string" ? oldCalendar.eventNotesFolder.trim() : "";
+		const paths = { ...old.paths };
+		if (legacy && (!paths.eventNotesFolder || paths.eventNotesFolder === DEFAULT_PATHS.eventNotesFolder)) {
+			paths.eventNotesFolder = legacy;
+		}
+		const { eventNotesFolder: _legacy, ...calendar } = oldCalendar;
+		void _legacy;
+		return {
+			...old,
+			schemaVersion: 3,
+			paths,
+			modules: { ...old.modules, calendar },
+		};
 	},
 };
 
@@ -217,7 +236,6 @@ export class SettingsManager {
 		// Raízes controlam seus filhos derivados. Caminhos personalizados existentes permanecem intactos.
 		next = { ...next, paths: { ...next.paths, ...resolvePaths(next.paths) } };
 		next = { ...next, paths: updateDerivedPaths(this.current.paths, next.paths) };
-		next = syncModuleDerivedPaths(this.current, next);
 		// A validação roda FORA da fila (síncrona e barata): um save bloqueado
 		// não pode ficar preso atrás de um persist lento de outro chamador.
 		if (!options?.skipValidation) {
