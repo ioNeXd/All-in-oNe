@@ -279,7 +279,17 @@ describe("MCP — contrato HTTP (Content-Type e Accept)", () => {
 		expect(res.status).toBe(406);
 	});
 
-	it("rejeita Accept application/json com q=0", async () => {\n\t\tconst h = await start();\n\t\tconst res = await fetch(`http://127.0.0.1:${h.port}`, {\n\t\t\tmethod: "POST",\n\t\t\theaders: { "Content-Type": "application/json", Accept: "application/json; q=0", Authorization: "Bearer tok" },\n\t\t\tbody: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),\n\t\t});\n\t\texpect(res.status).toBe(406);\n\t});\n\n\tit("aceita Accept application/json com parametros extras", async () => {
+	it("rejeita Accept application/json com q=0", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Accept: "application/json; q=0", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(406);
+	});
+
+	it("aceita Accept application/json com parametros extras", async () => {
 		const h = await start();
 		const res = await fetch(`http://127.0.0.1:${h.port}`, {
 			method: "POST",
@@ -434,7 +444,7 @@ describe("MCP — contrato HTTP (Content-Type e Accept)", () => {
 		expect(json.error.code).toBe(-32700);
 	});
 
-describe("MCP — autenticação (401 antes de qualquer processamento)", () => {
+});\n\ndescribe("MCP — autenticação (401 antes de qualquer processamento)", () => {
 	const CALL = {
 		jsonrpc: "2.0",
 		id: 42,
