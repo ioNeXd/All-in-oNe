@@ -113,4 +113,24 @@ describe("OnboardingModal — regressão de save bloqueado", () => {
 
 		expect(capturedNotices).toHaveLength(1);
 	});
+	it("falha ao criar pasta inicial: mostra Notice e mantém o onboarding aberto", async () => {
+		const core = makeCore({
+			calendarFolder: "Calendario",
+			calendarTemplatesFolder: "Calendario/templates",
+		});
+		core.app.vault.createFolder = vi.fn(async () => {
+			throw new Error("falha de escrita");
+		});
+		const modal = new OnboardingModal({} as never, core as unknown as HubCore);
+		const close = vi.spyOn(modal, "close");
+
+		await finishViaBotao(modal);
+
+		expect(core.settings.save).toHaveBeenCalledTimes(1);
+		expect(capturedNotices).toHaveLength(1);
+		expect(capturedNotices[0].message).toContain("não foi possível criar todas as pastas iniciais");
+		expect(capturedNotices[0].timeout).toBe(8000);
+		expect(close).not.toHaveBeenCalled();
+	});
+
 });
