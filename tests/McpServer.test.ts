@@ -461,17 +461,20 @@ describe("MCP — autenticação (401 antes de qualquer processamento)", () => {
 	});
 
 	it("esquema Bearer é case-insensitive; token sem esquema é recusado", async () => {
-		// O gate compara a string inteira com `Bearer ${token}` — não basta o
-		// token aparecer no header de qualquer forma (evita confusão de esquema).
 		const h = await start();
-		for (const authValue of ["tok"]) {
-			const res = await fetch(`http://127.0.0.1:${h.port}`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json", Authorization: authValue },
-				body: JSON.stringify(CALL),
-			});
-			expect(res.status, `Authorization: "${authValue}" deveria ser recusado`).toBe(401);
-		}
+		const accepted = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "bearer tok" },
+			body: JSON.stringify(CALL),
+		});
+		expect(accepted.status).toBe(200);
+
+		const rejected = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "tok" },
+			body: JSON.stringify(CALL),
+		});
+		expect(rejected.status).toBe(401);
 	});
 
 	it("a recusa acontece ANTES de executar qualquer ferramenta (spy nunca é chamado)", async () => {
