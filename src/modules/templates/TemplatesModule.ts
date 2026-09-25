@@ -411,6 +411,7 @@ export class TemplatesModule implements HubModule {
 				fm.date = fm.date ?? new Date().toISOString().slice(0, 10);
 				fm.thema = this.deriveThemaFromPath(file.path);
 				fm.status = STATUS_PENDING_INITIAL;
+				fm.concluido = false;
 				fm.origem = file.path;
 			});
 		});
@@ -440,7 +441,7 @@ export class TemplatesModule implements HubModule {
 		const origem = typeof fm.origem === "string" ? fm.origem : undefined;
 		if (!origem) return;
 
-		if (isStillPending(fm.status)) return; // ainda tem o chip "Pendente" — nada a fazer
+		if (fm.concluido !== true && isStillPending(fm.status)) return; // ainda incompleta — nada a fazer
 
 		// Chegou aqui: "Pendente" não está mais presente (usuário removeu o
 		// chip, apagou o campo inteiro, ou escreveu "Completo" à mão). A regra
@@ -461,6 +462,7 @@ export class TemplatesModule implements HubModule {
 			if (action.rewriteStatus) {
 				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
 					frontmatter.status = STATUS_COMPLETE_NORMALIZED;
+					frontmatter.concluido = true;
 				});
 			}
 
