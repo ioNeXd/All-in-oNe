@@ -78,12 +78,10 @@ export default class IoneHubPlugin extends Plugin {
 			if (this.core.isModuleEnabled("calendar")) {
 				if (!this.calendarRibbon) {
 					this.calendarRibbon = this.addRibbonIcon("calendar", "Abrir Calendário", () => {
-						const leaf = this.app.workspace.getLeavesOfType(CALENDAR_SIDEBAR_VIEW_TYPE)[0];
-						if (leaf) void this.app.workspace.revealLeaf(leaf);
-						else {
-							const target = this.app.workspace.getLeaf("tab");
-							void target.setViewState({ type: CALENDAR_SIDEBAR_VIEW_TYPE, active: true });
-						}
+						const existing = this.app.workspace.getLeavesOfType(CALENDAR_SIDEBAR_VIEW_TYPE);
+						for (const leaf of existing) leaf.detach();
+						const target = this.app.workspace.getLeaf("tab");
+						void target.setViewState({ type: CALENDAR_SIDEBAR_VIEW_TYPE, active: true });
 					});
 				}
 			} else if (this.calendarRibbon) {
