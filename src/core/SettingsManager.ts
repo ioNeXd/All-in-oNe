@@ -249,7 +249,6 @@ export class SettingsManager {
 			}
 		}
 
-		next = this.syncDerivedPaths(next, this.current);
 		next.sync = { lastWrittenBy: INSTANCE_ID, lastWrittenAt: Date.now() };
 		this.current = next;
 
