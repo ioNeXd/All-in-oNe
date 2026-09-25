@@ -28,10 +28,10 @@ export const STATUS_PENDING = "Pendente";
 export const STATUS_COMPLETE = "Completo";
 
 /** Status normalizado de nota COMPLETADA. */
-export const STATUS_COMPLETE_NORMALIZED = [STATUS_COMPLETE];
+export const STATUS_COMPLETE_NORMALIZED = ["Completo"];
 
-/** Status de nota recém-criada por template: pendente (os DOIS chips). */
-export const STATUS_PENDING_INITIAL = [STATUS_PENDING, STATUS_COMPLETE];
+/** Status de nota recém-criada por template: incompleta. */
+export const STATUS_PENDING_INITIAL = ["Incompleto"];
 
 /** Ainda tem o chip "Pendente"? Aceita lista ou string solta, qualquer capitalização. */
 export function isPendingStatus(status: unknown): boolean {
