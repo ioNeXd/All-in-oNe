@@ -347,7 +347,7 @@ export class LobbyRenderer {
 							new Notice(blocking.map((i) => i.message).join("\n"), 8000);
 							return;
 						}
-						new Notice("Caminho salvo.");
+						if (!this.app.vault.getAbstractFileByPath(draft.trim())) new Notice(`Caminho salvo, mas a pasta "${draft.trim()}" ainda não existe. Ela será criada quando necessária.`, 8000); else new Notice("Caminho salvo.");
 						this.render();
 					})
 				);
