@@ -1,7 +1,7 @@
 import { createDefaultSettings, randomId, HubSettings, SETTINGS_SCHEMA_VERSION } from "./types";
 import type { ConfigValidationIssue, HubModule, ModuleId } from "./ModuleContract";
 import { SPLIT_MODULE_IDS, type SplitPersistenceHandle } from "./SplitPersistence";
-import { updateDerivedPaths } from "./PathResolver";
+import { updateDerivedPaths, syncModuleDerivedPaths } from "./PathResolver";
 
 type Persist = (data: HubSettings) => Promise<void>;
 type Load = () => Promise<HubSettings | null>;
@@ -216,6 +216,7 @@ export class SettingsManager {
 	async save(next: HubSettings, options?: { skipValidation?: boolean }): Promise<ConfigValidationIssue[]> {
 		// Raízes controlam seus filhos derivados. Caminhos personalizados existentes permanecem intactos.
 		next = { ...next, paths: updateDerivedPaths(this.current.paths, next.paths) };
+		next = syncModuleDerivedPaths(this.current, next);
 		// A validação roda FORA da fila (síncrona e barata): um save bloqueado
 		// não pode ficar preso atrás de um persist lento de outro chamador.
 		if (!options?.skipValidation) {
