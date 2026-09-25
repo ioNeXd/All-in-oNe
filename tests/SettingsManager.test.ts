@@ -65,7 +65,7 @@ describe("SettingsManager", () => {
 		await manager.reset();
 
 		expect(manager.getModuleSettings("history")).toEqual({});
-		expect(manager.get().paths.calendarFolder).toBe("Calendario"); // voltou ao default
+		expect(manager.get().paths.calendarFolder).toBe("01 - Calendario"); // voltou ao default
 	});
 
 	it("reset 'all' também zera configuração (dados são zerados via hook, no HubCore)", async () => {
@@ -179,3 +179,12 @@ describe("SettingsManager", () => {
 		expect((stored as { modules: Record<string, Record<string, unknown>> }).modules["history"]).toEqual({ max: 2 });
 	});
 });
+	it("ao alterar a raiz do sistema, atualiza filhos derivados sem sobrescrever customizações", async () => {
+		const { manager } = makeManager(null);
+		await manager.init();
+		const current = manager.get();
+		await manager.save({ ...current, paths: { ...current.paths, systemFolder: "Meu Sistema" } });
+		expect(manager.get().paths.calendarTemplatesFolder).toBe("Meu Sistema/Templates/Calendário");
+		expect(manager.get().paths.filesFolder).toBe("Meu Sistema/arquivos");
+	});
+
