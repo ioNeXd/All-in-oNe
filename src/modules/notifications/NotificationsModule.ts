@@ -34,7 +34,7 @@ export const TRIGGER_LABELS: Record<NotifiableTrigger, string> = {
 	"calendar:event-fired": "Evento do calendário chegou",
 	"calendar:note-created": "Nota de calendário criada",
 	"autoupdate:available": "Atualização disponível",
-	"templates:note-pending": "Nota marcada como pendente",
+	"templates:note-pending": "Nota marcada como incompleta",
 	"templates:note-restored": "Nota completada e devolvida",
 	"core:safe-mode-entered": "Módulo desligado por falha",
 };
@@ -403,7 +403,20 @@ export class NotificationsModule implements HubModule {
 	}
 
 	private readSettings(): NotificationsModuleSettings {
-		const settings = { ...NOTIFICATIONS_DEFAULTS, ...this.context?.getSettings<NotificationsModuleSettings>() };
+		const raw = this.context?.getSettings<NotificationsModuleSettings>();
+		const settings = { ...NOTIFICATIONS_DEFAULTS, ...raw };
+		const validFilter =
+			settings.viewFilter === "all" ||
+			(Object.keys(TRIGGER_LABELS) as NotifiableTrigger[]).includes(settings.viewFilter);
+		if (!validFilter) settings.viewFilter = "all";
+		settings.groupByDay = settings.groupByDay !== false;
+		const normalizeHour = (value: number, fallback: number): number =>
+			Number.isInteger(value) && value >= 0 && value <= 23 ? value : fallback;
+		settings.doNotDisturb = {
+			enabled: settings.doNotDisturb?.enabled === true,
+			startHour: normalizeHour(settings.doNotDisturb?.startHour, NOTIFICATIONS_DEFAULTS.doNotDisturb.startHour),
+			endHour: normalizeHour(settings.doNotDisturb?.endHour, NOTIFICATIONS_DEFAULTS.doNotDisturb.endHour),
+		};
 		// As pendentes do write-behind fazem parte do estado lógico — leitura
 		// (painel, contagem de não lidas) inclui o que ainda não chegou ao disco.
 		const pending = this.pendingNotifications.pendingSnapshot();
@@ -453,7 +466,7 @@ export class NotificationsModule implements HubModule {
 			case "autoupdate:available":
 				return `⬆️ Nova versão disponível: ${payload.version}`;
 			case "templates:note-pending":
-				return `📝 Nota criada pendente: ${payload.path}`;
+				return `📝 Nota criada incompleta: ${payload.path}`;
 			case "templates:note-restored":
 				return `✅ Nota completada e restaurada: ${payload.path}`;
 			case "core:safe-mode-entered":
