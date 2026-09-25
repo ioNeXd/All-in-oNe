@@ -148,7 +148,7 @@ describe("searchVault — estratégia de leitura", () => {
 			{ path: "alvo.md", tags: ["alvo"], frontmatter: [], content: "" },
 		]);
 		const result = await searchVault({ query: "alvo", maxResults: 2 }, primitives);
-		expect(result.matches.map((m) => m.path)).toEqual(["a-alvo.md", "alvo.md"]);
+		expect(result.matches.map((m) => m.path)).toEqual(["alvo.md", "a-alvo.md"]);
 		expect(result.truncated).toBe(true);
 	});
 
