@@ -67,7 +67,7 @@ export interface HubSettings {
 	};
 }
 
-export const SETTINGS_SCHEMA_VERSION = 2;
+export const SETTINGS_SCHEMA_VERSION = 3;
 
 export function createDefaultSettings(): HubSettings {
 	return {
@@ -89,8 +89,11 @@ export function createDefaultSettings(): HubSettings {
 			theme: "match-obsidian",
 		},
 		paths: {
-			calendarFolder: "Calendario",
-			calendarTemplatesFolder: "Calendario/templates",
+			calendarFolder: "01 - Calendario",
+			calendarTemplatesFolder: "99 - Sistema/Templates/Calendário",
+			inboxFolder: "00 - Inbox",
+			systemFolder: "99 - Sistema",
+			filesFolder: "99 - Sistema/arquivos",
 		},
 		sync: {
 			lastWrittenBy: randomId(),

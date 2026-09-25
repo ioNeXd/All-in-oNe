@@ -347,7 +347,7 @@ export class LobbyRenderer {
 							new Notice(blocking.map((i) => i.message).join("\n"), 8000);
 							return;
 						}
-						new Notice("Caminho salvo.");
+						if (!this.app.vault.getAbstractFileByPath(draft.trim())) new Notice(`Caminho salvo, mas a pasta "${draft.trim()}" ainda não existe. Ela será criada quando necessária.`, 8000); else new Notice("Caminho salvo.");
 						this.render();
 					})
 				);
@@ -540,7 +540,7 @@ class ResetModal extends Modal {
 	}
 }
 
-/** Lista de notas com `status: pendente`, aberta pela ação rápida. */
+/** Lista notas incompletas (`status: ["incompleto"]`), aceitando também o status legado `pendente`. */
 class PendingNotesModal extends Modal {
 	constructor(app: App, private files: TFile[]) {
 		super(app);

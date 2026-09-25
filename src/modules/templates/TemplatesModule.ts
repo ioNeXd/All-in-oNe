@@ -3,7 +3,6 @@ import type { HubModule, ModuleContext, ModuleManifest } from "../../core/Module
 import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
 import {
 	decidePendingAction,
-	isPendingStatus as isStillPending,
 	STATUS_PENDING_INITIAL,
 	STATUS_COMPLETE_NORMALIZED,
 } from "../../core/NoteStatus";
@@ -42,7 +41,7 @@ const MAX_RULE_HISTORY = 15;
  * configurada, aplica o template (com suporte a herança via extendsRuleId),
  * preenche automaticamente os metadados deriváveis (`date`, `thema` — este
  * último a partir da hierarquia de pastas) e, se algum campo obrigatório
- * não puder ser preenchido, marca a nota como `status: pendente` e a move
+ * não puder ser preenchido, marca a nota como `status: incompleto` e a move
  * para a pasta "Pendente" um nível abaixo do root da categoria (criando essa
  * pasta se necessário; cai para "Pendente" na raiz se a categoria não puder
  * ser determinada).
@@ -240,9 +239,8 @@ export class TemplatesModule implements HubModule {
 			cls: "ione-hub-lobby__description",
 			text:
 				"Toda nota criada nesta pasta recebe o template abaixo, ganha os metadados " +
-				"date, thema e origem automaticamente, e nasce com status: Pendente na pasta " +
-				"Pendente da categoria. Quando você apagar o campo status (ou escrever Completo), " +
-				"a nota volta sozinha para a pasta de origem.",
+				"date, thema e origem automaticamente, e nasce com status: incompleto na pasta " +
+				"Pendente da categoria. Quando `concluido` for true, o status vira `completo` e a nota volta sozinha para a pasta de origem.",
 		});
 
 		// Seletor de regra "pai" (herança de template).
@@ -411,12 +409,13 @@ export class TemplatesModule implements HubModule {
 				fm.date = fm.date ?? new Date().toISOString().slice(0, 10);
 				fm.thema = this.deriveThemaFromPath(file.path);
 				fm.status = STATUS_PENDING_INITIAL;
+				fm.concluido = false;
 				fm.origem = file.path;
 			});
 		});
 		await this.movePendingToCategoryFolder(file);
 		this.context?.bus.emit("templates:note-pending", { path: file.path }, "templates");
-		this.context?.log("Nota criada e marcada como Pendente", { path: file.path });
+		this.context?.log("Nota criada e marcada como incompleta", { path: file.path });
 	}
 
 	/**
@@ -425,7 +424,7 @@ export class TemplatesModule implements HubModule {
 	 * Regras (conforme definido no design):
 	 *   - `status` removido  → vira `completo` e a nota volta para `origem`.
 	 *   - `status: completo` → volta para `origem`.
-	 *   - `status: pendente` → não faz nada.
+	 *   - `concluido: false` → mantém `status: incompleto` e não faz nada.
 	 *
 	 * O `movingFiles` evita reentrância: mover a nota dispara outro evento de
 	 * modify, que entraria aqui de novo no meio da operação anterior.
@@ -440,14 +439,21 @@ export class TemplatesModule implements HubModule {
 		const origem = typeof fm.origem === "string" ? fm.origem : undefined;
 		if (!origem) return;
 
-		if (isStillPending(fm.status)) return; // ainda tem o chip "Pendente" — nada a fazer
+		if (fm.concluido === false) {
+			const status = Array.isArray(fm.status) ? fm.status : [fm.status];
+			const alreadyIncomplete = status.length === 1 && String(status[0]).trim().toLowerCase() === "incompleto";
+			if (!alreadyIncomplete) {
+				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
+					frontmatter.status = STATUS_PENDING_INITIAL;
+				});
+			}
+			return;
+		}
 
-		// Chegou aqui: "Pendente" não está mais presente (usuário removeu o
-		// chip, apagou o campo inteiro, ou escreveu "Completo" à mão). A regra
-		// de decisão (normalizar status, devolver à origem, evitar loop) está
-		// centralizada em NoteStatus.decidePendingAction — testada em
-		// tests/NoteStatus.test.ts contra o código real.
-		const action = decidePendingAction(fm.status, origem, file.path);
+		// A conclusão é a fonte de verdade: quando concluido é true, a nota deve
+		// ser normalizada para completo e devolvida à origem.
+		const effectiveStatus = fm.concluido === true ? STATUS_COMPLETE_NORMALIZED : fm.status;
+		const action = decidePendingAction(effectiveStatus, origem, file.path);
 		if (!action.rewriteStatus && !action.move) return; // nada a fazer
 
 		// Captura o caminho ANTES de qualquer operação que o mude — o TFile é
@@ -461,6 +467,7 @@ export class TemplatesModule implements HubModule {
 			if (action.rewriteStatus) {
 				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
 					frontmatter.status = STATUS_COMPLETE_NORMALIZED;
+					frontmatter.concluido = true;
 				});
 			}
 

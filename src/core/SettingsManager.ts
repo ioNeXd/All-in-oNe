@@ -29,6 +29,15 @@ const migrations: Record<number, (old: HubSettings) => HubSettings> = {
 		void _p;
 		return { ...rest, schemaVersion: 2 };
 	},
+	2: (old) => {
+		const paths = { ...old.paths };
+		if (paths.calendarFolder === "Calendario") paths.calendarFolder = "01 - Calendario";
+		if (paths.calendarTemplatesFolder === "Calendario/templates") paths.calendarTemplatesFolder = "99 - Sistema/Templates/Calendário";
+		if (!paths.inboxFolder) paths.inboxFolder = "00 - Inbox";
+		if (!paths.systemFolder) paths.systemFolder = "99 - Sistema";
+		if (!paths.filesFolder) paths.filesFolder = "99 - Sistema/arquivos";
+		return { ...old, schemaVersion: 3, paths };
+	},
 };
 
 const INSTANCE_ID = randomId();
@@ -212,9 +221,26 @@ export class SettingsManager {
 		return issues;
 	}
 
+	private syncDerivedPaths(next: HubSettings, previous: HubSettings): HubSettings {
+		const oldSystem = (previous.paths.systemFolder ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+		const newSystem = (next.paths.systemFolder ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+		const oldDefaultTemplates = oldSystem ? `${oldSystem}/Templates/Calendário` : "";
+		const oldDefaultFiles = oldSystem ? `${oldSystem}/arquivos` : "";
+		if (newSystem) {
+			const paths = { ...next.paths };
+			if (oldDefaultTemplates && paths.calendarTemplatesFolder === oldDefaultTemplates) paths.calendarTemplatesFolder = `${newSystem}/Templates/Calendário`;
+			if (oldDefaultFiles && paths.filesFolder === oldDefaultFiles) paths.filesFolder = `${newSystem}/arquivos`;
+			next = { ...next, paths };
+		}
+		return next;
+	}
+
 	async save(next: HubSettings, options?: { skipValidation?: boolean }): Promise<ConfigValidationIssue[]> {
-		// A validação roda FORA da fila (síncrona e barata): um save bloqueado
-		// não pode ficar preso atrás de um persist lento de outro chamador.
+		next = this.syncDerivedPaths(next, this.current);
+
+		// Valida a configuração FINAL, já com os caminhos derivados sincronizados,
+		// para que a sincronização não introduza um conflito que a validação
+		// anterior ainda não enxergaria.
 		if (!options?.skipValidation) {
 			const issues = this.validate(next);
 			const blocking = issues.filter((i) => i.level === "error");

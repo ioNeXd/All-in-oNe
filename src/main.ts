@@ -38,6 +38,8 @@ import { CalendarSidebarView, CALENDAR_SIDEBAR_VIEW_TYPE } from "./modules/calen
 export default class IoneHubPlugin extends Plugin {
 	core!: HubCore;
 	private vaultBridge?: VaultEventBridge;
+	private calendarRibbon?: HTMLElement;
+	private calendarRibbonUnsub?: () => void;
 
 	async onload(): Promise<void> {
 		this.core = new HubCore(
@@ -70,6 +72,41 @@ export default class IoneHubPlugin extends Plugin {
 		};
 
 		await this.core.init();
+
+		const syncCalendarRibbon = () => {
+			if (this.core.isModuleEnabled("calendar")) {
+				if (!this.calendarRibbon) {
+					this.calendarRibbon = this.addRibbonIcon("calendar", "Abrir Calendário", () => {
+						const leaf = this.app.workspace.getLeavesOfType(CALENDAR_SIDEBAR_VIEW_TYPE)[0];
+						if (leaf) void this.app.workspace.revealLeaf(leaf);
+						else {
+							const target = this.app.workspace.getLeaf("tab");
+							void target.setViewState({ type: CALENDAR_SIDEBAR_VIEW_TYPE, active: true });
+						}
+					});
+				}
+			} else if (this.calendarRibbon) {
+				this.calendarRibbon.remove();
+				this.calendarRibbon = undefined;
+			}
+		};
+		
+		const enabledRef = this.core.bus.on<{ moduleId: string }>(
+			"core:module-enabled",
+			"main-calendar-ribbon",
+			({ payload }) => {
+				if (payload.moduleId === "calendar") syncCalendarRibbon();
+			}
+		);
+		const disabledRef = this.core.bus.on<{ moduleId: string }>(
+			"core:module-disabled",
+			"main-calendar-ribbon",
+			({ payload }) => {
+				if (payload.moduleId === "calendar") syncCalendarRibbon();
+			}
+		);
+		this.calendarRibbonUnsub = () => { enabledRef(); disabledRef(); };
+
 
 		// Traduz eventos nativos do vault para o barramento interno. Fica no
 		// núcleo (não num módulo) para que esses eventos existam sempre,
@@ -108,6 +145,10 @@ export default class IoneHubPlugin extends Plugin {
 			await this.core.registerModule(module);
 		}
 
+		// Os módulos já foram registrados e habilitados conforme a configuração.
+		// Só agora o estado inicial da ribbon do Calendário pode ser consultado.
+		syncCalendarRibbon();
+
 		this.addRibbonIcon("layout-dashboard", "Abrir All iₙ oNe", () => {
 			void this.openLobby();
 		});
@@ -128,6 +169,10 @@ export default class IoneHubPlugin extends Plugin {
 
 	async onunload(): Promise<void> {
 		this.vaultBridge?.stop();
+		this.calendarRibbonUnsub?.();
+		this.calendarRibbonUnsub = undefined;
+		this.calendarRibbon?.remove();
+		this.calendarRibbon = undefined;
 		await this.core.disableAll();
 	}
 

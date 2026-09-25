@@ -144,6 +144,7 @@ export class HubCore {
 			this.runtimeEnabledIds.add(id);
 			this.crashCounts.set(id, 0);
 			this.lastEnableErrors.delete(id);
+			void this.bus.emit("core:module-enabled", { moduleId: id }, "core");
 			if (this.safeMode) {
 				this.safeMode = false;
 				this.crashCounts.clear();
@@ -191,6 +192,7 @@ export class HubCore {
 			this.bus.offAll(id);
 			this.enabledModuleIds.delete(id);
 			this.runtimeEnabledIds.delete(id);
+			void this.bus.emit("core:module-disabled", { moduleId: id }, "core");
 		}
 	}
 

@@ -15,7 +15,7 @@ describe("SettingsManager", () => {
 	it("cria configuração padrão quando não há nada salvo", async () => {
 		const { manager } = makeManager(null);
 		const settings = await manager.init();
-		expect(settings.schemaVersion).toBe(2);
+		expect(settings.schemaVersion).toBe(3);
 		expect(settings.enabledModules).toContain("mcp");
 		// Perfis foram removidos do schema (nunca tiveram implementação):
 		expect(settings).not.toHaveProperty("profiles");
@@ -54,7 +54,7 @@ describe("SettingsManager", () => {
 		await manager.reset();
 
 		expect(manager.getModuleSettings("mcp")).toEqual({});
-		expect((getStored() as any).schemaVersion).toBe(2);
+		expect((getStored() as any).schemaVersion).toBe(3);
 	});
 
 	it("reset 'config' zera fatias de módulo E caminhos globais", async () => {
@@ -65,7 +65,7 @@ describe("SettingsManager", () => {
 		await manager.reset();
 
 		expect(manager.getModuleSettings("history")).toEqual({});
-		expect(manager.get().paths.calendarFolder).toBe("Calendario"); // voltou ao default
+		expect(manager.get().paths.calendarFolder).toBe("01 - Calendario"); // voltou ao default
 	});
 
 	it("reset 'all' também zera configuração (dados são zerados via hook, no HubCore)", async () => {
@@ -78,7 +78,7 @@ describe("SettingsManager", () => {
 		expect(manager.getModuleSettings("history")).toEqual({});
 	});
 
-	it("MIGRAÇÃO v1→v2: descarta perfis mortos e PRESERVA a configuração real", async () => {
+	it("MIGRAÇÃO v1→v3: descarta perfis mortos e PRESERVA a configuração real", async () => {
 		// data.json de quem usou versões antigas: schema v1, com os campos de
 		// perfil que nunca tiveram leitor — e configuração REAL que não pode
 		// se perder na remoção.
@@ -101,8 +101,8 @@ describe("SettingsManager", () => {
 
 		const settings = await manager.init();
 
-		// Migrou para v2 e os campos mortos sumiram:
-		expect(settings.schemaVersion).toBe(2);
+		// Migrou para v3 e os campos mortos sumiram:
+		expect(settings.schemaVersion).toBe(3);
 		expect(settings).not.toHaveProperty("activeProfileId");
 		expect(settings).not.toHaveProperty("profiles");
 		// A configuração REAL ficou intacta:
@@ -114,15 +114,15 @@ describe("SettingsManager", () => {
 
 		// Persistiu a versão migrada (o disco também fica limpo no próximo save):
 		const stored = getStored() as { schemaVersion: number; profiles?: unknown };
-		expect(stored.schemaVersion).toBe(2);
+		expect(stored.schemaVersion).toBe(3);
 		expect(stored).not.toHaveProperty("profiles");
 	});
 
-	it("MIGRAÇÃO v1→v2 é idempotente: rodar sobre v2 não re-migra nem recria campos", async () => {
+	it("MIGRAÇÃO v3 é idempotente: rodar sobre v3 não re-migra nem recria campos", async () => {
 		const { manager } = makeManager(createDefaultSettings());
 		const settings = await manager.init();
-		expect(settings.schemaVersion).toBe(2);
-		expect(manager.get().schemaVersion).toBe(2);
+		expect(settings.schemaVersion).toBe(3);
+		expect(manager.get().schemaVersion).toBe(3);
 	});
 
 	it("gravações concorrentes de módulos diferentes chegam TODAS ao disco (sem lost update)", async () => {
@@ -177,5 +177,63 @@ describe("SettingsManager", () => {
 
 		await manager.updateModuleSettings("history", { max: 2 }); // tem que funcionar
 		expect((stored as { modules: Record<string, Record<string, unknown>> }).modules["history"]).toEqual({ max: 2 });
+	});
+});
+
+
+describe("defaults e sincronização de caminhos derivados", () => {
+	it("usa os novos caminhos padrão", () => {
+		const { manager } = makeManager(null);
+		expect(manager.get().paths.calendarFolder).toBe("01 - Calendario");
+		expect(manager.get().paths.calendarTemplatesFolder).toBe("99 - Sistema/Templates/Calendário");
+	});
+
+	it("migra os caminhos antigos do schema v2 para os novos defaults", async () => {
+		const oldSettings = {
+			schemaVersion: 2,
+			onboardingCompleted: true,
+			modules: {},
+			enabledModules: [],
+			lobby: { openMode: "tab", theme: "custom" },
+			paths: { calendarFolder: "Calendario", calendarTemplatesFolder: "Calendario/templates" },
+			sync: { lastWrittenBy: "abc", lastWrittenAt: 1000 },
+			telemetry: { enabled: false },
+		};
+		const { manager, getStored } = makeManager(oldSettings);
+		const settings = await manager.init();
+		expect(settings.schemaVersion).toBe(3);
+		expect(settings.paths.calendarFolder).toBe("01 - Calendario");
+		expect(settings.paths.calendarTemplatesFolder).toBe("99 - Sistema/Templates/Calendário");
+		expect((getStored() as { schemaVersion: number }).schemaVersion).toBe(3);
+	});
+
+	it("valida conflitos depois de sincronizar caminhos derivados", async () => {
+		const { manager } = makeManager(null);
+		await manager.init();
+
+		const next = createDefaultSettings();
+		next.paths.systemFolder = "Sistema-Novo";
+		next.paths.calendarFolder = "Sistema-Novo/Templates/Calendário";
+
+		const issues = await manager.save(next);
+		expect(issues.some((i) => i.level === "error")).toBe(true);
+		expect(manager.get().paths.systemFolder).toBe("99 - Sistema");
+		expect(manager.get().paths.calendarFolder).toBe("01 - Calendario");
+	});
+
+	it("acompanha templates e arquivos quando o sistema muda, sem sobrescrever customização", async () => {
+		const { manager } = makeManager(null);
+		await manager.init();
+		const next = createDefaultSettings();
+		next.paths.systemFolder = "Sistema-Novo";
+		await manager.save(next);
+		expect(manager.get().paths.calendarTemplatesFolder).toBe("Sistema-Novo/Templates/Calendário");
+		expect(manager.get().paths.filesFolder).toBe("Sistema-Novo/arquivos");
+
+		const custom = { ...manager.get(), paths: { ...manager.get().paths, calendarTemplatesFolder: "Templates-Custom" } };
+		custom.paths.systemFolder = "Sistema-Final";
+		await manager.save(custom);
+		expect(manager.get().paths.calendarTemplatesFolder).toBe("Templates-Custom");
+		expect(manager.get().paths.filesFolder).toBe("Sistema-Final/arquivos");
 	});
 });

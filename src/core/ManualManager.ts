@@ -11,11 +11,11 @@ export class ManualManager {
 		const path = system + "/00 - Manual.md";
 		await ensureVaultFolder(this.app, system);
 		const p = settings.paths;
-		const eventFolder = (settings.modules.calendar?.eventNotesFolder as string) || "01 - Calendario/Notas-Eventos";
+		const eventFolder = `${p.calendarFolder.replace(/\/+$/, "")}/Notas-Eventos`;
 		const content = [
 			"---", "title: Manual All-in-oNe", "type: system", "---", "",
 			"# All-in-oNe", "", "## Estrutura atual do vault", "",
-			"```text", "00 - Inbox/", p.calendarFolder + "/", "  └── YYYY/", "      └── MM - Mes/", "          ├── YYYY-MM-DD.md", "          └── <Template>-YYYY-MM-DD.md", "99 - Sistema/", "  ├── 00 - Manual.md", "  ├── templetes/", "  └── arquivos/", "```", "",
+			"```text", "00 - Inbox/", p.calendarFolder + "/", "  └── YYYY/", "      └── MM - Mes/", "          ├── YYYY-MM-DD.md", "          └── <Template>-YYYY-MM-DD.md", "99 - Sistema/", "  ├── 00 - Manual.md", "  ├── Templates/", "  └── arquivos/", "```", "",
 			"## Caminhos configurados", "",
 			"- Inbox: `" + (p.inboxFolder || "00 - Inbox") + "`", "- Calendário: `" + p.calendarFolder + "`", "- Templates: `" + p.calendarTemplatesFolder + "`", "- Notas de eventos: `" + eventFolder + "`", "- Sistema: `" + system + "`", "- Arquivos: `" + (p.filesFolder || "99 - Sistema/arquivos") + "`", "",
 			"## Calendário", "",

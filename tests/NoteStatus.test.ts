@@ -11,13 +11,18 @@ import {
  * mão e pode divergir do módulo sem ninguém perceber.
  */
 
-describe("isPendingStatus (formato v0.6.0: lista com os 2 valores)", () => {
+describe("isPendingStatus (incompleto é o estado canônico; pendente permanece compatível)", () => {
 	it("reconhece a lista ['Pendente', 'Completo'] como pendente", () => {
 		expect(isPendingStatus(["Pendente", "Completo"])).toBe(true);
 	});
 
 	it("reconhece a lista normalizada ['Completo'] como NÃO pendente", () => {
 		expect(isPendingStatus(["Completo"])).toBe(false);
+	});
+
+	it("reconhece incompleto como estado pendente", () => {
+		expect(isPendingStatus("incompleto")).toBe(true);
+		expect(isPendingStatus(["incompleto"])).toBe(true);
 	});
 
 	it("aceita a forma antiga em texto simples", () => {
