@@ -122,7 +122,11 @@ export function interpretGpgStatusOutput(output: string): SignatureCheckOutcome 
 				break;
 			case "VALIDSIG":
 				sawValid = true;
-				if (parts[1]) fingerprint = parts[1];
+				// GnuPG: VALIDSIG <sig-fpr> <date> <timestamp> <expire> <version>
+				// <reserved> <pubkey-algo> <hash-algo> <class> <primary-fpr>
+				// Prefer the primary fingerprint when GnuPG reports it.
+				if (parts[10]) fingerprint = parts[10];
+				else if (parts[1]) fingerprint = parts[1];
 				break;
 		}
 	}
