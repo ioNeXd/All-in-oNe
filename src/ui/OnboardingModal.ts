@@ -9,7 +9,6 @@ export class OnboardingModal extends Modal {
 	private step: Step = "tour";
 	private calendarFolder: string;
 	private calendarTemplatesFolder: string;
-	private eventNotesFolder: string;
 	private inboxFolder: string;
 	private systemFolder: string;
 	private filesFolder: string;
@@ -19,7 +18,6 @@ export class OnboardingModal extends Modal {
 		super(app);
 		const s=core.settings.get();
 		this.calendarFolder=s.paths.calendarFolder; this.calendarTemplatesFolder=s.paths.calendarTemplatesFolder;
-		this.eventNotesFolder=(s.modules?.calendar?.eventNotesFolder as string)||"01 - Calendario/Notas-Eventos";
 		this.inboxFolder=s.paths.inboxFolder||"00 - Inbox"; this.systemFolder=s.paths.systemFolder||"99 - Sistema"; this.filesFolder=s.paths.filesFolder||"99 - Sistema/arquivos";
 	}
 
@@ -39,22 +37,15 @@ export class OnboardingModal extends Modal {
 	}
 	private renderConfig():void{
 		this.contentEl.createEl("h2",{text:"Configuração inicial"});this.contentEl.createEl("p",{text:"Revise os caminhos. Nada será criado até confirmar."});
-		const fields:Array<["calendarFolder"|"calendarTemplatesFolder"|"eventNotesFolder"|"inboxFolder"|"systemFolder"|"filesFolder",string,string]> = [
-			["calendarFolder","Calendário","01 - Calendario"],["calendarTemplatesFolder","Templates","99 - Sistema/templetes"],["eventNotesFolder","Notas de eventos","01 - Calendario/Notas-Eventos"],["inboxFolder","Inbox","00 - Inbox"],["systemFolder","Sistema","99 - Sistema"],["filesFolder","Arquivos","99 - Sistema/arquivos"]];
+		const fields:Array<["calendarFolder"|"calendarTemplatesFolder"|"inboxFolder"|"systemFolder"|"filesFolder",string,string]> = [
+			["calendarFolder","Calendário","01 - Calendario"],["calendarTemplatesFolder","Templates","99 - Sistema/Templates/Calendário"],["inboxFolder","Inbox","00 - Inbox"],["systemFolder","Sistema","99 - Sistema"],["filesFolder","Arquivos","99 - Sistema/arquivos"]];
 		for(const [key,label,placeholder] of fields)new Setting(this.contentEl).setName(label).addText(t=>{t.setValue(String(this[key]));t.setPlaceholder(placeholder);t.onChange(v=>{(this as unknown as Record<string,unknown>)[key as string]=v})});
 		const footer=this.contentEl.createDiv({cls:"ione-hub-onboarding__footer"});
 		footer.createEl("button",{text:"Pular configuração"}).onclick=()=>void this.finish(false);
 		footer.createEl("button",{text:"Continuar",cls:"mod-cta"}).onclick=()=>{this.step="style";this.render()};
 	}
-	private renderStyle():void{
-		this.contentEl.createEl("h2",{text:"Estilo inicial"});this.contentEl.createEl("p",{text:"A escolha usa o mesmo módulo Estilos. Você pode ignorar e ajustar depois."});
-		const panel=this.contentEl.createDiv({cls:"ione-hub-onboarding__style-preview"});
-		const styles=this.core.getModules().find(m=>m.manifest.id==="styles");
-		if(styles?.renderSettingsPanel)this.contentEl.createEl("p",{text:"Abra o módulo Estilos depois para escolher ou editar o tema. O onboarding não cria um segundo mecanismo de estilos."});
-		const footer=this.contentEl.createDiv({cls:"ione-hub-onboarding__footer"});
-		footer.createEl("button",{text:"Ignorar"}).onclick=()=>void this.finish(true);footer.createEl("button",{text:"Concluir",cls:"mod-cta"}).onclick=()=>void this.finish(true);
-		void panel;
-	}
+	private renderStyle():void{this.contentEl.createEl("h2",{text:"Estilo inicial"});this.contentEl.createEl("p",{text:"Escolha o estilo inicial diretamente aqui. Você pode pular agora e alterar depois no módulo Estilos."});const panel=this.contentEl.createDiv({cls:"ione-hub-onboarding__style-preview"});const styles=this.core.getModules().find(m=>m.manifest.id==="styles") as StylesModule|undefined;if(styles?.renderOnboardingPicker)styles.renderOnboardingPicker(panel);else if(styles?.renderSettingsPanel)styles.renderSettingsPanel(panel);const footer=this.contentEl.createDiv({cls:"ione-hub-onboarding__footer"});footer.createEl("button",{text:"Pular"}).onclick=()=>void this.finish(true);footer.createEl("button",{text:"Próximo",cls:"mod-cta"}).onclick=()=>void this.finish(true);}
+
 	private async finish(completed: boolean): Promise<void> {
 		const settings = this.core.settings.get();
 		const currentModules = settings.modules ?? {};
@@ -68,10 +59,6 @@ export class OnboardingModal extends Modal {
 				inboxFolder: this.inboxFolder,
 				systemFolder: this.systemFolder,
 				filesFolder: this.filesFolder,
-			},
-			modules: {
-				...currentModules,
-				calendar: { ...(currentModules.calendar ?? {}), eventNotesFolder: this.eventNotesFolder },
 			},
 		};
 		let issues;
@@ -87,7 +74,7 @@ export class OnboardingModal extends Modal {
 			new Notice(blocking.map((i) => i.message).join("\n"), 8000);
 			return;
 		}
-		for (const path of [this.inboxFolder, this.calendarFolder, this.eventNotesFolder, this.systemFolder, this.filesFolder, this.calendarTemplatesFolder]) {
+		for (const path of [this.inboxFolder, this.calendarFolder, this.systemFolder, this.filesFolder, this.calendarTemplatesFolder]) {
 			await ensureVaultFolder(this.core.app, path);
 		}
 		this.close();
