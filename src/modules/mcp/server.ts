@@ -642,6 +642,7 @@ function validateToolArgs(
 		for (const field of schema.required) {
 			if (!(field in args) || args[field] === undefined || args[field] === null) {
 				return `Campo obrigatório ausente: "${field}".`;
+			}
 		}
 	}
 
