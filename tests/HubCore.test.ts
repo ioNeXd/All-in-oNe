@@ -294,6 +294,7 @@ describe("HubCore — reset em 3 níveis (escadinha real)", () => {
 		expect(core.isModuleEnabled("custom-x")).toBe(false);
 
 		await core.settings.updateModuleSettings("mcp", { port: 9999 });
+		core.bus.clearHistory();
 		await core.bus.emit("demo:evento", {}, "core");
 		expect(core.bus.getHistory()).toHaveLength(1);
 
