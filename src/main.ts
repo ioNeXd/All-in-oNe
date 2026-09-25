@@ -73,6 +73,14 @@ export default class IoneHubPlugin extends Plugin {
 
 		await this.core.init();
 
+		// O manual é um documento derivado da configuração atual e é atualizado em todo startup.
+		try {
+			await new ManualManager(this.app).update(this.core.settings.get());
+		} catch (err) {
+			console.error("[All iₙ oNe] Falha ao atualizar o manual:", err);
+			new Notice("Não foi possível atualizar o manual do All-in-oNe.", 8000);
+		}
+
 		// Traduz eventos nativos do vault para o barramento interno. Fica no
 		// núcleo (não num módulo) para que esses eventos existam sempre,
 		// independentemente de quais módulos estejam ligados.
