@@ -2,8 +2,7 @@ import { TFile, TFolder, normalizePath, Setting, Notice, Modal, App } from "obsi
 import type { HubModule, ModuleContext, ModuleManifest } from "../../core/ModuleContract";
 import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
 import {
-	decidePendingAction,
-	STATUS_COMPLETE_NORMALIZED,
+	decideCompletionAction,
 } from "../../core/NoteStatus";
 import {
 	addSuggestion,
@@ -447,7 +446,7 @@ export class TemplatesModule implements HubModule {
 		}
 
 		// concluido: true é o único gatilho para concluir e devolver a nota à origem.
-		const action = decidePendingAction(STATUS_COMPLETE_NORMALIZED, origem, file.path);
+		const action = decideCompletionAction(origem, file.path);
 		if (!action.rewriteStatus && !action.move) return;
 
 		// Captura o caminho ANTES de qualquer operação que o mude — o TFile é
