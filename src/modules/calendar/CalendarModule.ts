@@ -349,7 +349,6 @@ export class CalendarModule implements HubModule {
 			this.context!.app,
 			date,
 			notes,
-			defaultFolder,
 			async (event, noteAction) => {
 				await this.resolveNoteAction(noteAction, event);
 				await this.addEvent(event);
@@ -369,7 +368,6 @@ export class CalendarModule implements HubModule {
 			this.context!.app,
 			date,
 			notes,
-			defaultFolder,
 			async (updated, noteAction) => {
 				await this.resolveNoteAction(noteAction, updated);
 				const settings = this.readSettings();
@@ -737,7 +735,7 @@ export class CalendarModule implements HubModule {
 	}
 
 	/** Cria uma nota NOVA já vinculada, na pasta configurável (padrão: Calendario/notas). */
-	async createLinkedNote(name: string, refId: string, _folderOverride?: string): Promise<TFile> {
+	async createLinkedNote(name: string, refId: string): Promise<TFile> {
 		const folder = normalizePath(this.context!.getFullSettings().paths.calendarFolder + "/Notas-Eventos");
 		await ensureVaultFolder(this.context!.app, folder);
 		const path = await uniqueVaultPath(this.context!.app, normalizePath(`${folder}/${name}.md`));
@@ -910,7 +908,6 @@ class EventEditorModal extends Modal {
 		app: App,
 		date: Date,
 		private notes: string[],
-		private defaultNoteFolder: string,
 		private onSave: (
 			event: Omit<CalendarEvent, "id">,
 			noteAction: { kind: "none" } | { kind: "existing"; path: string } | { kind: "create"; name: string }
