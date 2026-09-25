@@ -559,7 +559,8 @@ export class CalendarModule implements HubModule {
 			new Notice(blocking.map((i) => i.message).join("\n"), 8000);
 			return;
 		}
-		new Notice("Caminho salvo.");
+		if (!this.context!.app.vault.getAbstractFileByPath(trimmed)) new Notice(`Caminho salvo, mas a pasta "${trimmed}" ainda não existe no vault. Ela será criada quando necessária.`, 8000);
+		else new Notice("Caminho salvo.");
 		this.refreshPanel();
 	}
 
