@@ -22,13 +22,6 @@ export interface CalendarModuleSettings {
 	events: CalendarEvent[];
 	view: "month" | "week" | "agenda";
 	/**
-	 * Pasta única para notas de evento — tanto para uma nota EXISTENTE que o
-	 * usuário vincula (é movida pra cá) quanto para uma nota NOVA criada na
-	 * hora. Antes havia duas pastas separadas ("eventos" e "notas"); ficou
-	 * uma só, por pedido, para não duplicar o conceito.
-	 */
-	eventNotesFolder: string;
-	/**
 	 * Se true, o lembrete força a janela do Obsidian pra frente mesmo com o
 	 * app minimizado. Desligado por padrão — ver ReminderModal.
 	 */
@@ -38,7 +31,6 @@ export interface CalendarModuleSettings {
 export const CALENDAR_DEFAULTS: CalendarModuleSettings = {
 	events: [],
 	view: "month",
-	eventNotesFolder: "01 - Calendario/Notas-Eventos",
 	autoFocusOnReminder: false,
 };
 
@@ -211,7 +203,6 @@ export class CalendarModule implements HubModule {
 	 * só a UI de edição é que vive dentro do módulo.
 	 */
 	private renderSettingsTab(container: HTMLElement): void {
-		const settings = this.readSettings();
 		const paths = this.context!.getFullSettings().paths;
 
 		container.createEl("h3", { text: "Pastas" });
@@ -230,19 +221,6 @@ export class CalendarModule implements HubModule {
 			.addText((text) => {
 				text.setValue(paths.calendarTemplatesFolder);
 				text.inputEl.onblur = () => this.updateGlobalPath("calendarTemplatesFolder", text.getValue());
-			});
-
-		new Setting(container)
-			.setName("Pasta das notas de evento")
-			.setDesc(
-				"Usada tanto para notas EXISTENTES vinculadas (são movidas pra cá) quanto para " +
-					"notas NOVAS criadas a partir de um evento. Criada automaticamente se não existir."
-			)
-			.addText((text) => {
-				text.setValue(settings.eventNotesFolder);
-				text.inputEl.onblur = async () => {
-					await this.context?.updateSettings({ eventNotesFolder: text.getValue().trim() });
-				};
 			});
 
 		container.createEl("h3", { text: "Lembretes" });
@@ -354,7 +332,7 @@ export class CalendarModule implements HubModule {
 	openEventEditor(date: Date): void {
 		void this.ensureEventNotesFolder();
 		const notes = this.context!.app.vault.getMarkdownFiles().map((f) => f.path);
-		const defaultFolder = this.readSettings().eventNotesFolder;
+		const defaultFolder = this.context!.getFullSettings().paths.eventNotesFolder;
 		new EventEditorModal(
 			this.context!.app,
 			date,
@@ -373,7 +351,7 @@ export class CalendarModule implements HubModule {
 	editEvent(event: CalendarEvent): void {
 		void this.ensureEventNotesFolder();
 		const notes = this.context!.app.vault.getMarkdownFiles().map((f) => f.path);
-		const defaultFolder = this.readSettings().eventNotesFolder;
+		const defaultFolder = this.context!.getFullSettings().paths.eventNotesFolder;
 		const date = new Date(event.year ?? new Date().getFullYear(), event.month - 1, event.day);
 		new EventEditorModal(
 			this.context!.app,
@@ -782,7 +760,7 @@ export class CalendarModule implements HubModule {
 
 	/** Vincula uma nota EXISTENTE a um evento: grava o metadado e move para a pasta de eventos. */
 	async linkExistingNote(file: TFile, refId: string): Promise<void> {
-		const folder = this.readSettings().eventNotesFolder;
+		const folder = this.context!.getFullSettings().paths.eventNotesFolder;
 
 		await ensureVaultFolder(this.context!.app, folder);
 		const target = await uniqueVaultPath(this.context!.app, normalizePath(`${folder}/${file.name}`));
@@ -798,7 +776,7 @@ export class CalendarModule implements HubModule {
 
 	/** Cria uma nota NOVA já vinculada, na pasta configurável (padrão: Calendario/notas). */
 	async createLinkedNote(name: string, refId: string, folderOverride?: string): Promise<TFile> {
-		const folder = folderOverride?.trim() || this.readSettings().eventNotesFolder;
+		const folder = folderOverride?.trim() || this.context!.getFullSettings().paths.eventNotesFolder;
 		await ensureVaultFolder(this.context!.app, folder);
 		const path = await uniqueVaultPath(this.context!.app, normalizePath(`${folder}/${name}.md`));
 		const file = await this.context!.app.vault.create(path, "");
@@ -825,7 +803,7 @@ export class CalendarModule implements HubModule {
 
 	/** Pasta das notas de evento, criada sob demanda. */
 	async ensureEventNotesFolder(): Promise<string> {
-		const folder = this.readSettings().eventNotesFolder;
+		const folder = this.context!.getFullSettings().paths.eventNotesFolder;
 
 		await ensureVaultFolder(this.context!.app, folder);
 		return folder;
