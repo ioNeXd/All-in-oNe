@@ -38,3 +38,21 @@ export function updateDerivedPaths(previous: HubSettings["paths"], next: HubSett
 	}
 	return result;
 }
+
+export function syncModuleDerivedPaths(previous: HubSettings, next: HubSettings): HubSettings {
+	const previousCalendar = previous.paths.calendarFolder || DEFAULT_PATHS.calendarFolder;
+	const nextCalendar = next.paths.calendarFolder || DEFAULT_PATHS.calendarFolder;
+	if (previousCalendar === nextCalendar) return next;
+	const previousEvents = (previous.modules.calendar?.eventNotesFolder as string | undefined) || "";
+	if (previousEvents && previousEvents !== `${previousCalendar}/Notas-Eventos`) return next;
+	return {
+		...next,
+		modules: {
+			...next.modules,
+			calendar: {
+				...(next.modules.calendar ?? {}),
+				eventNotesFolder: `${nextCalendar}/Notas-Eventos`,
+			},
+		},
+	};
+}
