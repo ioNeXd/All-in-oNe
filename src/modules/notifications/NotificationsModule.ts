@@ -578,8 +578,10 @@ export class NotificationsModule implements HubModule {
 			}
 			drain.confirm();
 		} catch {
-			// Save falhou: SEM confirm — o lote segue pendente para o próximo
-			// flush re-tentar (a notificação não se perde na variável local).
+			// Save falhou: libera o lote para um retry real. Sem isso, os ids
+			// permaneceriam marcados como em voo e nenhum drain futuro poderia
+			// recolocá-los no lote.
+			drain.release();
 		}
 	}
 
