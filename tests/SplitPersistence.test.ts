@@ -6,7 +6,7 @@ import {
 	SPLIT_MODULE_IDS,
 } from "../src/core/SplitPersistence";
 import { SettingsManager } from "../src/core/SettingsManager";
-import { createDefaultSettings, type HubSettings } from "../src/core/types";
+import { createDefaultSettings, DEFAULT_PATHS, type HubSettings } from "../src/core/types";
 
 /**
  * PERSISTÊNCIA SPLIT — o motivo de existir: o write-behind do Histórico e
@@ -125,7 +125,7 @@ describe("SplitPersistence — gravação direcionada via SettingsManager", () =
 		const settings = await manager2.init();
 		expect(manager2.getModuleSettings("history")).toEqual({ maxEntries: 77 });
 		expect(manager2.getModuleSettings("notifications")).toEqual({ doNotDisturb: true });
-		expect(settings.paths.calendarFolder).toBe("Calendario"); // resto do principal
+		expect(settings.paths.calendarFolder).toBe(DEFAULT_PATHS.calendarFolder); // resto do principal
 	});
 });
 
