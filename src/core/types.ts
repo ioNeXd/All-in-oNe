@@ -89,8 +89,8 @@ export function createDefaultSettings(): HubSettings {
 			theme: "match-obsidian",
 		},
 		paths: {
-			calendarFolder: "Calendario",
-			calendarTemplatesFolder: "Calendario/templates",
+			calendarFolder: "01 - Calendario",
+			calendarTemplatesFolder: "99 - Sistema/Templates/Calendário",
 		},
 		sync: {
 			lastWrittenBy: randomId(),
