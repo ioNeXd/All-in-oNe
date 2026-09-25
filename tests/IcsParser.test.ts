@@ -83,7 +83,7 @@ describe("parseIcs — malformado e casos-limite", () => {
 	it("data impossível é descartada em vez de normalizada pelo Date", () => {
 		const { events, warnings } = parseIcs(buildIcs([vevent(["UID:ruim", "SUMMARY:Data inválida", "DTSTART;VALUE=DATE:20260230"])]));
 		expect(events).toHaveLength(0);
-		expect(warnings[0]).toContain("data inválida");
+		expect(warnings[0]).toContain("data de início");
 	});
 	it("horário impossível é descartado", () => {
 		const { events, warnings } = parseIcs(buildIcs([vevent(["UID:ruim", "SUMMARY:Hora inválida", "DTSTART:20260915T256000"])]));
