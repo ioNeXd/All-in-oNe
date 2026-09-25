@@ -185,6 +185,7 @@
 	font-weight: 700;
 }
 
+.ione-hub-calendar__event-indicator { display:block; text-align:center; line-height:1; margin-top:2px; }
 .ione-hub-calendar__day--has-event::after {
 	content: "•";
 	display: block;
