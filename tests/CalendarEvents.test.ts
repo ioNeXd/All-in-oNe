@@ -248,6 +248,16 @@ describe("nextEventDelayMs — agendamento por evento (em vez de polling)", () =
 		expect(nextEventDelayMs(events, NOW)).toBe(MAX_SCHEDULE_DELAY_MS);
 	});
 
+	it("data de calendário impossível não gera um disparo normalizado pelo Date", () => {
+		const events = [makeEvent({ day: 31, month: 2, time: "10:30" })];
+		expect(nextEventDelayMs(events, NOW)).toBe(MAX_SCHEDULE_DELAY_MS);
+	});
+
+	it("evento único no próximo ano é agendado pela data exata", () => {
+		const events = [makeEvent({ recurrence: "once", year: 2027, day: 23, month: 9, time: "10:30" })];
+		expect(nextEventDelayMs(events, NOW)).toBe(365 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000);
+	});
+
 	it("resultado nunca fica abaixo do mínimo (sem agendar para 'agora')", () => {
 		const events = [makeEvent({ day: 23, month: 9, time: "10:00" })]; // é AGORA
 		expect(nextEventDelayMs(events, NOW)).toBeGreaterThanOrEqual(MIN_SCHEDULE_DELAY_MS);
