@@ -1,79 +1,29 @@
-/**
- * REGRAS DE STATUS DAS NOTAS — PURO, SEM DEPENDÊNCIA DO OBSIDIAN
- * ---------------------------------------------------------------
- * Extraído de TemplatesModule para poder ser testado fora do runtime do app.
- * Antes essas regras eram espelhadas À MÃO nos testes (ver o comentário de
- * tests/TemplateStatus.test.ts) — qualquer divergência entre cópia e real
- * passava despercebida. Agora os testes importam o código real daqui.
- *
- * Formato do frontmatter (decisão v0.6.0):
- *   - Nota pendente:   status: ["Pendente", "Completo"]
- *   - Nota completada: status: ["Completo"]
- * A razão de nascer com os DOIS valores está documentada em applyRuleToNote.
- */
+/** Regras canônicas de conclusão de notas por template. */
 
-/**
- * VALORES CANÔNICOS DO FRONTMATTER — fonte única também para ESCRITA.
- * As funções abaixo já cobriam a LEITURA; os consumidores que gravavam o
- * status usavam literais soltos ("Completo", ["Pendente", "Completo"]), o
- * que era duplicação semântica esperando um drift: um typo num só lugar e
- * notas nascem completas sem ninguém perceber. Todo gravador usa estas
- * constantes.
- */
+/** Status usado enquanto a nota ainda não foi concluída. */
+export const STATUS_PENDING_INITIAL = ["Incompleto"] as const;
 
-/** Valor do chip pendente (formato v0.6.0 nasce com os DOIS valores). */
-export const STATUS_PENDING = "Pendente";
-
-/** Valor do chip de conclusão. */
+/** Status normalizado de uma nota concluída. */
+export const STATUS_COMPLETE_NORMALIZED = ["Completo"] as const;
 export const STATUS_COMPLETE = "Completo";
 
-/** Status normalizado de nota COMPLETADA. */
-export const STATUS_COMPLETE_NORMALIZED = ["Completo"];
-
-/** Status de nota recém-criada por template: incompleta. */
-export const STATUS_PENDING_INITIAL = ["Incompleto"];
-
-/** Ainda tem o chip "Pendente"? Aceita lista ou string solta, qualquer capitalização. */
-export function isPendingStatus(status: unknown): boolean {
-	const values = Array.isArray(status) ? status : [status];
-	return values.some((v) => typeof v === "string" && v.trim().toLowerCase() === "pendente");
-}
-
-/** Já está exatamente no formato normalizado de completada (["Completo"]). */
-export function isNormalizedComplete(status: unknown): boolean {
-	return (
-		Array.isArray(status) &&
-		status.length === 1 &&
-		String(status[0]).trim().toLowerCase() === "completo"
-	);
-}
-
-export interface PendingDecision {
-	/** Regravar `status: ["Completo"]` no frontmatter. */
+export interface CompletionDecision {
 	rewriteStatus: boolean;
-	/** Mover a nota de volta para a pasta de `origem`. */
 	move: boolean;
 }
 
-/**
- * Decide o que fazer com uma nota que TEM `origem` e cujo status deixou de
- * conter "Pendente" (usuário removeu o chip, apagou o campo ou escreveu
- * "Completo" à mão). É a tradução direta das regras definidas no design:
- *   - sem `origem`            → nada (não é nota de template)
- *   - ainda pendente          → nada
- *   - já normalizada e na origem → nada (evita loop reescrevendo o mesmo valor)
- *   - caso contrário          → normaliza o status e/ou devolve à origem
- */
-export function decidePendingAction(
-	status: unknown,
-	origem: string | undefined,
-	currentPath: string
-): PendingDecision {
+/** Decide a transição quando concluido já é true. */
+export function decideCompletionAction(origem: string | undefined, currentPath: string): CompletionDecision {
 	if (!origem) return { rewriteStatus: false, move: false };
-	if (isPendingStatus(status)) return { rewriteStatus: false, move: false };
+	return { rewriteStatus: false, move: origem !== currentPath };
+}
 
-	const alreadyNormalized = isNormalizedComplete(status);
-	if (origem === currentPath && alreadyNormalized) return { rewriteStatus: false, move: false };
+export function isNormalizedComplete(status: unknown): boolean {
+	return Array.isArray(status) && status.length === 1 && String(status[0]).trim().toLowerCase() === "completo";
+}
 
-	return { rewriteStatus: !alreadyNormalized, move: origem !== currentPath };
+/** Compatibilidade temporária para consumidores antigos. */
+export const decidePendingAction = (status: unknown, origem: string | undefined, currentPath: string): CompletionDecision => {
+	void status;
+	return decideCompletionAction(origem, currentPath);
 }
