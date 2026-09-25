@@ -168,6 +168,9 @@ export class HistoryModule implements HubModule {
 
 	private readSettings(): HistoryModuleSettings {
 		const settings = { ...HISTORY_DEFAULTS, ...this.context?.getSettings<HistoryModuleSettings>() };
+		if (!Number.isInteger(settings.maxEntries) || settings.maxEntries < 10) {
+			settings.maxEntries = HISTORY_DEFAULTS.maxEntries;
+		}
 		// As pendentes do write-behind fazem parte do estado lógico — leitura
 		// (painel, contagem do diagnóstico) inclui o que ainda não chegou ao
 		// disco, sem esperar a janela de flush. Mesmo contrato do
@@ -256,7 +259,7 @@ export class HistoryModule implements HubModule {
 				text.setValue(String(settings.maxEntries));
 				text.inputEl.onblur = async () => {
 					const n = Number(text.getValue());
-					if (!Number.isFinite(n) || n < 10) {
+					if (!Number.isInteger(n) || n < 10) {
 						new Notice("Informe um número maior ou igual a 10.");
 						text.setValue(String(settings.maxEntries));
 						return;
@@ -389,7 +392,7 @@ export const EVENT_LABELS: Record<string, string> = {
 	"mcp:action-logged": "Log de atividade do MCP",
 	"mcp:server-started": "Servidor MCP iniciado",
 	"mcp:server-stopped": "Servidor MCP parado",
-	"templates:note-pending": "Nota marcada como pendente",
+	"templates:note-pending": "Nota marcada como incompleta",
 	"templates:note-restored": "Nota concluída",
 	"calendar:note-created": "Nota de calendário criada",
 	"calendar:note-opened": "Nota de calendário aberta",
@@ -447,7 +450,7 @@ function describeEvent(eventName: string, payload: Record<string, unknown>): str
 		case "mcp:server-stopped":
 			return "Servidor MCP parado";
 		case "templates:note-pending":
-			return `Nota marcada como pendente: ${path}`;
+			return `Nota marcada como incompleta: ${path}`;
 		case "templates:note-restored":
 			return `Nota completada e devolvida ao lugar: ${path}`;
 		case "calendar:note-created":
