@@ -104,7 +104,7 @@ export function shouldFire(event: CalendarEvent, now: Date): boolean {
 /**
  * Quanto tempo (ms) falta para o PRÓXIMO disparo futuro — regra pura que
  * alimenta o agendador por setTimeout (em vez de polling fixo de 10s).
- * Eventos com horário marcado de hoje/amanhã (anuais inclusive) entram na
+ * Eventos com horário marcado na próxima ocorrência (anuais inclusive) entram na
  * conta; sem horário, o disparo é "em qualquer momento do dia", então não
  * adianta horário — a re-checagem de rotina (teto) cobre a virada.
  * Sem nada agendável: teto padrão (re-checagem de rotina, p.ex. virada de
@@ -151,7 +151,7 @@ export function nextEventDelayMs(events: readonly CalendarEvent[], now: Date): n
 }
 
 function parseEventTime(value: string): { hour: number; minute: number } | null {
-	const match = /^(?:[01]\\d|2[0-3]):[0-5]\\d$/.exec(value);
+	const match = /^(?:[01]\d|2[0-3]):[0-5]\d$/.exec(value);
 	if (!match) return null;
 	return { hour: Number(value.slice(0, 2)), minute: Number(value.slice(3, 5)) };
 }
