@@ -42,9 +42,9 @@ const MAX_RULE_HISTORY = 15;
  * preenche automaticamente os metadados deriváveis (`date`, `thema` — este
  * último a partir da hierarquia de pastas) e, se algum campo obrigatório
  * não puder ser preenchido, marca a nota como `status: incompleto` e a move
- * para a pasta "Pendente" um nível abaixo do root da categoria (criando essa
- * pasta se necessário; cai para "Pendente" na raiz se a categoria não puder
- * ser determinada).
+ * para a pasta de notas incompletas um nível abaixo do root da categoria
+ * (criando essa pasta se necessário; cai para a pasta de notas incompletas
+ * na raiz se a categoria não puder ser determinada).
  */
 export class TemplatesModule implements HubModule {
 	readonly manifest: ModuleManifest = {
@@ -245,7 +245,8 @@ export class TemplatesModule implements HubModule {
 			text:
 				"Toda nota criada nesta pasta recebe o template abaixo, ganha os metadados " +
 				"date, thema e origem automaticamente, e nasce com status: incompleto na pasta " +
-				"Pendente da categoria. Quando `concluido` for true, o status vira `completo` e a nota volta sozinha para a pasta de origem.",
+				"de notas incompletas da categoria. Quando `concluido` for true, o status vira " +
+				"`completo` e a nota volta sozinha para a pasta de origem.",
 		});
 
 		// Seletor de regra "pai" (herança de template).
@@ -458,6 +459,8 @@ export class TemplatesModule implements HubModule {
 			return;
 		}
 
+		if (this.stopped) return;
+
 		// A conclusão é a fonte de verdade: quando concluido é true, a nota deve
 		// ser normalizada para completo e devolvida à origem.
 		const effectiveStatus = fm.concluido === true ? STATUS_COMPLETE_NORMALIZED : fm.status;
@@ -485,6 +488,7 @@ export class TemplatesModule implements HubModule {
 				await ensureVaultFolder(this.context!.app, targetFolder);
 
 				const finalPath = await uniqueVaultPath(this.context!.app, origem);
+				this.movingFiles.add(finalPath);
 				await this.context!.fileWriteQueueRun(file.path, () =>
 					this.context!.app.fileManager.renameFile(file, finalPath)
 				);
@@ -499,6 +503,7 @@ export class TemplatesModule implements HubModule {
 		} finally {
 			this.movingFiles.delete(pathBefore);
 			this.movingFiles.delete(origem);
+			if (typeof origem === "string") this.movingFiles.delete(origem);
 		}
 	}
 
@@ -558,7 +563,7 @@ export class TemplatesModule implements HubModule {
 	async saveRule(rule: FolderTemplateRule): Promise<void> {
 		const settings = this.readSettings();
 		const existingIndex = settings.rules.findIndex((r) => r.id === rule.id);
-		const versions = settings.ruleVersions[rule.id] ?? [];
+		const versions = [...(settings.ruleVersions[rule.id] ?? [])];
 
 		if (existingIndex >= 0) {
 			versions.unshift({ content: settings.rules[existingIndex].templateContent, savedAt: Date.now() });
