@@ -91,6 +91,9 @@ export function createDefaultSettings(): HubSettings {
 		paths: {
 			calendarFolder: "01 - Calendario",
 			calendarTemplatesFolder: "99 - Sistema/Templates/Calendário",
+			inboxFolder: "00 - Inbox",
+			systemFolder: "99 - Sistema",
+			filesFolder: "99 - Sistema/arquivos",
 		},
 		sync: {
 			lastWrittenBy: randomId(),
