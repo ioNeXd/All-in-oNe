@@ -16,7 +16,7 @@ import { negotiateToolsApiVersion, TOOLS_API_VERSION } from "./ToolsApiVersion";
 import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
 import { randomId, cryptoRandomToken } from "../../core/types";
 import { searchVault, normalizeQuery } from "./SearchVault";
-import { createRateLimiter, wouldAllow, reserve } from "./RateLimit";
+import { createRateLimiter, reserve } from "./RateLimit";
 import { validateVaultPath } from "../../core/PathUtils";
 
 export interface McpModuleSettings {
@@ -111,10 +111,10 @@ export class McpModule implements HubModule {
 	/** Porta em que o servidor está DE FATO escutando (a config pode divergir até o restart). */
 	private listeningPort?: number;
 	/**
-	 * Rate limit: consumo SÓ na execução real (ver RateLimit.ts). Pré-checado
-	 * no gate com `wouldAllow` (não consome — negação por readOnly/pasta
-	 * bloqueada/dry-run não pode comer a cota de quem segue as regras) e
-	 * consumido de fato logo antes de executeTool/dry-run.
+	 * Rate limit: consumo SÓ depois de todas as validações do gate (ver
+	 * RateLimit.ts). A reserva é feita atomicamente antes da execução; falhas
+	 * de validação anteriores não consomem a cota e uma reserva liberada volta
+	 * a ficar disponível.
 	 */
 	private rateLimiter = createRateLimiter(MCP_DEFAULTS.rateLimitPerMinute);
 	private lastServerError?: string;
@@ -1090,8 +1090,8 @@ export function validateMcpDraft(draft: {
 	} else if (draft.port < 1024 || draft.port > 65535) {
 		errors.push(`Porta ${draft.port} inválida: use um valor entre 1024 e 65535.`);
 	}
-	if (!Number.isFinite(draft.rateLimitPerMinute) || draft.rateLimitPerMinute < 1) {
-		errors.push("O limite de ações por minuto precisa ser pelo menos 1.");
+	if (!Number.isInteger(draft.rateLimitPerMinute) || draft.rateLimitPerMinute < 1) {
+		errors.push("O limite de ações por minuto precisa ser um inteiro maior ou igual a 1.");
 	}
 	return errors;
 }
