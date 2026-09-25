@@ -127,6 +127,9 @@ export async function searchVault<F>(
 	if (!query) return { matches: [], truncated: false, scanned: 0 };
 
 	const maxResults = input.maxResults ?? DEFAULT_MAX_RESULTS;
+	if (!Number.isInteger(maxResults) || maxResults < 1) {
+		throw new RangeError("maxResults deve ser um inteiro maior ou igual a 1.");
+	}
 	const notes = primitives.listNotes();
 	const deferred: { file: F; path: string; baseScore: number }[] = [];
 	const matches: SearchMatch[] = [];
