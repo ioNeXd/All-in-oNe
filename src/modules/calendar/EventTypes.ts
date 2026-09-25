@@ -53,6 +53,9 @@ export const MONTH_NAMES = [
 
 /** Pasta do mês no formato "09 - Setembro", como pedido. */
 export function monthFolderName(monthIndexZeroBased: number): string {
+	if (!Number.isInteger(monthIndexZeroBased) || monthIndexZeroBased < 0 || monthIndexZeroBased >= MONTH_NAMES.length) {
+		throw new RangeError("Índice de mês inválido.");
+	}
 	const number = String(monthIndexZeroBased + 1).padStart(2, "0");
 	return `${number} - ${MONTH_NAMES[monthIndexZeroBased]}`;
 }
@@ -88,8 +91,9 @@ export function shouldFire(event: CalendarEvent, now: Date): boolean {
 	}
 
 	if (event.time) {
-		const [hour, minute] = event.time.split(":").map(Number);
-		const target = hour * 60 + minute;
+		const parsed = parseEventTime(event.time);
+		if (!parsed) return false;
+		const target = parsed.hour * 60 + parsed.minute;
 		const current = now.getHours() * 60 + now.getMinutes();
 		if (current < target) return false; // ainda não chegou a hora
 	}
@@ -114,28 +118,40 @@ export const MIN_SCHEDULE_DELAY_MS = 1_000;
 
 export function nextEventDelayMs(events: readonly CalendarEvent[], now: Date): number {
 	let best = MAX_SCHEDULE_DELAY_MS;
+
 	for (const event of events) {
-		if (event.recurrence === "once" && event.year !== now.getFullYear()) continue;
+		if (event.recurrence === "once" && event.year !== now.getFullYear() && event.year !== now.getFullYear() + 1) continue;
 		if (event.recurrence === "yearly" && event.lastFiredYear === now.getFullYear()) continue;
-		if (!event.time) continue; // sem horário: não há "próximo momento" preciso
+		if (!event.time) continue;
 
-		const [hour, minute] = event.time.split(":").map(Number);
-		if (!Number.isFinite(hour) || !Number.isFinite(minute)) continue;
+		const parsed = parseEventTime(event.time);
+		if (!parsed) continue;
 
-		const candidates: Date[] = [
-			new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute, 0, 0),
-		];
-		// Evento com horário de hoje que JÁ PASSOU (e ainda elegível — p.ex.
-		// Obsidian fechado na hora): o próximo é amanhã, mesmo dia/mês futuro
-		// do ano que vem para anual.
-		const tomorrow = new Date(candidates[0]);
-		tomorrow.setDate(tomorrow.getDate() + 1);
-		candidates.push(tomorrow);
+		const candidateYears =
+			event.recurrence === "once"
+				? [event.year!]
+				: [now.getFullYear(), now.getFullYear() + 1];
 
-		for (const when of candidates) {
+		for (const year of candidateYears) {
+			const when = new Date(year, event.month - 1, event.day, parsed.hour, parsed.minute, 0, 0);
+			if (
+				when.getFullYear() !== year ||
+				when.getMonth() !== event.month - 1 ||
+				when.getDate() !== event.day
+			) {
+				continue;
+			}
+
 			const delta = when.getTime() - now.getTime();
 			if (delta > 0 && delta < best) best = delta;
 		}
 	}
+
 	return Math.max(MIN_SCHEDULE_DELAY_MS, best);
+}
+
+function parseEventTime(value: string): { hour: number; minute: number } | null {
+	const match = /^(?:[01]\\d|2[0-3]):[0-5]\\d$/.exec(value);
+	if (!match) return null;
+	return { hour: Number(value.slice(0, 2)), minute: Number(value.slice(3, 5)) };
 }
