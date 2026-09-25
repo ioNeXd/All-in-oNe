@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DEFAULT_PATHS } from "../src/core/types";
-import { resolvePaths, updateDerivedPaths, syncModuleDerivedPaths } from "../src/core/PathResolver";
+import { resolvePaths, updateDerivedPaths } from "../src/core/PathResolver";
 
 describe("PathResolver", () => {
 	it("resolve os defaults canônicos", () => {
@@ -23,12 +23,10 @@ describe("PathResolver", () => {
 		expect(resolved.calendarTemplatesFolder).toBe("Meu/Template");
 	});
 
-	it("ao mudar o calendário, sincroniza a pasta de eventos do módulo quando ela era derivada", () => {
-		const previous = {
-			...({ schemaVersion: 2, onboardingCompleted: true, modules: { calendar: { eventNotesFolder: "01 - Calendario/Notas-Eventos" } }, enabledModules: [], lobby: { openMode: "tab", theme: "match-obsidian" }, paths: DEFAULT_PATHS, sync: { lastWrittenBy: "x", lastWrittenAt: 0 }, telemetry: { enabled: false } }),
-		};
-		const next = { ...previous, paths: { ...DEFAULT_PATHS, calendarFolder: "Agenda" } };
-		const synced = syncModuleDerivedPaths(previous, next);
-		expect(synced.modules.calendar.eventNotesFolder).toBe("Agenda/Notas-Eventos");
+	it("ao mudar o calendário, atualiza a pasta global de notas de eventos derivada", () => {
+		const previous = { ...DEFAULT_PATHS };
+		const next = { ...previous, calendarFolder: "Agenda" };
+		const resolved = updateDerivedPaths(previous, next);
+		expect(resolved.eventNotesFolder).toBe("Agenda/Notas-Eventos");
 	});
 });
