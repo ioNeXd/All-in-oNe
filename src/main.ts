@@ -40,6 +40,7 @@ export default class IoneHubPlugin extends Plugin {
 	private vaultBridge?: VaultEventBridge;
 	private calendarRibbon?: HTMLElement;
 	private calendarRibbonUnsub?: () => void;
+	private onboardingClickHandled = false;
 
 	async onload(): Promise<void> {
 		this.core = new HubCore(
@@ -150,6 +151,13 @@ export default class IoneHubPlugin extends Plugin {
 		syncCalendarRibbon();
 
 		this.addRibbonIcon("layout-dashboard", "Abrir All iₙ oNe", () => {
+			if (!this.onboardingClickHandled) {
+				this.onboardingClickHandled = true;
+				if (!this.core.settings.get().onboardingCompleted) {
+					new OnboardingModal(this.app, this.core).open();
+					return;
+				}
+			}
 			void this.openLobby();
 		});
 
@@ -159,12 +167,6 @@ export default class IoneHubPlugin extends Plugin {
 			callback: () => void this.openLobby(),
 		});
 
-		if (!this.core.settings.get().onboardingCompleted) {
-			// Espera o layout do Obsidian estabilizar antes de abrir o modal.
-			this.app.workspace.onLayoutReady(() => {
-				new OnboardingModal(this.app, this.core).open();
-			});
-		}
 	}
 
 	async onunload(): Promise<void> {
