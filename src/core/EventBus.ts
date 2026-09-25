@@ -57,8 +57,8 @@ export class EventBus {
 	private historyLimit = DEFAULT_HISTORY_LIMIT;
 	private throttleWindows = new Map<HubEventName, number>(); // ms
 	/**
-	 * Chaves evento:fonte — CRESCE LIMITADA por construção: só eventos COM
-	 * janela de throttle registrada escrevem aqui (o `set` está dentro do
+	 * Chaves compostas evento+fonte — CRESCE LIMITADA por construção: só
+	 * eventos COM janela de throttle registrada escrevem aqui (o `set` está dentro do
 	 * branch do throttle no emit), então o teto é (#eventos com throttle) ×
 	 * (#fontes distintas de cada um). Hoje: 1 evento ("file:created") × 2
 	 * fontes ("core", "filelifecycle"). Eventos sem janela nunca tocam a Map.
@@ -132,6 +132,7 @@ export class EventBus {
 				clearTimeout(timer);
 				this.coalesceTimers.delete(throttleKey);
 				this.coalescedPayloads.delete(throttleKey);
+				this.lastEmitAt.delete(throttleKey);
 			}
 		}
 	}
