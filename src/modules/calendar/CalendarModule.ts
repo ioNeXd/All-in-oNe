@@ -27,7 +27,6 @@ export interface CalendarModuleSettings {
 	 * hora. Antes havia duas pastas separadas ("eventos" e "notas"); ficou
 	 * uma só, por pedido, para não duplicar o conceito.
 	 */
-	eventNotesFolder: string;
 	/**
 	 * Se true, o lembrete força a janela do Obsidian pra frente mesmo com o
 	 * app minimizado. Desligado por padrão — ver ReminderModal.
@@ -38,7 +37,6 @@ export interface CalendarModuleSettings {
 export const CALENDAR_DEFAULTS: CalendarModuleSettings = {
 	events: [],
 	view: "month",
-	eventNotesFolder: "01 - Calendario/Notas-Eventos",
 	autoFocusOnReminder: false,
 };
 
@@ -217,18 +215,6 @@ export class CalendarModule implements HubModule {
 				text.inputEl.onblur = () => this.updateGlobalPath("calendarTemplatesFolder", text.getValue());
 			});
 
-		new Setting(container)
-			.setName("Pasta das notas de evento")
-			.setDesc(
-				"Usada tanto para notas EXISTENTES vinculadas (são movidas pra cá) quanto para " +
-					"notas NOVAS criadas a partir de um evento. Criada automaticamente se não existir."
-			)
-			.addText((text) => {
-				text.setValue(settings.eventNotesFolder);
-				text.inputEl.onblur = async () => {
-					await this.context?.updateSettings({ eventNotesFolder: text.getValue().trim() });
-				};
-			});
 
 		container.createEl("h3", { text: "Lembretes" });
 		new Setting(container)
@@ -339,7 +325,7 @@ export class CalendarModule implements HubModule {
 	openEventEditor(date: Date): void {
 		void this.ensureEventNotesFolder();
 		const notes = this.context!.app.vault.getMarkdownFiles().map((f) => f.path);
-		const defaultFolder = this.readSettings().eventNotesFolder;
+		const defaultFolder = normalizePath(this.context!.getFullSettings().paths.calendarFolder + "/Notas-Eventos");
 		new EventEditorModal(
 			this.context!.app,
 			date,
@@ -558,7 +544,7 @@ export class CalendarModule implements HubModule {
 	/** Clique num dia: abre a nota existente, ou pergunta o que fazer. */
 	private async handleDayClick(date: Date): Promise<void> {
 		const notes=this.findNotesForDate(date),events=this.eventsForDate(date),templates=await this.listAvailableTemplates();
-		new DateActionModal(this.context!.app,date,notes,events,templates,{openNote:file=>this.context!.app.workspace.getLeaf(false).openFile(file),createDaily:async()=>{const f=await this.createDailyNote(date);await this.context!.app.workspace.getLeaf(false).openFile(f)},createTemplate:async t=>{const f=await this.createTemplateNote(date,t);await this.context!.app.workspace.getLeaf(false).openFile(f)},createEvent:()=>this.openEventEditor(date),editEvent:e=>this.editEvent(e)}).open();
+		new DateActionModal(this.context!.app,date,notes,events,templates,{openNote:file=>this.context!.app.workspace.getLeaf(false).openFile(file),createDaily:async()=>{const f=await this.createDailyNote(date);await this.context!.app.workspace.getLeaf(false).openFile(f)},createTemplate:async t=>{const f=await this.createTemplateNote(date,t);await this.context!.app.workspace.getLeaf(false).openFile(f)},createEvent:()=>this.openEventEditor(date),editEvent:e=>this.editEvent(e),deleteEvent:e=>this.removeEvent(e.id)}).open();
 	}
 
 	private async updateGlobalPath(key: string, value: string): Promise<void> {
@@ -622,12 +608,12 @@ export class CalendarModule implements HubModule {
 	async createDailyNote(date: Date): Promise<TFile>{
 		const path=this.pathForDate(date),existing=this.context!.app.vault.getAbstractFileByPath(path);if(existing instanceof TFile)return existing;await ensureVaultFolder(this.context!.app,path.substring(0,path.lastIndexOf("/")));
 		const tp=normalizePath(this.context!.getFullSettings().paths.calendarTemplatesFolder+"/calendario/Nota diaria.md"),tf=this.context!.app.vault.getAbstractFileByPath(tp);const body=tf instanceof TFile?stripFrontmatter(await this.context!.app.vault.read(tf)).trim():"";
-		const file=await this.context!.app.vault.create(path,body);await this.context!.app.fileManager.processFrontMatter(file,fm=>{fm.date=dateKey(date);fm.thema=["Calendario",String(date.getFullYear()),MONTH_NAMES[date.getMonth()]];fm.origem=path;fm.concluido=false});await this.context?.bus.emit("calendar:note-created",{path,templateName:"Nota diaria"},"calendar");return file;
+		const file=await this.context!.app.vault.create(path,body);await this.context!.app.fileManager.processFrontMatter(file,fm=>{fm.date=dateKey(date);fm.thema=["Calendario",String(date.getFullYear()),MONTH_NAMES[date.getMonth()]];fm.origem=path;fm.concluido=false;fm.status=["incompleto"]});await this.context?.bus.emit("calendar:note-created",{path,templateName:"Nota diaria"},"calendar");return file;
 	}
 	async createTemplateNote(date: Date,template: string): Promise<TFile>{
 		const root=normalizePath(this.context!.getFullSettings().paths.calendarTemplatesFolder),source=this.context!.app.vault.getAbstractFileByPath(normalizePath(root+"/"+template));if(!(source instanceof TFile))throw new Error("Template não encontrado: "+template);
 		const folder=normalizePath(this.context!.getFullSettings().paths.calendarFolder+"/"+date.getFullYear()+"/"+monthFolderName(date.getMonth()));await ensureVaultFolder(this.context!.app,folder);
-		const suffix=firstAvailableTemplateSuffix(this.findNotesForDate(date).map(f=>f.name),source.basename,date),path=normalizePath(folder+"/"+templateNoteFilename(source.basename,date,suffix));const file=await this.context!.app.vault.create(path,stripFrontmatter(await this.context!.app.vault.read(source)).trim());await this.context!.app.fileManager.processFrontMatter(file,fm=>{fm.date=dateKey(date);fm.thema=["Calendario",String(date.getFullYear()),MONTH_NAMES[date.getMonth()]];fm.origem=path;fm.concluido=false});await this.context?.bus.emit("calendar:note-created",{path,templateName:template},"calendar");return file;
+		const suffix=firstAvailableTemplateSuffix(this.findNotesForDate(date).map(f=>f.name),source.basename,date),path=normalizePath(folder+"/"+templateNoteFilename(source.basename,date,suffix));const file=await this.context!.app.vault.create(path,stripFrontmatter(await this.context!.app.vault.read(source)).trim());await this.context!.app.fileManager.processFrontMatter(file,fm=>{fm.date=dateKey(date);fm.thema=["Calendario",String(date.getFullYear()),MONTH_NAMES[date.getMonth()]];fm.origem=path;fm.concluido=false;fm.status=["incompleto"]});await this.context?.bus.emit("calendar:note-created",{path,templateName:template},"calendar");return file;
 	}
 	async listAvailableTemplates(): Promise<string[]>{
 		const root=normalizePath(this.context!.getFullSettings().paths.calendarTemplatesFolder),folder=this.context!.app.vault.getAbstractFileByPath(root);if(!(folder instanceof TFolder))return[];const out:string[]=[];const walk=(f:TFolder)=>{for(const child of f.children){if(child instanceof TFolder)walk(child);else if(child instanceof TFile&&child.extension==="md"&&child.basename!=="Nota diaria")out.push(child.path.slice(root.length+1))}};walk(folder);return out.sort((a,b)=>a.localeCompare(b,"pt-BR"));
@@ -714,7 +700,7 @@ export class CalendarModule implements HubModule {
 
 	/** Vincula uma nota EXISTENTE a um evento: grava o metadado e move para a pasta de eventos. */
 	async linkExistingNote(file: TFile, refId: string): Promise<void> {
-		const folder = this.readSettings().eventNotesFolder;
+		const folder = normalizePath(this.context!.getFullSettings().paths.calendarFolder + "/Notas-Eventos");
 
 		await ensureVaultFolder(this.context!.app, folder);
 		const target = await uniqueVaultPath(this.context!.app, normalizePath(`${folder}/${file.name}`));
@@ -732,7 +718,7 @@ export class CalendarModule implements HubModule {
 
 	/** Cria uma nota NOVA já vinculada, na pasta configurável (padrão: Calendario/notas). */
 	async createLinkedNote(name: string, refId: string, folderOverride?: string): Promise<TFile> {
-		const folder = folderOverride?.trim() || this.readSettings().eventNotesFolder;
+		const folder = normalizePath(this.context!.getFullSettings().paths.calendarFolder + "/Notas-Eventos");
 		await ensureVaultFolder(this.context!.app, folder);
 		const path = await uniqueVaultPath(this.context!.app, normalizePath(`${folder}/${name}.md`));
 		const file = await this.context!.app.vault.create(path, "");
@@ -825,6 +811,7 @@ interface DateActionCallbacks {
 	createTemplate(template: string): void | Promise<void>;
 	createEvent(): void;
 	editEvent(event: CalendarEvent): void;
+	deleteEvent(event: CalendarEvent): void | Promise<void>;
 }
 
 class DateActionModal extends Modal {
@@ -840,7 +827,7 @@ class DateActionModal extends Modal {
 	onOpen(): void {
 		this.contentEl.createEl("h2", { text: this.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" }) });
 		if (this.notes.length === 0) this.button("📝 Nota diária", () => this.callbacks.createDaily());
-		else if (this.notes.length === 1) this.button("📝 Nota atual", () => this.callbacks.openNote(this.notes[0]));
+		else if (this.notes.length === 1) this.button("📝 Nota diária", () => this.callbacks.openNote(this.notes[0]));
 		else {
 			this.contentEl.createEl("h3", { text: "📝 Notas do dia" });
 			for (const note of this.notes) this.button(note.basename, () => this.callbacks.openNote(note));
@@ -855,6 +842,7 @@ class DateActionModal extends Modal {
 				row.createEl("strong", { text: event.title });
 				row.createSpan({ text: (event.time ? " · " + event.time : "") + (event.description ? " · " + event.description : "") });
 				row.createEl("button", { text: "Editar" }).onclick = () => { this.close(); this.callbacks.editEvent(event); };
+				row.createEl("button", { text: "Excluir" }).onclick = () => { this.close(); void this.callbacks.deleteEvent(event); };
 			}
 			this.button("➕ Criar evento", this.callbacks.createEvent);
 		}
