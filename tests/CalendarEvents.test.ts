@@ -133,7 +133,6 @@ describe("onResetData do Calendário — dados × configuração", () => {
 		const slice = {
 			events: structuredClone(events),
 			view: "month" as const,
-			eventNotesFolder: "Calendario/notas",
 			autoFocusOnReminder: false,
 		};
 		const updateSettings = vi.fn(async (patch: Record<string, unknown>) => {
