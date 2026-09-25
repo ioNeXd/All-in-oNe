@@ -7,13 +7,14 @@ externa; v0.2.0 fecha as 8 partes do plano pós-auditoria — anexos do MCP,
 .ics no Calendário, assinatura GPG + BRAT no Auto-update, realce de CSS,
 filtros de Notificações/Histórico, teclado/drag-and-drop no Lobby — ver
 CHANGELOG): a arquitetura está completa e auditada, cada
-módulo está funcional na sua função principal, e as lacunas restantes estão
+módulo está funcional na sua função principal, e as lacunas conhecidas estão
 listadas aqui sem rodeio.
 
-> Estado da validação nesta linha de base: typecheck estrito ✅ ·
+> **Validação registrada para esta linha de base:** typecheck estrito ✅ ·
 > **suíte Vitest completa** (todos importando código real, não cópias
-> espelhadas) ✅ · build de produção ✅. O que os testes não cobrem é o
-> runtime de verdade no Obsidian — para isso, siga `docs/MANUAL-VALIDATION.md`.
+> espelhadas) ✅ · build de produção ✅. Esses resultados são a validação
+> registrada, não uma execução desta auditoria. O que os testes não cobrem é
+> o runtime de verdade no Obsidian — para isso, siga `docs/MANUAL-VALIDATION.md`.
 
 ## Versões por módulo
 
@@ -28,7 +29,7 @@ seções seguintes detalham cada módulo em seu estado atual.
 | MCP | `0.1.0` — ferramentas base de leitura e escrita | `0.1.0` | `0.3.0` — MCP 2026-07-28 stateless + compatibilidade com a era 2025, além das features de anexos/log/toolsApiVersion |
 | Ciclo de vida de arquivos | `0.1.0` — nome ao criar, confirmação opcional de renome/mover/exclusão | `0.1.0` | `0.1.0` — sem mudanças |
 | Estilos | `0.1.0` — temas, painel visual, preview/undo/export | `0.1.0` | `0.2.0` — realce de sintaxe no editor livre (overlay + `CssHighlight.ts`) |
-| Templates por pasta | `0.1.0` — regras por pasta, herança, status, movimentação | `0.1.0` | `0.1.0` — sem mudanças de código (a Parte 0 do plano corrigiu apenas docs) |
+| Templates por pasta | `0.1.0` — regras por pasta, herança, status, movimentação | `0.1.0` | `0.2.0` — status canônico `incompleto/completo`, sincronização com `concluido` e compatibilidade com o status legado |
 | Calendário | `0.2.0`¹ — grade/semana/agenda, recorrentes, lembretes, `DayActionModal` | `0.2.0`¹ | `0.3.0` — importador `.ics` (`IcsParser.ts`), `onResetData` e diagnóstico da última importação |
 | Notificações | `0.1.0` — 11 gatilhos, regras, não-perturbe, histórico no painel | `0.1.0` | `0.2.0` — filtro por gatilho persistido e agrupamento por dia (`NotificationList.ts`) |
 | Histórico | `0.1.0` — registro persistente e filtro por tipo | `0.1.0` | `0.2.0` — busca por texto combinada ao filtro (`HistoryFilter.ts`) e consumidor de `mcp:action-logged` |
@@ -159,8 +160,9 @@ dispensada, mensagens de erro honestas.
 
 **Funciona:** regras por pasta com herança e derivação automática de
 `thema` pela hierarquia, template aplicado sem quebrar o frontmatter,
-`status` como lista clicável `["Pendente","Completo"]` (com regra
-centralizada em `NoteStatus.ts`, testada contra o código real), movimentação
+`status` canônico como lista clicável `["incompleto"]` / `["completo"]`, com
+compatibilidade de leitura para `pendente` e regra centralizada em
+`NoteStatus.ts`, testada contra o código real, movimentação
 para pasta Pendente por categoria com fallback, retorno automático ao
 completar, proteção anti-loop, histórico de versões de regras, painel no
 Lobby para criar, editar e remover regras (formulário único de criação e
@@ -181,7 +183,9 @@ sem duplicar controles), indicadores por dia (nota existente, pendente,
 evento) com tooltip, visões de semana e agenda, modal de escolha de
 template (`DayActionModal`), eventos recorrentes com contagem ou "para
 sempre", lembretes com timer de 10s, nota vinculada aberta em segundo
-plano, vínculo por metadado (renomear/mover a nota não quebra), janela
+plano, vínculo por metadado (renomear/mover a nota não quebra), sincronização
+reativa de `status`/`concluido` para notas de calendário, ribbon dedicado
+para abrir o Calendário quando o módulo está ligado, janela
 espontânea desligada por padrão (opt-in), listagem de templates a partir
 da pasta configurável, seletor filtrável de notas/pastas
 (`FilterSuggest.ts`), importação de arquivos `.ics` (parser puro em
