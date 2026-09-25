@@ -388,7 +388,7 @@ export class CalendarModule implements HubModule {
 		action:
 			| { kind: "none" }
 			| { kind: "existing"; path: string }
-			| { kind: "create"; name: string; folder: string },
+			| { kind: "create"; name: string },
 		event: Omit<CalendarEvent, "id">
 	): Promise<void> {
 		if (action.kind === "none" || !event.noteRefId) return;
@@ -396,7 +396,7 @@ export class CalendarModule implements HubModule {
 			const file = this.context!.app.vault.getAbstractFileByPath(action.path);
 			if (file instanceof TFile) await this.linkExistingNote(file, event.noteRefId);
 		} else if (action.kind === "create") {
-			await this.createLinkedNote(action.name.trim(), event.noteRefId, action.folder);
+			await this.createLinkedNote(action.name.trim(), event.noteRefId);
 		}
 	}
 
@@ -903,7 +903,6 @@ class EventEditorModal extends Modal {
 	private noteMode: "none" | "existing" | "create" = "none";
 	private selectedExistingPath = "";
 	private newNoteName = "";
-	private newNoteFolder: string;
 	/** refId reaproveitado se já havia nota vinculada (edição); novo se ainda não. */
 	private noteRefId: string;
 
@@ -914,12 +913,11 @@ class EventEditorModal extends Modal {
 		private defaultNoteFolder: string,
 		private onSave: (
 			event: Omit<CalendarEvent, "id">,
-			noteAction: { kind: "none" } | { kind: "existing"; path: string } | { kind: "create"; name: string; folder: string }
+			noteAction: { kind: "none" } | { kind: "existing"; path: string } | { kind: "create"; name: string }
 		) => void | Promise<void>,
 		private existing?: CalendarEvent
 	) {
 		super(app);
-		this.newNoteFolder = defaultNoteFolder;
 		this.noteRefId = existing?.noteRefId ?? `note-${Date.now()}`;
 		if (existing) {
 			this.noteMode = existing.noteRefId ? "existing" : "none";
@@ -1052,18 +1050,11 @@ class EventEditorModal extends Modal {
 			new Setting(this.contentEl)
 				.setName("Nome da nova nota")
 				.addText((text) => text.onChange((v) => (this.newNoteName = v)));
-
 			this.contentEl.createEl("p", {
 				cls: "ione-hub-lobby__description",
-				text: `Pasta — padrão "${this.defaultNoteFolder}". Digite para filtrar entre as pastas do vault.`,
+				text: "A nota será criada automaticamente em Calendario/Notas-Eventos dentro da pasta do Calendário configurada.",
 			});
-			const folderSetting = new Setting(this.contentEl).setName("Pasta");
-			const folderInput = folderSetting.controlEl.createEl("input", { type: "text" });
-			folderInput.value = this.newNoteFolder;
-			folderInput.style.width = "100%";
-			const folderBox = this.contentEl.createDiv();
-			attachFilterSuggest(folderInput, folderBox, this.allFolders(), (v) => (this.newNoteFolder = v));
-			folderInput.oninput = () => (this.newNoteFolder = folderInput.value);
+		
 		}
 
 		new Setting(this.contentEl)
@@ -1087,7 +1078,7 @@ class EventEditorModal extends Modal {
 							this.noteMode === "existing"
 								? ({ kind: "existing", path: this.selectedExistingPath } as const)
 								: this.noteMode === "create"
-									? ({ kind: "create", name: this.newNoteName.trim(), folder: this.newNoteFolder } as const)
+									? ({ kind: "create", name: this.newNoteName.trim() } as const)
 									: ({ kind: "none" } as const);
 
 						if (this.noteMode === "existing" && !this.selectedExistingPath) {
