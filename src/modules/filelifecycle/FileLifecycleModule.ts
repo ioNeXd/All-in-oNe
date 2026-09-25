@@ -210,10 +210,6 @@ export class FileLifecycleModule implements HubModule {
 	}
 
 	/**
-	 * Sinaliza que a nota tem nome definitivo. Os outros módulos (Templates,
-	 * Histórico) usam este evento em vez do `file:created` cru.
-	 */
-	/**
 	 * Sinaliza que a nota tem nome definitivo. Emite dois eventos: o interno
 	 * `lifecycle:note-ready` (usado por Templates) e o `file:created` "oficial"
 	 * — este módulo é quem manda essa notícia pro resto do plugin quando está
@@ -499,8 +495,12 @@ class ConfirmModal extends Modal {
 					.setButtonText("Confirmar")
 					.setWarning()
 					.onClick(async () => {
-						await this.onConfirm();
-						this.close();
+						try {
+							await this.onConfirm();
+							this.close();
+						} catch (error) {
+							new Notice(error instanceof Error ? error.message : "A operação falhou.");
+						}
 					})
 			)
 			.addButton((btn) => btn.setButtonText("Cancelar").onClick(() => this.close()));
@@ -546,8 +546,12 @@ class MovePromptModal extends Modal {
 					.setButtonText("Mover")
 					.setCta()
 					.onClick(async () => {
-						await this.onMove(this.target === "/" ? "" : this.target);
-						this.close();
+						try {
+							await this.onMove(this.target === "/" ? "" : this.target);
+							this.close();
+						} catch (error) {
+							new Notice(error instanceof Error ? error.message : "A operação falhou.");
+						}
 					})
 			)
 			.addButton((btn) => btn.setButtonText("Cancelar").onClick(() => this.close()));
