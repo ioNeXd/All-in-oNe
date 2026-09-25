@@ -106,7 +106,6 @@ export default class IoneHubPlugin extends Plugin {
 			}
 		);
 		this.calendarRibbonUnsub = () => { enabledRef(); disabledRef(); };
-		syncCalendarRibbon();
 
 
 		// Traduz eventos nativos do vault para o barramento interno. Fica no
@@ -145,6 +144,10 @@ export default class IoneHubPlugin extends Plugin {
 		for (const module of modules) {
 			await this.core.registerModule(module);
 		}
+
+		// Os módulos já foram registrados e habilitados conforme a configuração.
+		// Só agora o estado inicial da ribbon do Calendário pode ser consultado.
+		syncCalendarRibbon();
 
 		this.addRibbonIcon("layout-dashboard", "Abrir All iₙ oNe", () => {
 			void this.openLobby();
