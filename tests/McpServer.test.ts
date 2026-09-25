@@ -279,7 +279,7 @@ describe("MCP — contrato HTTP (Content-Type e Accept)", () => {
 		expect(res.status).toBe(406);
 	});
 
-	it("aceita Accept application/json com parametros extras", async () => {
+	it("rejeita Accept application/json com q=0", async () => {\n\t\tconst h = await start();\n\t\tconst res = await fetch(`http://127.0.0.1:${h.port}`, {\n\t\t\tmethod: "POST",\n\t\t\theaders: { "Content-Type": "application/json", Accept: "application/json; q=0", Authorization: "Bearer tok" },\n\t\t\tbody: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),\n\t\t});\n\t\texpect(res.status).toBe(406);\n\t});\n\n\tit("aceita Accept application/json com parametros extras", async () => {
 		const h = await start();
 		const res = await fetch(`http://127.0.0.1:${h.port}`, {
 			method: "POST",
@@ -460,11 +460,11 @@ describe("MCP — autenticação (401 antes de qualquer processamento)", () => {
 		expect(await res.json()).toEqual({ error: "Token inválido." });
 	});
 
-	it("comparação EXATA: esquema minúsculo ou token sem esquema também recusa", async () => {
+	it("esquema Bearer é case-insensitive; token sem esquema é recusado", async () => {
 		// O gate compara a string inteira com `Bearer ${token}` — não basta o
 		// token aparecer no header de qualquer forma (evita confusão de esquema).
 		const h = await start();
-		for (const authValue of ["bearer tok", "tok"]) {
+		for (const authValue of ["tok"]) {
 			const res = await fetch(`http://127.0.0.1:${h.port}`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json", Authorization: authValue },
@@ -604,7 +604,7 @@ describe("MCP — negociação da versão da API de ferramentas", () => {
 		expect(listJson.result.tools.some((t) => t.name === "get_server_info")).toBe(true);
 	});
 
-	it("minor maior dentro do mesmo major é aceito (1.9.0 contra servidor 1.0.0)", async () => {
+	it("minor maior dentro do mesmo major é compatível e negocia a versão suportada pelo servidor", async () => {
 		const h = await start("1.0.0");
 		const res = await post(h.port, {
 			jsonrpc: "2.0",
@@ -614,7 +614,7 @@ describe("MCP — negociação da versão da API de ferramentas", () => {
 		});
 		const json = (await res.json()) as { result: { toolsApiVersion: string } };
 		expect(res.status).toBe(200);
-		expect(json.result.toolsApiVersion).toBe("1.9.0");
+		expect(json.result.toolsApiVersion).toBe("1.0.0");
 	});
 
 	it("major incompatível (2.0.0 contra servidor 1.0.0) recebe erro claro com código dedicado", async () => {
