@@ -204,7 +204,7 @@ describe("defaults e sincronização de caminhos derivados", () => {
 		expect(settings.schemaVersion).toBe(3);
 		expect(settings.paths.calendarFolder).toBe("01 - Calendario");
 		expect(settings.paths.calendarTemplatesFolder).toBe("99 - Sistema/Templates/Calendário");
-		expect(getStored().schemaVersion).toBe(3);
+		expect((getStored() as { schemaVersion: number }).schemaVersion).toBe(3);
 	});
 
 	it("acompanha templates e arquivos quando o sistema muda, sem sobrescrever customização", async () => {
