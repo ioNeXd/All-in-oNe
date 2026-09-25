@@ -95,6 +95,8 @@ export class CalendarModule implements HubModule {
 	private readonly audioUnlocker = new AudioUnlocker();
 	/** Desinscrição do pedido da UI (calendar:open-today) — limpo no onDisable. */
 	private busUnsubscribe?: () => void;
+	private dailyNoteModifyUnsubscribe?: () => void;
+	private syncingDailyNoteStatus = new Set<string>();
 	/** Estado da ÚLTIMA importação .ics — alimenta o Diagnóstico. */
 	private lastIcsImport: { ok: boolean; detail: string } | undefined;
 	/** Mês exibido na grade (independente do mês atual) — controlado pela navegação. */
@@ -135,6 +137,16 @@ export class CalendarModule implements HubModule {
 		this.busUnsubscribe = this.context!.bus.on("calendar:open-today", "calendar", () => {
 			void this.openOrCreateForDate(new Date());
 		});
+
+		// Mantém `status` sincronizado com `concluido` nas notas diárias.
+		const modifyRef = this.context!.app.vault.on("modify", (file) => {
+			if (!(file instanceof TFile) || file.extension !== "md") return;
+			if (this.syncingDailyNoteStatus.has(file.path)) return;
+			if (!this.findDailyNoteByPath(file.path)) return;
+			void this.syncDailyNoteStatus(file);
+		});
+		this.dailyNoteModifyUnsubscribe = () => this.context!.app.vault.offref(modifyRef);
+		void this.syncAllDailyNoteStatuses();
 	}
 
 	onDisable(): void {
@@ -142,6 +154,9 @@ export class CalendarModule implements HubModule {
 		this.dailyCheckInterval = undefined;
 		this.busUnsubscribe?.();
 		this.busUnsubscribe = undefined;
+		this.dailyNoteModifyUnsubscribe?.();
+		this.dailyNoteModifyUnsubscribe = undefined;
+		this.syncingDailyNoteStatus.clear();
 		this.audioUnlocker.disarm();
 		// Limpa a dedupe de minuto junto: sem isto, um desligar→ligar dentro
 		// do mesmo minuto pulava a checagem retroativa (e um lembrete sem
@@ -648,10 +663,34 @@ export class CalendarModule implements HubModule {
 		const p=this.context!.getFullSettings().paths;return normalizePath(p.calendarFolder+"/"+date.getFullYear()+"/"+monthFolderName(date.getMonth())+"/"+dailyNoteFilename(date));
 	}
 	async openOrCreateForDate(date: Date): Promise<TFile>{const e=this.findDailyNote(date);if(e){await this.context?.bus.emit("calendar:note-opened",{path:e.path},"calendar");return e}return this.createDailyNote(date)}
+	private findDailyNoteByPath(path: string): TFile | undefined {
+		const file = this.context?.app.vault.getAbstractFileByPath(path);
+		return file instanceof TFile && /^\d{4}-\d{2}-\d{2}\.md$/.test(file.name) ? file : undefined;
+	}
+
+	private async syncDailyNoteStatus(file: TFile): Promise<void> {
+		if (this.syncingDailyNoteStatus.has(file.path)) return;
+		this.syncingDailyNoteStatus.add(file.path);
+		try {
+			await this.context!.app.fileManager.processFrontMatter(file, (fm) => {
+				const status = fm.concluido === true ? "Completo" : "Incompleto";
+				if (fm.status !== status) fm.status = status;
+			});
+		} finally {
+			this.syncingDailyNoteStatus.delete(file.path);
+		}
+	}
+
+	private async syncAllDailyNoteStatuses(): Promise<void> {
+		for (const file of this.context!.app.vault.getMarkdownFiles()) {
+			if (this.findDailyNoteByPath(file.path)) await this.syncDailyNoteStatus(file);
+		}
+	}
+
 	async createDailyNote(date: Date): Promise<TFile>{
 		const path=this.pathForDate(date),existing=this.context!.app.vault.getAbstractFileByPath(path);if(existing instanceof TFile)return existing;await ensureVaultFolder(this.context!.app,path.substring(0,path.lastIndexOf("/")));
 		const tp=normalizePath(this.context!.getFullSettings().paths.calendarTemplatesFolder+"/calendario/Nota diaria.md"),tf=this.context!.app.vault.getAbstractFileByPath(tp);const body=tf instanceof TFile?stripFrontmatter(await this.context!.app.vault.read(tf)).trim():"";
-		const file=await this.context!.app.vault.create(path,body);await this.context!.app.fileManager.processFrontMatter(file,fm=>{fm.date=dateKey(date);fm.thema=["Calendario",String(date.getFullYear()),MONTH_NAMES[date.getMonth()]];fm.origem=path;fm.concluido=false});await this.context?.bus.emit("calendar:note-created",{path,templateName:"Nota diaria"},"calendar");return file;
+		const file=await this.context!.app.vault.create(path,body);await this.context!.app.fileManager.processFrontMatter(file,fm=>{fm.date=dateKey(date);fm.thema=["Calendario",String(date.getFullYear()),MONTH_NAMES[date.getMonth()]];fm.origem=path;fm.concluido=false;fm.status="Incompleto"});await this.context?.bus.emit("calendar:note-created",{path,templateName:"Nota diaria"},"calendar");return file;
 	}
 	async createTemplateNote(date: Date,template: string): Promise<TFile>{
 		const root=normalizePath(this.context!.getFullSettings().paths.calendarTemplatesFolder),source=this.context!.app.vault.getAbstractFileByPath(normalizePath(root+"/"+template));if(!(source instanceof TFile))throw new Error("Template não encontrado: "+template);
