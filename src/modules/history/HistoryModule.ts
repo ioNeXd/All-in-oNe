@@ -239,8 +239,10 @@ export class HistoryModule implements HubModule {
 			}
 			drain.confirm();
 		} catch {
-			// Save falhou: SEM confirm — o lote segue pendente e o próximo
-			// flush o re-tenta (a entrada não se perde na variável local).
+			// Save falhou: libera o lote para um retry real. Sem isso, os ids
+			// permaneceriam marcados como em voo e nenhum drain futuro poderia
+			// recolocá-los no lote.
+			drain.release();
 		}
 	}
 
