@@ -95,7 +95,9 @@ escuta** (não a configurada), reinício automático quando a porta configurada
 muda, painel completo no Lobby (porta, somente-leitura, dry-run, listas de
 permissão, regenerar token, reiniciar — tudo usável com o módulo desligado).
 
-**Compatibilidade MCP:** a era moderna 2026-07-28 é suportada para `server/discover`, `tools/list` e `tools/call`. A implementação continua deliberadamente limitada a Tools: `resources/*`, `prompts/*`, `subscriptions/listen`, Tasks e MRTR não são anunciados nem implementados. A era 2025 continua disponível pelo handshake legado.\n\n**Não implementado ainda:** ferramentas de backlinks/links; integração com
+**Compatibilidade MCP:** a era moderna 2026-07-28 é suportada para `server/discover`, `tools/list` e `tools/call`. A implementação continua deliberadamente limitada a Tools: `resources/*`, `prompts/*`, `subscriptions/listen`, Tasks e MRTR não são anunciados nem implementados. A era 2025 continua disponível pelo handshake legado.
+
+**Não implementado ainda:** ferramentas de backlinks/links; integração com
 Dataview/Bases — dependência externa, não implementável dentro do plugin:
 `dataview_query` exige o plugin Dataview instalado e habilitado; sem ele,
 a ferramenta responde com erro que aponta o pré-requisito em vez de falhar
