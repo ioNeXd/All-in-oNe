@@ -506,13 +506,16 @@ export class AutoUpdateModule implements HubModule {
 			throw originalErr;
 		}
 
+		const appliedVersion = release.tag_name.replace(/^v/, "");
+		this.currentVersion = appliedVersion;
+		await this.context?.updateSettings({ lastKnownVersion: appliedVersion });
 		new Notice("All iₙ oNe atualizado. Recarregue o Obsidian ou recarregue o plugin para aplicar.");
 		await this.context?.bus.emit(
 			"autoupdate:applied",
-			{ version: release.tag_name },
+			{ version: appliedVersion },
 			"autoupdate"
 		);
-		this.context?.log(`Plugin atualizado para ${release.tag_name}`);
+		this.context?.log(`Plugin atualizado para ${appliedVersion}`);
 	}
 
 	/**
