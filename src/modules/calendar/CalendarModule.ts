@@ -131,6 +131,22 @@ export class CalendarModule implements HubModule {
 		// cast de método — a UI não conhece API interna de módulo). Inscrito no
 		// onEnable: com o módulo desligado o pedido não tem destinatário, e o
 		// Lobby já avisa o usuário antes de emitir.
+		const metadataRef = this.context!.app.metadataCache.on("changed", (file) => {
+			if (!(file instanceof TFile) || file.extension !== "md") return;
+			const fm = this.context!.app.metadataCache.getFileCache(file)?.frontmatter;
+			if (!fm || typeof fm.date !== "string") return;
+			if (!isCalendarNoteForDate(file, new Date(fm.date))) return;
+			const completed = fm.concluido === true;
+			const status = Array.isArray(fm.status) ? fm.status : [fm.status];
+			const hasExpected = status.length === 1 && String(status[0]).toLowerCase() === (completed ? "completo" : "incompleto");
+			if (hasExpected) return;
+			void this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
+				frontmatter.concluido = completed;
+				frontmatter.status = [completed ? "completo" : "incompleto"];
+			});
+		});
+		this.metadataUnsubscribe = () => this.context!.app.metadataCache.offref(metadataRef);
+
 		this.busUnsubscribe = this.context!.bus.on("calendar:open-today", "calendar", () => {
 			void this.openOrCreateForDate(new Date());
 		});
