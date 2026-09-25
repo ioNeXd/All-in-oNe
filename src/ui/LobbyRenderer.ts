@@ -540,7 +540,7 @@ class ResetModal extends Modal {
 	}
 }
 
-/** Lista de notas com `status: pendente`, aberta pela ação rápida. */
+/** Lista notas incompletas (`status: ["incompleto"]`), aceitando também o status legado `pendente`. */
 class PendingNotesModal extends Modal {
 	constructor(app: App, private files: TFile[]) {
 		super(app);
