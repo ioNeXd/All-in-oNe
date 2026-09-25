@@ -496,6 +496,7 @@ export class TemplatesModule implements HubModule {
 				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
 					delete frontmatter.origem;
 				});
+				if (this.stopped) return;
 
 				this.context?.bus.emit("templates:note-restored", { path: finalPath }, "templates");
 				new Notice(`Nota completada e devolvida para ${finalPath}`);
@@ -503,7 +504,6 @@ export class TemplatesModule implements HubModule {
 		} finally {
 			this.movingFiles.delete(pathBefore);
 			this.movingFiles.delete(origem);
-			if (typeof origem === "string") this.movingFiles.delete(origem);
 		}
 	}
 
@@ -527,13 +527,14 @@ export class TemplatesModule implements HubModule {
 		return parts;
 	}
 
-	/** Move a nota para CategoriaX/Pendente/, criando a pasta se necessário; cai para Pendente na raiz se não achar categoria. */
+	/** Move a nota para a pasta de notas incompletas da categoria, criando-a se necessário. */
 	private async movePendingToCategoryFolder(file: TFile): Promise<void> {
 		const parts = file.path.split("/");
 		const category = parts.length > 1 ? parts[0] : undefined;
 		const pendingFolder = category ? `${category}/Pendente` : "Pendente";
 
 		await ensureVaultFolder(this.context!.app, pendingFolder);
+		if (this.stopped) return;
 		const newPath = await uniqueVaultPath(this.context!.app, normalizePath(`${pendingFolder}/${file.name}`));
 
 		// Mesma regra do handleNoteModified: capturar o caminho ANTES do rename,
