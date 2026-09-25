@@ -2,33 +2,33 @@ import { App, Modal, Setting, TFile } from "obsidian";
 import type { CalendarEvent } from "./EventTypes";\nimport type { AudioUnlocker } from "../../core/AudioUnlock";
 
 export class ReminderModal extends Modal {
-\tconstructor(
-\t\tapp: App,
-\t\tprivate events: CalendarEvent[],
-\t\tprivate onOpenNote: (refId: string) => void | Promise<void>,
-\t\tprivate onEditEvent: (event: CalendarEvent) => void,
-\t\tprivate autoFocus = false
-\t) { super(app); }
+	constructor(
+		app: App,
+		private events: CalendarEvent[],
+		private onOpenNote: (refId: string) => void | Promise<void>,
+		private onEditEvent: (event: CalendarEvent) => void,
+		private autoFocus = false
+	) { super(app); }
 
-\tonOpen(): void {
-\t\tthis.modalEl.addClass("ione-hub-reminder"); flashTaskbarIcon(); if (this.autoFocus) bringWindowToFront();
-\t\tthis.contentEl.createEl("div",{cls:"ione-hub-reminder__badge",text:"⏰ Lembretes"});
-\t\tthis.contentEl.createEl("h2",{text:this.events.length===1?this.events[0].title:this.events.length+" eventos"});
-\t\tfor(const event of this.events){
-\t\t\tconst card=this.contentEl.createDiv({cls:"ione-hub-reminder__event"});
-\t\t\tcard.createEl("strong",{text:event.title});
-\t\t\tif(event.description)card.createEl("p",{cls:"ione-hub-reminder__description",text:event.description});
-\t\t\tcard.createEl("div",{cls:"ione-hub-reminder__when",text:event.time?"Hoje às "+event.time:"Hoje"});
-\t\t\tconst actions=new Setting(card);
-\t\t\tif(event.noteRefId){
-\t\t\t\tactions.addButton(btn=>btn.setButtonText("Abrir nota").onClick(async()=>{await this.onOpenNote(event.noteRefId!);this.close()}));
-\t\t\t\tactions.addButton(btn=>btn.setButtonText("Criar/selecionar nova nota").onClick(()=>{this.close();this.onEditEvent(event)}));
-\t\t\t}
-\t\t\tactions.addButton(btn=>btn.setButtonText("Editar evento").onClick(()=>{this.close();this.onEditEvent(event)}));
-\t\t}
-\t\tnew Setting(this.contentEl).addButton(btn=>btn.setButtonText("Ok, entendi").setCta().onClick(()=>this.close()));
-\t}
-\tonClose():void{stopFlashing();this.contentEl.empty();}
+	onOpen(): void {
+		this.modalEl.addClass("ione-hub-reminder"); flashTaskbarIcon(); if (this.autoFocus) bringWindowToFront();
+		this.contentEl.createEl("div",{cls:"ione-hub-reminder__badge",text:"⏰ Lembretes"});
+		this.contentEl.createEl("h2",{text:this.events.length===1?this.events[0].title:this.events.length+" eventos"});
+		for(const event of this.events){
+			const card=this.contentEl.createDiv({cls:"ione-hub-reminder__event"});
+			card.createEl("strong",{text:event.title});
+			if(event.description)card.createEl("p",{cls:"ione-hub-reminder__description",text:event.description});
+			card.createEl("div",{cls:"ione-hub-reminder__when",text:event.time?"Hoje às "+event.time:"Hoje"});
+			const actions=new Setting(card);
+			if(event.noteRefId){
+				actions.addButton(btn=>btn.setButtonText("Abrir nota").onClick(async()=>{await this.onOpenNote(event.noteRefId!);this.close()}));
+				actions.addButton(btn=>btn.setButtonText("Criar/selecionar nova nota").onClick(()=>{this.close();this.onEditEvent(event)}));
+			}
+			actions.addButton(btn=>btn.setButtonText("Editar evento").onClick(()=>{this.close();this.onEditEvent(event)}));
+		}
+		new Setting(this.contentEl).addButton(btn=>btn.setButtonText("Ok, entendi").setCta().onClick(()=>this.close()));
+	}
+	onClose():void{stopFlashing();this.contentEl.empty();}
 }
 
 function flashTaskbarIcon():void{const win=getElectronWindow();if(!win)return;try{if(!win.isFocused?.())win.flashFrame?.(true)}catch{}}
