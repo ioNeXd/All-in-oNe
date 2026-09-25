@@ -235,7 +235,6 @@ describe("MCP — contrato HTTP (Content-Type e Accept)", () => {
 		});
 		expect(res.status).toBe(200);
 	});
-});
 
 	// --- MIME estrito: rejeita falsos positivos do antigo includes() ---
 
