@@ -90,6 +90,7 @@ export default class IoneHubPlugin extends Plugin {
 				this.calendarRibbon = undefined;
 			}
 		};
+		
 		syncCalendarRibbon();
 
 
