@@ -121,6 +121,9 @@ export class StylesModule implements HubModule {
 		else this.renderEditorTab(body);
 	}
 
+	/** Renderiza o seletor de temas no onboarding usando a mesma UI do módulo. */
+	renderOnboardingPicker(container: HTMLElement): void { this.renderPresetsTab(container); }
+
 	// ---------- Aba 1: temas prontos ----------
 	private renderPresetsTab(container: HTMLElement): void {
 		container.createEl("p", {

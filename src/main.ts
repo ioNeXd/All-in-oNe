@@ -13,7 +13,7 @@ import { NotificationsModule } from "./modules/notifications/NotificationsModule
 import { HistoryModule } from "./modules/history/HistoryModule";
 import { FileLifecycleModule } from "./modules/filelifecycle/FileLifecycleModule";
 import { VaultEventBridge } from "./core/VaultEventBridge";
-import { CommandBridge } from "./core/CommandBridge";
+import { CommandBridge } from "./core/CommandBridge";\nimport { ManualManager } from "./core/ManualManager";\nimport { CalendarSidebarView, CALENDAR_SIDEBAR_VIEW_TYPE } from "./modules/calendar/CalendarSidebarView";
 
 /**
  * PLUGIN PRINCIPAL
@@ -85,7 +85,7 @@ export default class IoneHubPlugin extends Plugin {
 		);
 		this.vaultBridge.start();
 
-		this.registerView(LOBBY_VIEW_TYPE, (leaf) => new LobbyView(leaf, this.core));
+		this.registerView(LOBBY_VIEW_TYPE, (leaf) => new LobbyView(leaf, this.core));\n\t\tthis.registerView(CALENDAR_SIDEBAR_VIEW_TYPE, (leaf) => new CalendarSidebarView(leaf, this.core));
 
 		const autoUpdate = new AutoUpdateModule();
 		autoUpdate.setCurrentVersion(this.manifest.version);
