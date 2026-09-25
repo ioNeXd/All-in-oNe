@@ -41,9 +41,19 @@ export interface RateLimiter {
 }
 
 export function createRateLimiter(limit: number): RateLimiter {
+	if (!Number.isInteger(limit) || limit < 1) {
+		throw new RangeError("O limite de rate limit deve ser um inteiro maior ou igual a 1.");
+	}
 	let timestamps: number[] = [];
 
+	const validateNow = (now: number): void => {
+		if (!Number.isFinite(now)) {
+			throw new RangeError("O instante do rate limit deve ser um número finito.");
+		}
+	};
+
 	const prune = (now: number): number[] => {
+		validateNow(now);
 		const windowStart = now - RATE_LIMIT_WINDOW_MS;
 		timestamps = timestamps.filter((t) => t > windowStart);
 		return timestamps;
@@ -58,6 +68,7 @@ export function createRateLimiter(limit: number): RateLimiter {
 			return true;
 		},
 		release: (ts: number) => {
+			validateNow(ts);
 			// Remove o timestamp EXATO — cada reservation carrega
 			// o seu, nunca remove slot alheio.
 			const idx = timestamps.indexOf(ts);
