@@ -23,10 +23,6 @@ export interface CalendarModuleSettings {
 	view: "month" | "week" | "agenda";
 	/**
 	 * Pasta única para notas de evento — tanto para uma nota EXISTENTE que o
-	 * usuário vincula (é movida pra cá) quanto para uma nota NOVA criada na
-	 * hora. Antes havia duas pastas separadas ("eventos" e "notas"); ficou
-	 * uma só, por pedido, para não duplicar o conceito.
-	 */
 	/**
 	 * Se true, o lembrete força a janela do Obsidian pra frente mesmo com o
 	 * app minimizado. Desligado por padrão — ver ReminderModal.
