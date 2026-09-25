@@ -26,7 +26,6 @@ src/
     filelifecycle/       ← ciclo de vida de arquivos (nome na criação, confirmações)
     styles/              ← editor de estilos e temas
       CssHighlight.ts    ← tokenizador puro do realce do editor (testado)
-      StylesModule.ts    ← também contém ThemePreviewModal
     autoupdate/          ← auto-update via GitHub Releases
       ReleaseUtils.ts    ← regra pura: SemVer/assets/checksums (testada)
       SignatureUtils.ts  ← regra pura: decisão/parse da verificação GPG (testada)
@@ -39,16 +38,18 @@ src/
       HistoryFilter.ts   ← regra pura: filtro combinado tipo + texto (testada)
 
   ui/
-    LobbyRenderer.ts     ← toda a UI do Lobby; também contém ResetModal
-    LobbyView.ts         ← view do painel central e LobbyModal
+    LobbyRenderer.ts     ← toda a UI do Lobby (cascas finas: LobbyView/LobbyModal)
     OnboardingModal.ts   ← assistente de primeira execução
+    ResetModal (em LobbyRenderer.ts) ← modal "Restaurar tudo" (3 níveis)
+    OpenModeModal (em main.ts)       ← aba/janela/perguntar sempre
+    ThemePreviewModal (em StylesModule.ts) ← preview de tema do Estilos
     FilterSuggest.ts     ← campo de texto com sugestão filtrada (reutilizável)
     interactiveRows.ts   ← linha clicável acessível (teclado/ARIA) reutilizável
     lobbyOrder.ts        ← regras puras da ordem de módulos no Lobby (testadas)
 
-  main.ts                ← cola com a API real do Obsidian; contém OpenModeModal
+  main.ts                ← cola com a API real do Obsidian (Plugin)
 
-  styles/ ...                    ← suítes vitest — todos importam código real
+tests/                    ← suítes vitest — todos importam código real
   mocks/obsidian.ts      ← stub do pacote "obsidian" (types-only), via alias no vitest
 ```
 
