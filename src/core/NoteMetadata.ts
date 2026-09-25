@@ -21,12 +21,19 @@ export class NoteMetadataService {
 	}
 
 	async setCompletionStatus(file: TFile, completed: boolean, shape: CompletionStatusShape = "scalar"): Promise<void> {
+		const desiredStatus =
+			shape === "array"
+				? (completed ? [STATUS_COMPLETE] : STATUS_PENDING_INITIAL)
+				: (completed ? STATUS_COMPLETE : STATUS_PENDING_INITIAL[0]);
+		const current = this.app.metadataCache.getFileCache(file)?.frontmatter;
+		const sameStatus = Array.isArray(desiredStatus)
+			? Array.isArray(current?.status) && JSON.stringify(current.status) === JSON.stringify(desiredStatus)
+			: current?.status === desiredStatus;
+		if (current?.concluido === completed && sameStatus) return;
+
 		await this.update(file, {
 			concluido: completed,
-			status:
-				shape === "array"
-					? (completed ? [STATUS_COMPLETE] : STATUS_PENDING_INITIAL)
-					: (completed ? STATUS_COMPLETE : STATUS_PENDING_INITIAL[0]),
+			status: desiredStatus,
 		});
 	}
 }
