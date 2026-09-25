@@ -135,7 +135,7 @@ partir disso.
 
 O vault do Obsidian é assíncrono. Dois módulos diferentes podem, em teoria,
 mexer no mesmo arquivo dentro da mesma janela de tempo (ex.: o módulo de
-Templates movendo uma nota para `Pendente` no exato momento em que uma
+Templates movendo uma nota para a pasta de notas incompletas no exato momento em que uma
 chamada MCP está editando essa nota a pedido de um cliente externo). Sem
 serialização, a escrita que "chegar por último" no event loop pode
 sobrescrever a outra silenciosamente.
