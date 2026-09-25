@@ -5,7 +5,7 @@ import { resolvePaths } from "../core/PathResolver";
 import { DEFAULT_PATHS } from "../core/types";
 
 type Step = "tour" | "config" | "style";
-type PathKey = "calendarFolder" | "calendarTemplatesFolder" | "inboxFolder" | "systemFolder" | "filesFolder";
+type PathKey = "calendarFolder" | "calendarTemplatesFolder" | "eventNotesFolder" | "inboxFolder" | "systemFolder" | "filesFolder";
 
 export class OnboardingModal extends Modal {
 	private step: Step = "tour";
