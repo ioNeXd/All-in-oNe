@@ -1,6 +1,6 @@
 import { DEFAULT_PATHS, type HubSettings } from "./types";
 
-export type ResolvedPaths = typeof DEFAULT_PATHS;
+export type ResolvedPaths = { [K in keyof typeof DEFAULT_PATHS]: string };
 
 export function resolvePaths(paths: HubSettings["paths"]): ResolvedPaths {
 	const system = paths.systemFolder?.trim() || DEFAULT_PATHS.systemFolder;
