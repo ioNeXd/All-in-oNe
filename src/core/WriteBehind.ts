@@ -37,6 +37,8 @@ export interface DrainResult<T> {
 	 * drain re-inclui estes ids (retry — a janela de perda some).
 	 */
 	confirm: () => void;
+	/** Libera o lote sem removê-lo da fila, permitindo retry após falha do save. */
+	release: () => void;
 }
 
 export class WriteBehindQueue<T extends Identified> {
@@ -51,7 +53,11 @@ export class WriteBehindQueue<T extends Identified> {
 	 * que o chamador guardou antes.
 	 */
 	enqueue(item: T): T[] {
-		this.items = [item, ...this.items];
+		// Um id representa o mesmo registro lógico: uma regravação substitui
+		// a versão anterior, inclusive quando a versão anterior está em voo.
+		// O voo continua protegido por `inFlightIds`; a versão nova fica
+		// pendente para o próximo drain após a confirmação/liberação do voo.
+		this.items = [item, ...this.items.filter((existing) => existing.id !== item.id)];
 		return this.pendingSnapshot();
 	}
 
@@ -75,9 +81,8 @@ export class WriteBehindQueue<T extends Identified> {
 	 * — o batch corrente não os repete, e o próximo leva a diferença.
 	 *
 	 * Há no máximo um lote em voo por id: enquanto um id estiver em voo,
-	 * `takeBatch` o pula. Se o mesmo id for re-enfileirado, a versão mais
-	 * recente permanece na frente e só é drenada após a confirmação do lote
-	 * anterior.
+	 * `takeBatch` o pula. Se o mesmo id for re-enfileirado, `enqueue` substitui
+	 * a versão antiga pela mais recente e ela fica pendente até o voo terminar.
 	 */
 	takeBatch(max: number): DrainResult<T> {
 		const batch: T[] = [];
@@ -98,13 +103,17 @@ export class WriteBehindQueue<T extends Identified> {
 				confirmed = true;
 				for (const item of batch) {
 					this.inFlightIds.delete(item.id);
-					// A fila é mais-recente-primeiro; portanto, a ÚLTIMA ocorrência
-					// do id é a versão mais antiga, correspondente ao lote confirmado.
-					// Uma versão re-enfileirada durante o voo permanece na frente
-					// para o próximo drain.
-					const index = fallbackFindLastIndex(this.items, item.id);
+					// Remove apenas a mesma instância que foi persistida. Se houve
+					// re-enfileiração do mesmo id durante o voo, a versão nova é
+					// uma instância diferente e permanece pendente.
+					const index = this.items.indexOf(item);
 					if (index !== -1) this.items.splice(index, 1);
 				}
+			},
+			release: () => {
+				if (confirmed) return;
+				confirmed = true;
+				for (const item of batch) this.inFlightIds.delete(item.id);
 			},
 		};
 	}
@@ -120,10 +129,3 @@ export class WriteBehindQueue<T extends Identified> {
 	}
 }
 
-/** findLastIndex para runtimes sem ES2023 (a fila roda dentro do Obsidian). */
-function fallbackFindLastIndex<T extends Identified>(items: T[], id: string): number {
-	for (let i = items.length - 1; i >= 0; i--) {
-		if (items[i].id === id) return i;
-	}
-	return -1;
-}
