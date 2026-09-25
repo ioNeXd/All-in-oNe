@@ -236,8 +236,11 @@ export class SettingsManager {
 	}
 
 	async save(next: HubSettings, options?: { skipValidation?: boolean }): Promise<ConfigValidationIssue[]> {
-		// A validação roda FORA da fila (síncrona e barata): um save bloqueado
-		// não pode ficar preso atrás de um persist lento de outro chamador.
+		next = this.syncDerivedPaths(next, this.current);
+
+		// Valida a configuração FINAL, já com os caminhos derivados sincronizados,
+		// para que a sincronização não introduza um conflito que a validação
+		// anterior ainda não enxergaria.
 		if (!options?.skipValidation) {
 			const issues = this.validate(next);
 			const blocking = issues.filter((i) => i.level === "error");
