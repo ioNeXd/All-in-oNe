@@ -15,7 +15,7 @@ describe("SettingsManager", () => {
 	it("cria configuração padrão quando não há nada salvo", async () => {
 		const { manager } = makeManager(null);
 		const settings = await manager.init();
-		expect(settings.schemaVersion).toBe(2);
+		expect(settings.schemaVersion).toBe(3);
 		expect(settings.enabledModules).toContain("mcp");
 		// Perfis foram removidos do schema (nunca tiveram implementação):
 		expect(settings).not.toHaveProperty("profiles");
@@ -54,7 +54,7 @@ describe("SettingsManager", () => {
 		await manager.reset();
 
 		expect(manager.getModuleSettings("mcp")).toEqual({});
-		expect((getStored() as any).schemaVersion).toBe(2);
+		expect((getStored() as any).schemaVersion).toBe(3);
 	});
 
 	it("reset 'config' zera fatias de módulo E caminhos globais", async () => {
@@ -78,7 +78,7 @@ describe("SettingsManager", () => {
 		expect(manager.getModuleSettings("history")).toEqual({});
 	});
 
-	it("MIGRAÇÃO v1→v2: descarta perfis mortos e PRESERVA a configuração real", async () => {
+	it("MIGRAÇÃO v1→v3: descarta perfis mortos e PRESERVA a configuração real", async () => {
 		// data.json de quem usou versões antigas: schema v1, com os campos de
 		// perfil que nunca tiveram leitor — e configuração REAL que não pode
 		// se perder na remoção.
@@ -101,8 +101,8 @@ describe("SettingsManager", () => {
 
 		const settings = await manager.init();
 
-		// Migrou para v2 e os campos mortos sumiram:
-		expect(settings.schemaVersion).toBe(2);
+		// Migrou para v3 e os campos mortos sumiram:
+		expect(settings.schemaVersion).toBe(3);
 		expect(settings).not.toHaveProperty("activeProfileId");
 		expect(settings).not.toHaveProperty("profiles");
 		// A configuração REAL ficou intacta:
@@ -114,15 +114,24 @@ describe("SettingsManager", () => {
 
 		// Persistiu a versão migrada (o disco também fica limpo no próximo save):
 		const stored = getStored() as { schemaVersion: number; profiles?: unknown };
-		expect(stored.schemaVersion).toBe(2);
+		expect(stored.schemaVersion).toBe(3);
 		expect(stored).not.toHaveProperty("profiles");
 	});
 
-	it("MIGRAÇÃO v1→v2 é idempotente: rodar sobre v2 não re-migra nem recria campos", async () => {
+	it("MIGRAÇÃO v2→v3 move o caminho de eventos legado para paths e remove a duplicação", async () => {
+		const old = { ...createDefaultSettings(), schemaVersion: 2, modules: { calendar: { eventNotesFolder: "Agenda/Eventos" } }, paths: { ...createDefaultSettings().paths } };
+		const { manager } = makeManager(old);
+		const settings = await manager.init();
+		expect(settings.schemaVersion).toBe(3);
+		expect(settings.paths.eventNotesFolder).toBe("Agenda/Eventos");
+		expect(manager.getModuleSettings("calendar")).toEqual({});
+	});
+
+	it("MIGRAÇÃO v1→v3 é idempotente: rodar sobre v2 não re-migra nem recria campos", async () => {
 		const { manager } = makeManager(createDefaultSettings());
 		const settings = await manager.init();
-		expect(settings.schemaVersion).toBe(2);
-		expect(manager.get().schemaVersion).toBe(2);
+		expect(settings.schemaVersion).toBe(3);
+		expect(manager.get().schemaVersion).toBe(3);
 	});
 
 	it("gravações concorrentes de módulos diferentes chegam TODAS ao disco (sem lost update)", async () => {
