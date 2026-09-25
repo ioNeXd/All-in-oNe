@@ -137,6 +137,15 @@ export async function searchVault<F>(
 	let truncated = false;
 	let scanned = 0;
 
+	const accept = (match: SearchMatch): boolean => {
+		if (matches.length >= maxResults) {
+			truncated = true;
+			return false;
+		}
+		matches.push(match);
+		return true;
+	};
+
 	for (const file of notes) {
 		const meta = primitives.fileMeta(file);
 		scanned++;
