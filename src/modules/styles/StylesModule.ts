@@ -489,15 +489,12 @@ export class StylesModule implements HubModule {
 			this.readSettings().presets.find((p) => p.id === presetId);
 		if (!preset) return;
 
-		// BUG CORRIGIDO: antes, `setCss(preset.css)` jogava o CSS do tema como
-		// texto solto — sem os marcadores GENERATED_START/END. Isso funcionava
-		// para o Editor livre (que só mostra o CSS ativo), mas o Painel visual
-		// lê exclusivamente o que está DENTRO desses marcadores para preencher
-		// os seletores de cor e sliders — então, depois de aplicar um tema, o
-		// painel continuava mostrando os valores padrão de fábrica, não as
-		// cores do tema. Envolvendo o CSS do preset no mesmo bloco usado pelo
-		// painel visual, os dois lados passam a concordar.
-		const block = `${GENERATED_START}\n${preset.css}\n${GENERATED_END}`;
+		// O painel visual é dono do bloco delimitado pelos marcadores. Um
+		// tema personalizado pode ter sido salvo enquanto esse bloco existia;
+		// removê-lo antes de aplicar evita marcadores aninhados, que fariam
+		// `stripGeneratedBlock()` deixar lixo de CSS ao limpar o painel.
+		const presetCss = stripGeneratedBlock(preset.css).trim();
+		const block = `${GENERATED_START}\n${presetCss}\n${GENERATED_END}`;
 		await this.setCss(block);
 	}
 
@@ -518,8 +515,11 @@ export class StylesModule implements HubModule {
 	}
 
 	async importTheme(json: string): Promise<void> {
-		const parsed = JSON.parse(json) as { css: string };
-		await this.setCss(parsed.css ?? "");
+		const parsed: unknown = JSON.parse(json);
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || typeof (parsed as { css?: unknown }).css !== "string") {
+			throw new TypeError('JSON de tema inválido: esperado um objeto com "css" string.');
+		}
+		await this.setCss((parsed as { css: string }).css);
 	}
 
 	private applyCss(css: string): void {
