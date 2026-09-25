@@ -568,7 +568,6 @@ export class NotificationsModule implements HubModule {
 		if (this.flushTimer || this.pendingNotifications.size === 0) return;
 		this.flushTimer = setTimeout(() => void this.flushNow(), FLUSH_INTERVAL_MS);
 	}
-	}
 
 	/**
 	 * Drena as notificações pendentes num único save (batedor: reset invalida
