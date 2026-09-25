@@ -212,6 +212,16 @@ export class SettingsManager {
 		return issues;
 	}
 
+	private syncDerivedPaths(next: HubSettings, previous: HubSettings): HubSettings {
+		const oldSystem = (previous.paths.systemFolder ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+		const newSystem = (next.paths.systemFolder ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+		const oldDefaultTemplates = oldSystem ? `${oldSystem}/Templates/Calendário` : "";
+		if (oldDefaultTemplates && next.paths.calendarTemplatesFolder === oldDefaultTemplates && newSystem) {
+			next = { ...next, paths: { ...next.paths, calendarTemplatesFolder: `${newSystem}/Templates/Calendário` } };
+		}
+		return next;
+	}
+
 	async save(next: HubSettings, options?: { skipValidation?: boolean }): Promise<ConfigValidationIssue[]> {
 		// A validação roda FORA da fila (síncrona e barata): um save bloqueado
 		// não pode ficar preso atrás de um persist lento de outro chamador.
@@ -223,6 +233,7 @@ export class SettingsManager {
 			}
 		}
 
+		next = this.syncDerivedPaths(next, this.current);
 		next.sync = { lastWrittenBy: INSTANCE_ID, lastWrittenAt: Date.now() };
 		this.current = next;
 
