@@ -91,12 +91,20 @@ export default class IoneHubPlugin extends Plugin {
 			}
 		};
 		
-		const enabledRef = this.core.bus.on("core:module-enabled", "main-calendar-ribbon", ({ moduleId }) => {
-			if (moduleId === "calendar") syncCalendarRibbon();
-		});
-		const disabledRef = this.core.bus.on("core:module-disabled", "main-calendar-ribbon", ({ moduleId }) => {
-			if (moduleId === "calendar") syncCalendarRibbon();
-		});
+		const enabledRef = this.core.bus.on<{ moduleId: string }>(
+			"core:module-enabled",
+			"main-calendar-ribbon",
+			({ payload }) => {
+				if (payload.moduleId === "calendar") syncCalendarRibbon();
+			}
+		);
+		const disabledRef = this.core.bus.on<{ moduleId: string }>(
+			"core:module-disabled",
+			"main-calendar-ribbon",
+			({ payload }) => {
+				if (payload.moduleId === "calendar") syncCalendarRibbon();
+			}
+		);
 		this.calendarRibbonUnsub = () => { enabledRef(); disabledRef(); };
 		syncCalendarRibbon();
 
