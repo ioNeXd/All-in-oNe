@@ -78,6 +78,7 @@ export class CalendarModule implements HubModule {
 	private dailyCheckInterval?: number;
 	/** Generation/epoch: invalida callbacks de timers e disparos de ciclos anteriores. */
 	private generation = 0;
+	private enabled = false;
 	/**
 	 * Desbloqueio de áudio próprio (core/AudioUnlock): cada módulo tem sua
 	 * instância, com ciclo de vida independente. O lembrete dispara sozinho —
@@ -106,6 +107,7 @@ export class CalendarModule implements HubModule {
 
 	onEnable(): void {
 		this.generation++;
+		this.enabled = true;
 		// Arma o destravamento de áudio no primeiro gesto (política de autoplay).
 		this.audioUnlocker.arm();
 		// Verificação RETROATIVA imediata: se o Obsidian abriu depois da hora
@@ -157,6 +159,7 @@ export class CalendarModule implements HubModule {
 		this.metadataUnsubscribe?.();
 		this.metadataUnsubscribe = undefined;
 		this.audioUnlocker.disarm();
+		this.enabled = false;
 		this.generation++;
 		// Limpa a dedupe de minuto junto: sem isto, um desligar→ligar dentro
 		// do mesmo minuto pulava a checagem retroativa (e um lembrete sem
@@ -588,7 +591,7 @@ export class CalendarModule implements HubModule {
 	 * cobre o wake-up tardio do Obsidian/suspensão do SO.
 	 */
 	private scheduleNextCheck(): void {
-		if (typeof window === "undefined") return;
+		if (!this.enabled || typeof window === "undefined") return;
 		const gen = this.generation;
 		if (this.dailyCheckInterval) window.clearTimeout(this.dailyCheckInterval);
 		this.dailyCheckInterval = window.setTimeout(() => {
