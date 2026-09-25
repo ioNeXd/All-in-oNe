@@ -728,7 +728,7 @@ export class CalendarModule implements HubModule {
 		}
 	}
 
-	/** Cria uma nota NOVA já vinculada, na pasta configurável (padrão: Calendario/notas). */
+	/** Cria uma nota NOVA já vinculada, na pasta de notas de eventos derivada de `calendarFolder` (`Notas-Eventos`). */
 	async createLinkedNote(name: string, refId: string): Promise<TFile> {
 		const folder = normalizePath(this.context!.getFullSettings().paths.calendarFolder + "/Notas-Eventos");
 		await ensureVaultFolder(this.context!.app, folder);
@@ -888,7 +888,7 @@ class DateActionModal extends Modal {
  * janela só. A seção "nota vinculada" oferece selecionar uma nota já
  * existente (que é movida para a pasta de eventos e ganha o metadado
  * `origem_evento`) ou criar uma nota nova numa pasta configurável
- * (padrão: Calendario/notas).
+ * (derivada de `calendarFolder` + `/Notas-Eventos`).
  */
 class EventEditorModal extends Modal {
 	private draft: Omit<CalendarEvent, "id">;
