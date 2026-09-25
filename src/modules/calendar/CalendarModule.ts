@@ -411,6 +411,7 @@ export class CalendarModule implements HubModule {
 			this.context!.app,
 			[sample],
 			() => Promise.resolve(),
+			(event) => this.editEvent(event),
 			this.readSettings().autoFocusOnReminder
 		).open();
 		void playReminderChime(this.audioUnlocker);
