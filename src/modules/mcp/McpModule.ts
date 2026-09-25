@@ -208,7 +208,7 @@ export class McpModule implements HubModule {
 	}
 
 	validateSettings(settings: HubSettings): ConfigValidationIssue[] {
-		const mcp = (settings.modules.mcp ?? {}) as Partial<McpModuleSettings>;
+		const mcp: McpModuleSettings = { ...MCP_DEFAULTS, ...(settings.modules.mcp ?? {}) };
 		const issues: ConfigValidationIssue[] = [];
 		if (!Number.isInteger(mcp.port) || mcp.port < 1024 || mcp.port > 65535) {
 			issues.push({ field: "port", level: "error", message: "A porta deve ser um inteiro entre 1024 e 65535." });
