@@ -1,13 +1,4 @@
-import type { HubSettings } from "./types";
-
-export const DEFAULT_PATHS = {
-	inboxFolder: "00 - Inbox",
-	calendarFolder: "01 - Calendario",
-	systemFolder: "99 - Sistema",
-	calendarTemplatesFolder: "99 - Sistema/Templates/Calendário",
-	eventNotesFolder: "01 - Calendario/Notas-Eventos",
-	filesFolder: "99 - Sistema/arquivos",
-} as const;
+import { DEFAULT_PATHS, type HubSettings } from "./types";
 
 export type ResolvedPaths = typeof DEFAULT_PATHS;
 
