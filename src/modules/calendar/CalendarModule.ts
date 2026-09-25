@@ -355,7 +355,6 @@ export class CalendarModule implements HubModule {
 	editEvent(event: CalendarEvent): void {
 		void this.ensureEventNotesFolder();
 		const notes = this.context!.app.vault.getMarkdownFiles().map((f) => f.path);
-		const defaultFolder = normalizePath(this.context!.getFullSettings().paths.calendarFolder + "/Notas-Eventos");
 		const date = new Date(event.year ?? new Date().getFullYear(), event.month - 1, event.day);
 		new EventEditorModal(
 			this.context!.app,
