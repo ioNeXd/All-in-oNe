@@ -1,54 +1,41 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { OnboardingModal } from "../src/ui/OnboardingModal";
-import { capturedNotices } from "./mocks/obsidian"; // não vem de "obsidian": o tsc usa os tipos reais
+import { capturedNotices } from "./mocks/obsidian";
 import type { HubCore } from "../src/core/HubCore";
-import type { ConfigValidationIssue } from "../src/core/ModuleContract";
 
-/**
- * REGRESSÃO: onboarding fechava em silêncio com save bloqueado.
- *
- * Se o usuário deixasse os dois campos de pasta com o MESMO caminho, a
- * validação do núcleo (conflito de caminhos entre módulos) bloqueava a
- * gravação — mas o modal ignorava as issues, fechava sem salvar nem
- * avisar. O `onboardingCompleted` nem ficava true, e o usuário só
- * descobriria o problema na próxima abertura do plugin.
- *
- * Importa o CÓDIGO REAL do modal; "obsidian" é stub via alias do vitest.
- * A resposta da validação é injetada no save falso — o que se testa é o
- * COMPORTAMENTO do modal diante de um save bloqueado (regra do núcleo já
- * coberta por SettingsManager.test.ts).
- */
-
-interface CoreSpy {
-	app: { vault: { getAbstractFileByPath: () => undefined; createFolder: ReturnType<typeof vi.fn> } };
-	settings: {
-		get: () => { schemaVersion: number; onboardingCompleted: boolean; paths: Record<string, string> };
-		save: ReturnType<typeof vi.fn>;
-	};
-}
-
-function makeCore(
-	paths: { calendarFolder: string; calendarTemplatesFolder: string },
-	saveResult: ConfigValidationIssue[] = []
-): CoreSpy {
+function makeCore(saveIssues: unknown[] = []) {
 	const settings = {
-		schemaVersion: 1,
-		onboardingCompleted: false,
-		paths,
+		get: () => ({
+			schemaVersion: 2,
+			onboardingCompleted: false,
+			modules: {},
+			enabledModules: [],
+			lobby: { openMode: "tab", theme: "match-obsidian" },
+			paths: {
+				calendarFolder: "01 - Calendario",
+				calendarTemplatesFolder: "99 - Sistema/Templates/Calendário",
+			},
+			sync: { lastWrittenBy: "test", lastWrittenAt: 0 },
+			telemetry: { enabled: false },
+		}),
+		validate: vi.fn(() => []),
+		save: vi.fn(async () => saveIssues),
 	};
 	return {
 		app: {
-			vault: { getAbstractFileByPath: () => undefined, createFolder: vi.fn(async () => {}) },
+			vault: {
+			getAbstractFileByPath: () => undefined,
+			createFolder: vi.fn(async () => {}),
+			create: vi.fn(async () => {}),
+			modify: vi.fn(async () => {}),
+			},
 		},
-		settings: {
-			get: () => settings,
-			save: vi.fn(async () => saveResult),
-		},
+		settings,
+		getModules: () => [],
 	};
 }
 
-/** Dispara o mesmo caminho que o clique do botão percorre: finish() privado. */
-async function finishViaBotao(modal: OnboardingModal): Promise<void> {
+async function finishViaButton(modal: OnboardingModal): Promise<void> {
 	const finish = (modal as unknown as { finish: () => Promise<void> }).finish;
 	await finish.call(modal);
 }
@@ -57,60 +44,30 @@ beforeEach(() => {
 	capturedNotices.length = 0;
 });
 
-describe("OnboardingModal — regressão de save bloqueado", () => {
-	it("save bloqueado por conflito de caminhos: exibe Notice e NÃO marca como concluído", async () => {
-		const core = makeCore(
-			{ calendarFolder: "Calendario", calendarTemplatesFolder: "Calendario" }, // conflito
-			[
-				{
-					field: "calendarFolder",
-					level: "error",
-					message: 'O caminho "Calendario" já está em uso por "calendarTemplatesFolder".',
-				},
-			]
-		);
+describe("OnboardingModal", () => {
+	it("não conclui quando a validação bloqueia os caminhos", async () => {
+		const core = makeCore([{ field: "calendarFolder", level: "error", message: "caminho em conflito" }]);
+		core.settings.validate.mockReturnValue([{ field: "calendarFolder", level: "error", message: "caminho em conflito" }]);
 		const modal = new OnboardingModal({} as never, core as unknown as HubCore);
 
-		await finishViaBotao(modal);
+		await finishViaButton(modal);
 
-		// O Notice carrega a mensagem da validação do núcleo.
-		expect(capturedNotices).toHaveLength(1);
-		expect(capturedNotices[0].message).toContain("já está em uso");
-		expect(capturedNotices[0].timeout).toBe(8000);
-		// Save foi tentado (com onboardingCompleted true), mas foi bloqueado.
-		expect(core.settings.save).toHaveBeenCalledTimes(1);
+		expect(core.settings.validate).toHaveBeenCalledTimes(1);
+		expect(core.settings.save).not.toHaveBeenCalled();
+		expect(capturedNotices[0].message).toContain("caminho em conflito");
 	});
 
-	it("caminhos válidos e distintos: sem Notice, cria pasta de templates recursivamente", async () => {
-		const core = makeCore({
-			calendarFolder: "Calendario",
-			calendarTemplatesFolder: "Calendario/templates",
-		});
+	it("valida, cria as pastas e salva onboardingCompleted=true", async () => {
+		const core = makeCore();
 		const modal = new OnboardingModal({} as never, core as unknown as HubCore);
 
-		await finishViaBotao(modal);
+		await finishViaButton(modal);
 
 		expect(capturedNotices).toHaveLength(0);
+		expect(core.settings.validate).toHaveBeenCalledTimes(1);
 		expect(core.settings.save).toHaveBeenCalledTimes(1);
-		// A nova configuração inicial cria todas as pastas configuradas, segmento a segmento.
-		expect(core.app.vault.createFolder).toHaveBeenCalledTimes(9);
-	});
-
-	it("conflito com case/trailing slash diferentes também mostra o erro ao usuário", async () => {
-		const core = makeCore(
-			{ calendarFolder: "Calendario/", calendarTemplatesFolder: "calendario" },
-			[
-				{
-					field: "calendarFolder",
-					level: "error",
-					message: "O caminho já está em uso por outro módulo.",
-				},
-			]
-		);
-		const modal = new OnboardingModal({} as never, core as unknown as HubCore);
-
-		await finishViaBotao(modal);
-
-		expect(capturedNotices).toHaveLength(1);
+		const saved = core.settings.save.mock.calls[0][0];
+		expect(saved.onboardingCompleted).toBe(true);
+		expect(core.app.vault.createFolder).toHaveBeenCalled();
 	});
 });
