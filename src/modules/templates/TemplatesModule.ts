@@ -240,7 +240,7 @@ export class TemplatesModule implements HubModule {
 			text:
 				"Toda nota criada nesta pasta recebe o template abaixo, ganha os metadados " +
 				"date, thema e origem automaticamente, e nasce com status: incompleto na pasta " +
-				"Pendente" da categoria. Quando `concluido` for true, o status vira `completo` e a nota volta sozinha para a pasta de origem.",
+				"Pendente da categoria. Quando `concluido` for true, o status vira `completo` e a nota volta sozinha para a pasta de origem.",
 		});
 
 		// Seletor de regra "pai" (herança de template).
@@ -424,7 +424,7 @@ export class TemplatesModule implements HubModule {
 	 * Regras (conforme definido no design):
 	 *   - `status` removido  → vira `completo` e a nota volta para `origem`.
 	 *   - `status: completo` → volta para `origem`.
-	 *   - `status: pendente` → não faz nada.
+	 *   - `concluido: false` → mantém `status: incompleto` e não faz nada.
 	 *
 	 * O `movingFiles` evita reentrância: mover a nota dispara outro evento de
 	 * modify, que entraria aqui de novo no meio da operação anterior.
