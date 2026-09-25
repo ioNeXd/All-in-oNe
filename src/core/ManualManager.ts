@@ -25,7 +25,7 @@ export class ManualManager {
 			`${paths.eventNotesFolder}/`,
 			`${paths.systemFolder}/`,
 			`  ├── 00 - Manual.md`,
-			`  └── arquivos/`,
+			`  └── ${paths.filesFolder}/`,
 			"```", "",
 			"## Caminhos configurados", "",
 			`- Inbox: \`${paths.inboxFolder}\``,
