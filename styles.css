@@ -491,6 +491,11 @@ textarea.ione-hub-styles__editor-input {
 	caret-color: var(--text-normal);
 	background: transparent;
 }
+textarea.ione-hub-styles__editor-input:hover,
+textarea.ione-hub-styles__editor-input:focus {
+	background: transparent !important;
+	color: transparent !important;
+}
 textarea.ione-hub-styles__editor-input::selection {
 	background: var(--text-selection, rgba(59, 109, 196, 0.4));
 	color: transparent;
