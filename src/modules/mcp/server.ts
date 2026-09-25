@@ -181,7 +181,7 @@ async function handleRequest(
 		const hasJsonOrWildcard = accept.split(",").some((part) => {
 			const [rawMime, ...params] = part.split(";");
 			const mime = rawMime.trim().toLowerCase();
-			const quality = params.find((param) => /^\\s*q\\s*=/i.test(param));
+			const quality = params.find((param) => /^\s*q\s*=/i.test(param));
 			const q = quality ? Number(quality.split("=")[1]?.trim()) : 1;
 			if (!Number.isFinite(q) || q <= 0) return false;
 			return mime === "application/json" || mime === "*/*" || mime === "application/*";
