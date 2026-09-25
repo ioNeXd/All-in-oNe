@@ -55,13 +55,41 @@ export class OnboardingModal extends Modal {
 		footer.createEl("button",{text:"Ignorar"}).onclick=()=>void this.finish(true);footer.createEl("button",{text:"Concluir",cls:"mod-cta"}).onclick=()=>void this.finish(true);
 		void panel;
 	}
-	private async finish(completed:boolean):Promise<void>{
-		const s=this.core.settings.get();
-		try{
-			const issues=await this.core.settings.save({...s,onboardingCompleted:completed,paths:{...s.paths,calendarFolder:this.calendarFolder,calendarTemplatesFolder:this.calendarTemplatesFolder,inboxFolder:this.inboxFolder,systemFolder:this.systemFolder,filesFolder:this.filesFolder},modules:{...s.modules,calendar:{...(s.modules.calendar||{}),eventNotesFolder:this.eventNotesFolder}}});
-			const blocking=issues.filter(i=>i.level==="error");if(blocking.length){new Notice(blocking.map(i=>i.message).join("\n"),8000);return}
-			for(const p of [this.inboxFolder,this.calendarFolder,this.eventNotesFolder,this.systemFolder,this.filesFolder,this.calendarTemplatesFolder])await ensureVaultFolder(this.core.app,p);
-			this.close();
-		}catch(err){console.error("[All iₙ oNe] Onboarding:",err);new Notice("Não foi possível salvar a configuração inicial.",8000)}
+	private async finish(completed: boolean): Promise<void> {
+		const settings = this.core.settings.get();
+		const currentModules = settings.modules ?? {};
+		const next = {
+			...settings,
+			onboardingCompleted: completed,
+			paths: {
+				...settings.paths,
+				calendarFolder: this.calendarFolder,
+				calendarTemplatesFolder: this.calendarTemplatesFolder,
+				inboxFolder: this.inboxFolder,
+				systemFolder: this.systemFolder,
+				filesFolder: this.filesFolder,
+			},
+			modules: {
+				...currentModules,
+				calendar: { ...(currentModules.calendar ?? {}), eventNotesFolder: this.eventNotesFolder },
+			},
+		};
+		let issues;
+		try {
+			issues = await this.core.settings.save(next);
+		} catch (err) {
+			console.error("[All iₙ oNe] Onboarding: falha ao salvar configuração inicial:", err);
+			new Notice("Não foi possível salvar a configuração inicial. Tente novamente.", 8000);
+			return;
+		}
+		const blocking = issues.filter((i) => i.level === "error");
+		if (blocking.length > 0) {
+			new Notice(blocking.map((i) => i.message).join("\n"), 8000);
+			return;
+		}
+		for (const path of [this.inboxFolder, this.calendarFolder, this.eventNotesFolder, this.systemFolder, this.filesFolder, this.calendarTemplatesFolder]) {
+			await ensureVaultFolder(this.core.app, path);
+		}
+		this.close();
 	}
 }
