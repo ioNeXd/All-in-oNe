@@ -25,6 +25,10 @@ describe("BACKUP_FILES / caminhos", () => {
 			`plugins/All-in-oNe/${BACKUP_DIR}/main.js`
 		);
 	});
+
+	it("backupFilePath rejeita nomes fora da allowlist", () => {
+		expect(() => backupFilePath("plugins/All-in-oNe", "../../data.json")).toThrow(RangeError);
+	});
 });
 
 describe("pickExisting — o que copiar", () => {
