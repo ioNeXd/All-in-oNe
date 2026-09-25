@@ -210,8 +210,11 @@ export class McpModule implements HubModule {
 	validateSettings(settings: HubSettings): ConfigValidationIssue[] {
 		const mcp = (settings.modules.mcp ?? {}) as Partial<McpModuleSettings>;
 		const issues: ConfigValidationIssue[] = [];
-		if (mcp.port && (mcp.port < 1024 || mcp.port > 65535)) {
-			issues.push({ field: "port", level: "error", message: "A porta deve estar entre 1024 e 65535." });
+		if (!Number.isInteger(mcp.port) || mcp.port < 1024 || mcp.port > 65535) {
+			issues.push({ field: "port", level: "error", message: "A porta deve ser um inteiro entre 1024 e 65535." });
+		}
+		if (!Number.isInteger(mcp.rateLimitPerMinute) || mcp.rateLimitPerMinute < 1) {
+			issues.push({ field: "rateLimitPerMinute", level: "error", message: "O limite de ações por minuto deve ser um inteiro maior ou igual a 1." });
 		}
 		return issues;
 	}
