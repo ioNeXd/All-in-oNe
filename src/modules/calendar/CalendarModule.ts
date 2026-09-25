@@ -22,8 +22,6 @@ export interface CalendarModuleSettings {
 	events: CalendarEvent[];
 	view: "month" | "week" | "agenda";
 	/**
-	 * Pasta única para notas de evento — tanto para uma nota EXISTENTE que o
-	/**
 	 * Se true, o lembrete força a janela do Obsidian pra frente mesmo com o
 	 * app minimizado. Desligado por padrão — ver ReminderModal.
 	 */
