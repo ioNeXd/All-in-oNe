@@ -443,7 +443,7 @@ export class CalendarModule implements HubModule {
 		const rerenderCurrent=rerender ?? (()=>this.rerenderView());
 		const header=container.createDiv({cls:"ione-hub-calendar__header"});
 		const prev=header.createEl("button",{text:"<"});
-		const title=header.createSpan({text:this.displayedMonth.toLocaleDateString("pt-BR",{month:"long",year:"numeric"}),cls:"ione-hub-calendar__title"});
+		header.createSpan({text:this.displayedMonth.toLocaleDateString("pt-BR",{month:"long",year:"numeric"}),cls:"ione-hub-calendar__title"});
 		const today=header.createEl("button",{text:"Hoje"});
 		const next=header.createEl("button",{text:">"});
 		prev.setAttr("aria-label","Mês anterior"); next.setAttr("aria-label","Próximo mês");
