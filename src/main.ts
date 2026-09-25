@@ -13,7 +13,9 @@ import { NotificationsModule } from "./modules/notifications/NotificationsModule
 import { HistoryModule } from "./modules/history/HistoryModule";
 import { FileLifecycleModule } from "./modules/filelifecycle/FileLifecycleModule";
 import { VaultEventBridge } from "./core/VaultEventBridge";
-import { CommandBridge } from "./core/CommandBridge";\nimport { ManualManager } from "./core/ManualManager";\nimport { CalendarSidebarView, CALENDAR_SIDEBAR_VIEW_TYPE } from "./modules/calendar/CalendarSidebarView";
+import { CommandBridge } from "./core/CommandBridge";
+import { ManualManager } from "./core/ManualManager";
+import { CalendarSidebarView, CALENDAR_SIDEBAR_VIEW_TYPE } from "./modules/calendar/CalendarSidebarView";
 
 /**
  * PLUGIN PRINCIPAL
