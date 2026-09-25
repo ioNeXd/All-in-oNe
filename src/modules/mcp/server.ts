@@ -179,8 +179,12 @@ async function handleRequest(
 	const accept = req.headers["accept"] ?? "";
 	if (accept) {
 		const hasJsonOrWildcard = accept.split(",").some((part) => {
-			const mime = part.split(";")[0].trim().toLowerCase();
-			return mime === "application/json" || mime === "*/*";
+			const [rawMime, ...params] = part.split(";");
+			const mime = rawMime.trim().toLowerCase();
+			const quality = params.find((param) => /^\\s*q\\s*=/i.test(param));
+			const q = quality ? Number(quality.split("=")[1]?.trim()) : 1;
+			if (!Number.isFinite(q) || q <= 0) return false;
+			return mime === "application/json" || mime === "*/*" || mime === "application/*";
 		});
 		if (!hasJsonOrWildcard) {
 			res.writeHead(406).end(JSON.stringify({ error: "Servidor produz apenas application/json." }));
@@ -213,7 +217,7 @@ async function handleRequest(
 		// Validação do prefixo Bearer ANTES — rejeita qualquer formato diferente
 		// (bearer, token-only, schema desconhecido) sem comparar o segredo.
 		const BEARER_PREFIX = "Bearer ";
-		if (!authHeader.startsWith(BEARER_PREFIX)) {
+		if (!authHeader.toLowerCase().startsWith(BEARER_PREFIX.toLowerCase())) {
 			if (throttled) authThrottle.recordFailure(identity!);
 			res.writeHead(401).end(JSON.stringify({ error: "Token inválido." }));
 			return;
