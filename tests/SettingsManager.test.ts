@@ -65,7 +65,7 @@ describe("SettingsManager", () => {
 		await manager.reset();
 
 		expect(manager.getModuleSettings("history")).toEqual({});
-		expect(manager.get().paths.calendarFolder).toBe("Calendario"); // voltou ao default
+		expect(manager.get().paths.calendarFolder).toBe("01 - Calendario"); // voltou ao default
 	});
 
 	it("reset 'all' também zera configuração (dados são zerados via hook, no HubCore)", async () => {
@@ -205,6 +205,20 @@ describe("defaults e sincronização de caminhos derivados", () => {
 		expect(settings.paths.calendarFolder).toBe("01 - Calendario");
 		expect(settings.paths.calendarTemplatesFolder).toBe("99 - Sistema/Templates/Calendário");
 		expect((getStored() as { schemaVersion: number }).schemaVersion).toBe(3);
+	});
+
+	it("valida conflitos depois de sincronizar caminhos derivados", async () => {
+		const { manager } = makeManager(null);
+		await manager.init();
+
+		const next = createDefaultSettings();
+		next.paths.systemFolder = "Sistema-Novo";
+		next.paths.calendarFolder = "Sistema-Novo/Templates/Calendário";
+
+		const issues = await manager.save(next);
+		expect(issues.some((i) => i.level === "error")).toBe(true);
+		expect(manager.get().paths.systemFolder).toBe("99 - Sistema");
+		expect(manager.get().paths.calendarFolder).toBe("01 - Calendario");
 	});
 
 	it("acompanha templates e arquivos quando o sistema muda, sem sobrescrever customização", async () => {
