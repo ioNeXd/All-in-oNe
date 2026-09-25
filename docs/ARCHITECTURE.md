@@ -14,7 +14,7 @@ src/
     CommandBridge.ts     ← ponte módulos→Command Palette (registro único + checkCallback)
     PathUtils.ts         ← regras puras de caminho (testadas sem vault)
     VaultPaths.ts        ← operações de vault: pastas recursivas, nome único
-    NoteStatus.ts        ← regra pura: pendente/completo (testada) — compartilhada
+    NoteStatus.ts        ← regra pura: incompleto/completo (testada) — compartilhada
                            por templates/calendar/Lobby, sem acoplamento entre módulos
     secureStore.ts       ← ofuscação de campos sensíveis (ex.: token MCP)
     types.ts             ← formato de HubSettings
@@ -68,7 +68,7 @@ mesmos métodos (`onRegister`, `onEnable`, `onDisable`, `getHealthStatus`,
 `onSettingsChange`, `onResetData`) em todos, sem saber o que cada um faz
 por dentro.
 
-O contrato na linha de base v0.1.0:
+O contrato vigente nesta linha de base:
 
 - `onRegister(context)` — roda sempre, no registro; guarda o context.
 - `onEnable()` / `onDisable()` — ativação e desativação de fato (coisas
