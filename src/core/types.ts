@@ -67,7 +67,7 @@ export interface HubSettings {
 	};
 }
 
-export const SETTINGS_SCHEMA_VERSION = 2;
+export const SETTINGS_SCHEMA_VERSION = 3;
 
 export function createDefaultSettings(): HubSettings {
 	return {
