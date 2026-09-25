@@ -21,7 +21,9 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
 		reminder: true,
 		...overrides,
 	};
-}	describe("disparo de eventos do calendário", () => {
+}
+
+describe("disparo de eventos do calendário", () => {
 	it("dispara no dia certo de um evento anual", () => {
 		expect(shouldFire(makeEvent(), new Date(2026, 8, 15, 10, 0))).toBe(true);
 	});
