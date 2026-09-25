@@ -475,9 +475,26 @@
 textarea.ione-hub-styles__editor-input {
 	position: relative;
 	z-index: 1;
-	color: transparent;
-	caret-color: var(--text-normal);
-	background: transparent;
+	color: transparent !important;
+	-webkit-text-fill-color: transparent !important;
+	caret-color: var(--text-normal) !important;
+	background: transparent !important;
+	background-color: transparent !important;
+}
+/*
+ * O tema do Obsidian pode aplicar background/cor próprios em :hover e :focus
+ * nos textareas. Como este textarea é a camada de entrada transparente do
+ * editor com overlay, qualquer fundo opaco cobre o código colorizado atrás
+ * dele e faz o conteúdo parecer desaparecer ao passar o mouse.
+ * A transparência precisa vencer também essas regras do tema.
+ */
+textarea.ione-hub-styles__editor-input:hover,
+textarea.ione-hub-styles__editor-input:focus,
+textarea.ione-hub-styles__editor-input:active {
+	color: transparent !important;
+	-webkit-text-fill-color: transparent !important;
+	background: transparent !important;
+	background-color: transparent !important;
 }
 textarea.ione-hub-styles__editor-input::selection {
 	background: var(--text-selection, rgba(59, 109, 196, 0.4));
