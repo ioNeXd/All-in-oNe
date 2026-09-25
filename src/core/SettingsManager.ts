@@ -216,8 +216,12 @@ export class SettingsManager {
 		const oldSystem = (previous.paths.systemFolder ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
 		const newSystem = (next.paths.systemFolder ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
 		const oldDefaultTemplates = oldSystem ? `${oldSystem}/Templates/Calendário` : "";
-		if (oldDefaultTemplates && next.paths.calendarTemplatesFolder === oldDefaultTemplates && newSystem) {
-			next = { ...next, paths: { ...next.paths, calendarTemplatesFolder: `${newSystem}/Templates/Calendário` } };
+		const oldDefaultFiles = oldSystem ? `${oldSystem}/arquivos` : "";
+		if (newSystem) {
+			const paths = { ...next.paths };
+			if (oldDefaultTemplates && paths.calendarTemplatesFolder === oldDefaultTemplates) paths.calendarTemplatesFolder = `${newSystem}/Templates/Calendário`;
+			if (oldDefaultFiles && paths.filesFolder === oldDefaultFiles) paths.filesFolder = `${newSystem}/arquivos`;
+			next = { ...next, paths };
 		}
 		return next;
 	}
