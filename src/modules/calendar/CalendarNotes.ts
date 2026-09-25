@@ -1,1 +1,35 @@
-import type { TFile } from "obsidian";\n\nexport function dateKey(date: Date): string {\n\treturn String(date.getFullYear()) + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());\n}\n\nexport function dailyNoteFilename(date: Date): string {\n\treturn dateKey(date) + ".md";\n}\n\nexport function templateNoteFilename(templateName: string, date: Date, suffix = 1): string {\n\tconst base = sanitizeTemplateName(templateName);\n\tconst key = dateKey(date);\n\treturn suffix <= 1 ? base + "-" + key + ".md" : base + "-" + suffix + "-" + key + ".md";\n}\n\nexport function sanitizeTemplateName(name: string): string {\n\treturn name.replace(/\\/g, "/").split("/").pop()!.replace(/\.md$/i, "").trim().replace(/[\\/:*?"<>|]/g, "-") || "Nota";\n}\n\nexport function isCalendarNoteForDate(file: Pick<TFile, "basename">, date: Date): boolean {\n\tconst key = dateKey(date);\n\treturn file.basename === key || new RegExp("(?:^|-)"+key.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")+"$").test(file.basename);\n}\n\nexport function firstAvailableTemplateSuffix(existingBasenames: Iterable<string>, templateName: string, date: Date): number {\n\tconst existing = new Set(existingBasenames);\n\tfor (let suffix = 1; ; suffix++) {\n\t\tif (!existing.has(templateNoteFilename(templateName, date, suffix))) return suffix;\n\t}\n}\n\nfunction pad(value: number): string {\n\treturn String(value).padStart(2, "0");\n}\n
+import type { TFile } from "obsidian";
+
+export function dateKey(date: Date): string {
+	return String(date.getFullYear()) + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
+}
+
+export function dailyNoteFilename(date: Date): string {
+	return dateKey(date) + ".md";
+}
+
+export function templateNoteFilename(templateName: string, date: Date, suffix = 1): string {
+	const base = sanitizeTemplateName(templateName);
+	const key = dateKey(date);
+	return suffix <= 1 ? base + "-" + key + ".md" : base + "-" + suffix + "-" + key + ".md";
+}
+
+export function sanitizeTemplateName(name: string): string {
+	return name.replace(/\\/g, "/").split("/").pop()!.replace(/\.md$/i, "").trim().replace(/[\\/:*?"<>|]/g, "-") || "Nota";
+}
+
+export function isCalendarNoteForDate(file: Pick<TFile, "basename">, date: Date): boolean {
+	const key = dateKey(date);
+	return file.basename === key || file.basename.endsWith("-" + key);
+}
+
+export function firstAvailableTemplateSuffix(existingBasenames: Iterable<string>, templateName: string, date: Date): number {
+	const existing = new Set(existingBasenames);
+	for (let suffix = 1; ; suffix++) {
+		if (!existing.has(templateNoteFilename(templateName, date, suffix))) return suffix;
+	}
+}
+
+function pad(value: number): string {
+	return String(value).padStart(2, "0");
+}
