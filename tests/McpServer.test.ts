@@ -444,7 +444,9 @@ describe("MCP — contrato HTTP (Content-Type e Accept)", () => {
 		expect(json.error.code).toBe(-32700);
 	});
 
-});\n\ndescribe("MCP — autenticação (401 antes de qualquer processamento)", () => {
+});
+
+describe("MCP — autenticação (401 antes de qualquer processamento)", () => {
 	const CALL = {
 		jsonrpc: "2.0",
 		id: 42,
