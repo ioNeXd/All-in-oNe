@@ -39,7 +39,7 @@ export class OnboardingModal extends Modal {
 	}
 	private renderConfig():void{
 		this.contentEl.createEl("h2",{text:"Configuração inicial"});this.contentEl.createEl("p",{text:"Revise os caminhos. Nada será criado até confirmar."});
-		const fields:Array<[keyof OnboardingModal,string,string]> = [
+		const fields:Array<["calendarFolder"|"calendarTemplatesFolder"|"eventNotesFolder"|"inboxFolder"|"systemFolder"|"filesFolder",string,string]> = [
 			["calendarFolder","Calendário","01 - Calendario"],["calendarTemplatesFolder","Templates","99 - Sistema/templetes"],["eventNotesFolder","Notas de eventos","01 - Calendario/Notas-Eventos"],["inboxFolder","Inbox","00 - Inbox"],["systemFolder","Sistema","99 - Sistema"],["filesFolder","Arquivos","99 - Sistema/arquivos"]];
 		for(const [key,label,placeholder] of fields)new Setting(this.contentEl).setName(label).addText(t=>{t.setValue(String(this[key]));t.setPlaceholder(placeholder);t.onChange(v=>{(this as unknown as Record<string,unknown>)[key as string]=v})});
 		const footer=this.contentEl.createDiv({cls:"ione-hub-onboarding__footer"});
