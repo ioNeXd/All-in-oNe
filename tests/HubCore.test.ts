@@ -294,6 +294,9 @@ describe("HubCore — reset em 3 níveis (escadinha real)", () => {
 		expect(core.isModuleEnabled("custom-x")).toBe(false);
 
 		await core.settings.updateModuleSettings("mcp", { port: 9999 });
+		// O enable do módulo registra um evento de lifecycle; ele não faz parte
+		// do cenário que queremos verificar neste teste de reset de dados.
+		core.bus.clearHistory();
 		await core.bus.emit("demo:evento", {}, "core");
 		expect(core.bus.getHistory()).toHaveLength(1);
 
