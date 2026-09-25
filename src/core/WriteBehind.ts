@@ -74,9 +74,10 @@ export class WriteBehindQueue<T extends Identified> {
 	 * em voo (re-record durante o save) ficam na fila para o drain seguinte
 	 * — o batch corrente não os repete, e o próximo leva a diferença.
 	 *
-	 * Em voo é marcado com CONTADOR por id (dois drains em cascata podem
-	 * carregar o mesmo id — ex.: save falhou sem confirm e o retry o pegou
-	 * de novo). O confirm só solta de vez quando todos os voos do id acabam.
+	 * Há no máximo um lote em voo por id: enquanto um id estiver em voo,
+	 * `takeBatch` o pula. Se o mesmo id for re-enfileirado, a versão mais
+	 * recente permanece na frente e só é drenada após a confirmação do lote
+	 * anterior.
 	 */
 	takeBatch(max: number): DrainResult<T> {
 		const batch: T[] = [];
@@ -89,16 +90,18 @@ export class WriteBehindQueue<T extends Identified> {
 			batch.push(item);
 		}
 		for (const item of batch) this.inFlightIds.add(item.id);
+		let confirmed = false;
 		return {
 			batch,
 			confirm: () => {
+				if (confirmed) return;
+				confirmed = true;
 				for (const item of batch) {
 					this.inFlightIds.delete(item.id);
-					// Remove a ÚLTIMA ocorrência do id (a mais recente). Se o id
-					// foi re-enfileirado durante o voo, a cópia mais nova
-					// permanece na fila para o drain seguinte — versão correta.
-					// foi re-enfileirado durante o voo, a cópia mais nova
-					// permanece na fila para o drain seguinte — versão correta.
+					// A fila é mais-recente-primeiro; portanto, a ÚLTIMA ocorrência
+					// do id é a versão mais antiga, correspondente ao lote confirmado.
+					// Uma versão re-enfileirada durante o voo permanece na frente
+					// para o próximo drain.
 					const index = fallbackFindLastIndex(this.items, item.id);
 					if (index !== -1) this.items.splice(index, 1);
 				}
