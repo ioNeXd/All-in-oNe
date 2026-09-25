@@ -15,9 +15,9 @@
  *   - `takeBatch` aceita um conjunto `inFlightIds` do drain anterior: o lote
  *     novo nunca repete ids já em voo (o disco ainda vai recebê-los) —
  *     sem duplicata no merged;
- *   - se o drain anterior FALHOU, os ids em voo não são confirmados e o
- *     lote novo os recontém (retry natural) — exatamente a janela que
- *     antes perdia entrada;
+ *   - se o drain anterior FALHOU, o chamador usa `release()` para retirar os
+ *     ids do estado "em voo"; o próximo drain então os tenta novamente —
+ *     exatamente a janela que antes perdia entrada;
  *   - `generation` protegendo clear/reset continua existindo, mas como
  *     detalhe do chamador — aqui só há fila e confirmação.
  *
