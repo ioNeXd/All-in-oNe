@@ -145,7 +145,7 @@ describe("onResetData do Calendário — dados × configuração", () => {
 			bus: {} as never,
 			getSettings: () => JSON.parse(JSON.stringify(slice)) as typeof slice,
 			updateSettings,
-			getFullSettings: () => ({ modules: { calendar: slice } }) as never,
+			getFullSettings: () => ({ modules: { calendar: slice }, paths: { eventNotesFolder: "Calendario/notas" } }) as never,
 			isModuleEnabled: () => true,
 			log: () => {},
 			registerCommand: () => {},
