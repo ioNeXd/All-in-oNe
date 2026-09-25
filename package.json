@@ -30,6 +30,6 @@
     "vitest": "^4.1.11"
   },
   "overrides": {
-    "braces": "github:micromatch/braces#74b2db2938fad48a2ea54a9c8bf27a37a62c350d"
+    "braces": "git+https://github.com/micromatch/braces.git#74b2db2938fad48a2ea54a9c8bf27a37a62c350d"
   }
 }
