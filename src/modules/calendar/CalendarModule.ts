@@ -347,7 +347,7 @@ export class CalendarModule implements HubModule {
 	editEvent(event: CalendarEvent): void {
 		void this.ensureEventNotesFolder();
 		const notes = this.context!.app.vault.getMarkdownFiles().map((f) => f.path);
-		const defaultFolder = this.readSettings().eventNotesFolder;
+		const defaultFolder = normalizePath(this.context!.getFullSettings().paths.calendarFolder + "/Notas-Eventos");
 		const date = new Date(event.year ?? new Date().getFullYear(), event.month - 1, event.day);
 		new EventEditorModal(
 			this.context!.app,
@@ -721,7 +721,7 @@ export class CalendarModule implements HubModule {
 	}
 
 	/** Cria uma nota NOVA já vinculada, na pasta configurável (padrão: Calendario/notas). */
-	async createLinkedNote(name: string, refId: string, folderOverride?: string): Promise<TFile> {
+	async createLinkedNote(name: string, refId: string, _folderOverride?: string): Promise<TFile> {
 		const folder = normalizePath(this.context!.getFullSettings().paths.calendarFolder + "/Notas-Eventos");
 		await ensureVaultFolder(this.context!.app, folder);
 		const path = await uniqueVaultPath(this.context!.app, normalizePath(`${folder}/${name}.md`));
@@ -749,7 +749,7 @@ export class CalendarModule implements HubModule {
 
 	/** Pasta das notas de evento, criada sob demanda. */
 	async ensureEventNotesFolder(): Promise<string> {
-		const folder = this.readSettings().eventNotesFolder;
+		const folder = normalizePath(this.context!.getFullSettings().paths.calendarFolder + "/Notas-Eventos");
 
 		await ensureVaultFolder(this.context!.app, folder);
 		return folder;
