@@ -93,6 +93,7 @@ export class CalendarModule implements HubModule {
 	private readonly audioUnlocker = new AudioUnlocker();
 	/** Desinscrição do pedido da UI (calendar:open-today) — limpo no onDisable. */
 	private busUnsubscribe?: () => void;
+	private metadataUnsubscribe?: () => void;
 	/** Estado da ÚLTIMA importação .ics — alimenta o Diagnóstico. */
 	private lastIcsImport: { ok: boolean; detail: string } | undefined;
 	/** Mês exibido na grade (independente do mês atual) — controlado pela navegação. */
@@ -140,6 +141,8 @@ export class CalendarModule implements HubModule {
 		this.dailyCheckInterval = undefined;
 		this.busUnsubscribe?.();
 		this.busUnsubscribe = undefined;
+		this.metadataUnsubscribe?.();
+		this.metadataUnsubscribe = undefined;
 		this.audioUnlocker.disarm();
 		// Limpa a dedupe de minuto junto: sem isto, um desligar→ligar dentro
 		// do mesmo minuto pulava a checagem retroativa (e um lembrete sem
