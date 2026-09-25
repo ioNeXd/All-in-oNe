@@ -92,6 +92,7 @@ export interface SignatureCheckOutcome {
 export function interpretGpgStatusOutput(output: string): SignatureCheckOutcome {
 	const lines = output.split("\n").map((l) => l.trim()).filter(Boolean);
 	let sawGood = false;
+	let sawValid = false;
 	let sawTerminalBad = false;
 	let sawNoPubkey = false;
 	let fingerprint: string | undefined;
@@ -112,25 +113,26 @@ export function interpretGpgStatusOutput(output: string): SignatureCheckOutcome 
 				sawTerminalBad = true;
 				break;
 			case "ERRSIG":
-				errsigReason =
-					parts[6] === "4"
-						? "algoritmo não suportado"
-						: parts[6] === "5"
-							? "dados criptográficos inválidos"
-							: "erro ao processar a assinatura";
+				// Formato: ERRSIG <keyid> <pubkey algo> <hash algo> <class> <date> <timestamp> <fpr>
+				errsigReason = "erro ao processar a assinatura";
 				sawTerminalBad = true;
 				break;
 			case "NO_PUBKEY":
 				sawNoPubkey = true;
 				break;
 			case "VALIDSIG":
-				if (parts[10]) fingerprint = parts[10];
-				else if (parts[1]) fingerprint = parts[1];
+				sawValid = true;
+				if (parts[1]) fingerprint = parts[1];
 				break;
 		}
 	}
 
-	if (sawGood && !sawTerminalBad) return { valid: true, keyFingerprint: fingerprint };
+	// GOODSIG apenas identifica a chave/nome da assinatura; VALIDSIG é o
+	// veredicto criptográfico. Nunca aceitamos uma assinatura sem VALIDSIG.
+	if (sawValid && !sawTerminalBad) return { valid: true, keyFingerprint: fingerprint };
+	if (sawGood && !sawValid && !sawTerminalBad) {
+		return { valid: false, reason: "Assinatura não possui veredicto criptográfico VALIDSIG." };
+	}
 	if (sawNoPubkey)
 		return {
 			valid: false,
