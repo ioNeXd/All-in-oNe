@@ -142,8 +142,7 @@ sobrescrever a outra silenciosamente.
 
 `FileWriteQueue.run(path, operation)` garante que toda operação de escrita
 para o MESMO `path` rode em sequência — nunca em paralelo — sem bloquear
-operações em arquivos diferentes. Na linha de base, **todas** as escritas
-de módulos e do MCP passam por ela.
+operações em arquivos diferentes. Na linha de base, as operações de escrita que podem concorrer entre módulos e MCP passam por ela; operações internas do Obsidian que apenas normalizam frontmatter são mantidas no próprio módulo.
 
 ## Por que uma ponte de eventos do vault (`VaultEventBridge`)
 
