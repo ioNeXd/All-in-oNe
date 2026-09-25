@@ -39,6 +39,7 @@ export function addSuggestion(
 	entry: PendingSuggestion,
 	max = MAX_PENDING_SUGGESTIONS
 ): { list: PendingSuggestion[]; added: boolean } {
+	if (!Number.isInteger(max) || max < 1) throw new RangeError("max deve ser um inteiro >= 1");
 	const withoutSamePath = list.filter((x) => x.path !== entry.path);
 	const wasThere = withoutSamePath.length !== list.length;
 	const sameRuleThere = wasThere && list.find((x) => x.path === entry.path)?.suggestedRuleId === entry.suggestedRuleId;
