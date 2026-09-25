@@ -29,3 +29,11 @@ describe("CalendarNotes", () => {
 		expect(isCalendarNoteForDate({ basename: "Reuniao-2026-09-23" }, date)).toBe(false);
 	});
 });
+
+
+describe("Nota nova", () => {
+	it("gera nomes no padrão nota-data e nota-N-data", () => {
+		expect(templateNoteFilename("nota", date)).toBe("nota-2026-09-24.md");
+		expect(templateNoteFilename("nota", date, 2)).toBe("nota-2-2026-09-24.md");
+	});
+});
