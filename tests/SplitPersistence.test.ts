@@ -125,7 +125,7 @@ describe("SplitPersistence — gravação direcionada via SettingsManager", () =
 		const settings = await manager2.init();
 		expect(manager2.getModuleSettings("history")).toEqual({ maxEntries: 77 });
 		expect(manager2.getModuleSettings("notifications")).toEqual({ doNotDisturb: true });
-		expect(settings.paths.calendarFolder).toBe("Calendario"); // resto do principal
+		expect(settings.paths.calendarFolder).toBe("01 - Calendario"); // resto do principal
 	});
 });
 
