@@ -415,7 +415,7 @@ export class TemplatesModule implements HubModule {
 		});
 		await this.movePendingToCategoryFolder(file);
 		this.context?.bus.emit("templates:note-pending", { path: file.path }, "templates");
-		this.context?.log("Nota criada e marcada como Pendente", { path: file.path });
+		this.context?.log("Nota criada e marcada como incompleta", { path: file.path });
 	}
 
 	/**
