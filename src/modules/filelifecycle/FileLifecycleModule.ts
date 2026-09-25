@@ -187,6 +187,7 @@ export class FileLifecycleModule implements HubModule {
 
 		try {
 			const name = await this.askName(file.basename, "Nome da nova nota");
+			if (this.stopped) return;
 			let target = file;
 
 			if (name && name !== file.basename) {
@@ -196,6 +197,7 @@ export class FileLifecycleModule implements HubModule {
 				await this.context!.fileWriteQueueRun(originalPath, () =>
 					this.context!.app.fileManager.renameFile(file, finalPath)
 				);
+				if (this.stopped) return;
 				const renamed = this.context!.app.vault.getAbstractFileByPath(finalPath);
 				if (renamed instanceof TFile) target = renamed;
 			}
@@ -230,7 +232,7 @@ export class FileLifecycleModule implements HubModule {
 
 	async promptRename(file: TFile): Promise<void> {
 		const name = await this.askName(file.basename, "Renomear nota");
-		if (!name || name === file.basename) return;
+		if (this.stopped || !name || name === file.basename) return;
 
 		const doRename = async () => {
 			const folder = file.path.substring(0, file.path.lastIndexOf("/"));
@@ -263,6 +265,7 @@ export class FileLifecycleModule implements HubModule {
 	}
 
 	async promptDelete(file: TFile): Promise<void> {
+		if (this.stopped) return;
 		if (!this.readSettings().confirmOnDelete) {
 			await this.context!.fileWriteQueueRun(
 				file.path,
@@ -286,9 +289,11 @@ export class FileLifecycleModule implements HubModule {
 	}
 
 	async promptMove(file: TFile): Promise<void> {
+		if (this.stopped) return;
 		const folders = this.listFolders();
 		new MovePromptModal(this.context!.app, file, folders, async (targetFolder) => {
 			const doMove = async () => {
+				if (this.stopped) return;
 				const desired = normalizePath(`${targetFolder}/${file.name}`);
 				const finalPath = await uniqueVaultPath(this.context!.app, desired);
 				await ensureVaultFolder(this.context!.app, targetFolder);
