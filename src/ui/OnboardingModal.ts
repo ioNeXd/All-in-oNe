@@ -19,7 +19,7 @@ export class OnboardingModal extends Modal {
 		super(app);
 		const s=core.settings.get();
 		this.calendarFolder=s.paths.calendarFolder; this.calendarTemplatesFolder=s.paths.calendarTemplatesFolder;
-		this.eventNotesFolder=(s.modules.calendar?.eventNotesFolder as string)||"01 - Calendario/Notas-Eventos";
+		this.eventNotesFolder=(s.modules?.calendar?.eventNotesFolder as string)||"01 - Calendario/Notas-Eventos";
 		this.inboxFolder=s.paths.inboxFolder||"00 - Inbox"; this.systemFolder=s.paths.systemFolder||"99 - Sistema"; this.filesFolder=s.paths.filesFolder||"99 - Sistema/arquivos";
 	}
 
