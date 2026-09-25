@@ -33,8 +33,8 @@ export interface DrainResult<T> {
 	/** Lote a gravar (na ordem do módulo: mais recente primeiro). */
 	batch: T[];
 	/**
-	 * Chame `confirm(ids)` após o save persistir; sem confirmação, o próximo
-	 * drain re-inclui estes ids (retry — a janela de perda some).
+	 * Chame `confirm()` após o save persistir; em caso de falha, chame `release()`
+	 * para permitir que o próximo drain faça retry dos ids.
 	 */
 	confirm: () => void;
 	/** Libera o lote sem removê-lo da fila, permitindo retry após falha do save. */
@@ -75,10 +75,10 @@ export class WriteBehindQueue<T extends Identified> {
 	}
 
 	/**
-	 * Tira da fila o lote a gravar. Nada é removido: os itens passam a
-	 * "em voo" e SAEM da fila só no `confirm()`. Itens com id igual a um
-	 * em voo (re-record durante o save) ficam na fila para o drain seguinte
-	 * — o batch corrente não os repete, e o próximo leva a diferença.
+	 * Seleciona o lote a gravar. Nada é removido: os itens passam a
+	 * "em voo" e só SAEM da fila no `confirm()`. Itens com id igual a um
+	 * em voo (re-record durante o save) são substituídos pela versão mais
+	 * recente e ficam pendentes até o voo terminar.
 	 *
 	 * Há no máximo um lote em voo por id: enquanto um id estiver em voo,
 	 * `takeBatch` o pula. Se o mesmo id for re-enfileirado, `enqueue` substitui
@@ -89,8 +89,7 @@ export class WriteBehindQueue<T extends Identified> {
 		for (const item of this.items) {
 			if (batch.length >= Math.max(0, max)) break;
 			// Itens cujo id JÁ está em voo não entram num novo lote: a versão
-			// mais recente (cabeça) é a que fica — se houver re-enfileiração,
-			// a antiga sai no confirm e a nova segue pendente.
+			// mais recente permanece pendente até o voo ser confirmado/liberado.
 			if (this.inFlightIds.has(item.id)) continue;
 			batch.push(item);
 		}
