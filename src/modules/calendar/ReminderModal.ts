@@ -1,5 +1,6 @@
 import { App, Modal, Setting, TFile } from "obsidian";
-import type { CalendarEvent } from "./EventTypes";\nimport type { AudioUnlocker } from "../../core/AudioUnlock";
+import type { CalendarEvent } from "./EventTypes";
+import type { AudioUnlocker } from "../../core/AudioUnlock";
 
 export class ReminderModal extends Modal {
 	constructor(
