@@ -419,7 +419,7 @@
 .ione-hub-styles__editor {
 	width: 100%;
 	min-height: 420px;
-	resize: vertical;
+	resize: both;
 	font-family: var(--font-monospace);
 	font-size: 13px;
 	line-height: 1.6;
@@ -445,6 +445,7 @@
 }
 .ione-hub-styles__overlay {
 	position: absolute;
+	resize: none;
 	inset: 0;
 	height: 100%;
 	margin: 0;
