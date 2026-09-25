@@ -181,8 +181,7 @@ baseline e o ciclo 0.2.0 do plugin era herança do dev pré-baseline (ver
 tabela acima).
 
 **Funciona:** grade clicável com navegação entre meses (‹ › e "Hoje",
-sem duplicar controles), indicadores por dia (nota existente, pendente,
-evento) com tooltip, visões de semana e agenda, modal de escolha de
+sem duplicar controles), indicadores por dia (nota existente, evento) com tooltip, visões de semana e agenda, modal de escolha de
 template (`DayActionModal`), eventos recorrentes com contagem ou "para
 sempre", lembretes com timer de 10s, nota vinculada aberta em segundo
 plano, vínculo por metadado (renomear/mover a nota não quebra), sincronização
