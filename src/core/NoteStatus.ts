@@ -15,7 +15,7 @@ export interface CompletionDecision {
 /** Decide a transição quando concluido já é true. */
 export function decideCompletionAction(origem: string | undefined, currentPath: string): CompletionDecision {
 	if (!origem) return { rewriteStatus: false, move: false };
-	return { rewriteStatus: false, move: origem !== currentPath };
+	return { rewriteStatus: true, move: origem !== currentPath };
 }
 
 export function isNormalizedComplete(status: unknown): boolean {
