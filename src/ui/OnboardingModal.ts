@@ -41,7 +41,7 @@ export class OnboardingModal extends Modal {
 			["calendarFolder","Calendário","01 - Calendario"],["calendarTemplatesFolder","Templates","99 - Sistema/Templates/Calendário"],["inboxFolder","Inbox","00 - Inbox"],["systemFolder","Sistema","99 - Sistema"],["filesFolder","Arquivos","99 - Sistema/arquivos"]];
 		for(const [key,label,placeholder] of fields)new Setting(this.contentEl).setName(label).addText(t=>{t.setValue(String(this[key]));t.setPlaceholder(placeholder);t.onChange(v=>{(this as unknown as Record<string,unknown>)[key as string]=v})});
 		const footer=this.contentEl.createDiv({cls:"ione-hub-onboarding__footer"});
-		footer.createEl("button",{text:"Pular configuração"}).onclick=()=>void this.finish(false);
+		footer.createEl("button",{text:"Pular configuração"}).onclick=()=>{this.step="style";this.render()};
 		footer.createEl("button",{text:"Continuar",cls:"mod-cta"}).onclick=()=>{this.step="style";this.render()};
 	}
 	private renderStyle():void{this.contentEl.createEl("h2",{text:"Estilo inicial"});this.contentEl.createEl("p",{text:"Escolha o estilo inicial diretamente aqui. Você pode pular agora e alterar depois no módulo Estilos."});const panel=this.contentEl.createDiv({cls:"ione-hub-onboarding__style-preview"});const styles=this.core.getModules().find(m=>m.manifest.id==="styles") as StylesModule|undefined;if(styles?.renderOnboardingPicker)styles.renderOnboardingPicker(panel);else if(styles?.renderSettingsPanel)styles.renderSettingsPanel(panel);const footer=this.contentEl.createDiv({cls:"ione-hub-onboarding__footer"});footer.createEl("button",{text:"Pular"}).onclick=()=>void this.finish(true);footer.createEl("button",{text:"Próximo",cls:"mod-cta"}).onclick=()=>void this.finish(true);}
