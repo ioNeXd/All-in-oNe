@@ -111,10 +111,6 @@ export class OnboardingModal extends Modal {
 				filesFolder: this.filesFolder,
 				eventNotesFolder: this.eventNotesFolder,
 			},
-			modules: {
-				...settings.modules,
-				calendar: { ...(settings.modules.calendar ?? {}), eventNotesFolder: this.eventNotesFolder },
-			},
 		};
 		const issues = this.core.settings.validate(next);
 		const blocking = issues.filter((issue) => issue.level === "error");
