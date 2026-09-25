@@ -20,6 +20,13 @@ export class NoteMetadataService {
 		});
 	}
 
+	async remove(file: TFile, keys: string[]): Promise<void> {
+		if (keys.length === 0) return;
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			for (const key of keys) delete frontmatter[key];
+		});
+	}
+
 	async setCompletionStatus(file: TFile, completed: boolean, shape: CompletionStatusShape = "scalar"): Promise<void> {
 		const desiredStatus =
 			shape === "array"
