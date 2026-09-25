@@ -76,7 +76,7 @@ export const DEFAULT_PATHS = {
 	filesFolder: "99 - Sistema/arquivos",
 } as const;
 
-export const SETTINGS_SCHEMA_VERSION = 2;
+export const SETTINGS_SCHEMA_VERSION = 3;
 
 export function createDefaultSettings(): HubSettings {
 	return {
