@@ -274,7 +274,6 @@ export class CalendarModule implements HubModule {
 		void this.renderCurrentView(container.createDiv(), settings.view);
 
 		// Estava escrita mas nunca chamada em lugar nenhum — corrigido agora.
-		void this.renderPendingTimeline(container.createDiv());
 	}
 
 	/** Aba dedicada com todos os eventos marcados. */
@@ -319,7 +318,7 @@ export class CalendarModule implements HubModule {
 					btn.setButtonText("Testar").onClick(() => {
 						new ReminderModal(
 							this.context!.app,
-							event,
+							[event],
 							(refId) => this.openNoteByRef(refId),
 							this.readSettings().autoFocusOnReminder
 						).open();
@@ -409,7 +408,7 @@ export class CalendarModule implements HubModule {
 		};
 		new ReminderModal(
 			this.context!.app,
-			sample,
+			[sample],
 			() => Promise.resolve(),
 			this.readSettings().autoFocusOnReminder
 		).open();
@@ -498,8 +497,8 @@ export class CalendarModule implements HubModule {
 			const date = new Date(today);
 			date.setDate(today.getDate() + i);
 			const events = this.eventsForDate(date);
-			const note = this.findNoteForDate(date);
-			if (events.length === 0 && !note) continue;
+			const notes = this.findNotesForDate(date);
+			if (events.length === 0 && notes.length === 0) continue;
 
 			found++;
 			const row = list.createDiv({ cls: "ione-hub-calendar__week-row" });
@@ -523,6 +522,27 @@ export class CalendarModule implements HubModule {
 		}
 	}
 
+
+	private findDailyNote(date: Date): TFile | null {
+		const file = this.context!.app.vault.getAbstractFileByPath(this.pathForDate(date));
+		return file instanceof TFile ? file : null;
+	}
+
+	private findNotesForDate(date: Date): TFile[] {
+		const paths = this.context!.getFullSettings().paths;
+		const folder = this.context!.app.vault.getAbstractFileByPath(normalizePath(paths.calendarFolder + "/" + date.getFullYear() + "/" + monthFolderName(date.getMonth())));
+		if (!(folder instanceof TFolder)) return [];
+		return folder.children.filter((file): file is TFile => file instanceof TFile && file.extension === "md" && isCalendarNoteForDate(file, date));
+	}
+
+	private isToday(year: number, month: number, day: number): boolean {
+		const now = new Date();
+		return now.getFullYear() === year && now.getMonth() === month && now.getDate() === day;
+	}
+
+	private rerenderView(): void {
+		this.refreshPanel();
+	}
 
 	private eventsForDate(date: Date): CalendarEvent[] {
 		return this.readSettings().events.filter(
@@ -797,59 +817,66 @@ export type DayAction =
  * Modal de escolha ao clicar numa data: nota com template, nota vazia ou
  * marcar um evento. Substitui o antigo seletor que só oferecia templates.
  */
-class DayActionModal extends Modal {
+interface DateActionCallbacks {
+	openNote(file: TFile): void | Promise<void>;
+	createDaily(): void | Promise<void>;
+	createTemplate(template: string): void | Promise<void>;
+	createEvent(): void;
+	editEvent(event: CalendarEvent): void;
+}
+
+class DateActionModal extends Modal {
 	constructor(
 		app: App,
 		private date: Date,
+		private notes: TFile[],
+		private events: CalendarEvent[],
 		private templates: string[],
-		private onChoose: (action: DayAction) => void | Promise<void>
-	) {
-		super(app);
-	}
+		private callbacks: DateActionCallbacks
+	) { super(app); }
 
 	onOpen(): void {
-		const label = this.date.toLocaleDateString("pt-BR", {
-			day: "2-digit",
-			month: "long",
-			year: "numeric",
-		});
-		this.contentEl.createEl("h2", { text: label });
-		this.contentEl.createEl("p", {
-			cls: "ione-hub-lobby__description",
-			text: "O que você quer fazer nesta data?",
-		});
-
-		this.contentEl.createEl("h3", { text: "Criar nota" });
-		for (const template of this.templates) {
-			this.action(`📄 Com o template "${template}"`, { kind: "note", template });
+		this.contentEl.createEl("h2", { text: this.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" }) });
+		if (this.notes.length === 0) this.button("📝 Nota diária", () => this.callbacks.createDaily());
+		else if (this.notes.length === 1) this.button("📝 Nota atual", () => this.callbacks.openNote(this.notes[0]));
+		else {
+			this.contentEl.createEl("h3", { text: "📝 Notas do dia" });
+			for (const note of this.notes) this.button(note.basename, () => this.callbacks.openNote(note));
 		}
-		if (this.templates.length === 0) {
-			this.contentEl.createEl("p", {
-				cls: "ione-hub-lobby__description",
-				text: "Nenhum template encontrado. Coloque arquivos .md na pasta de templates do calendário para que apareçam aqui.",
-			});
+		this.contentEl.createEl("h3", { text: "📋 Nota template" });
+		this.renderTemplates();
+		this.contentEl.createEl("h3", { text: "🔔 Eventos" });
+		if (this.events.length === 0) this.button("Criar evento", this.callbacks.createEvent);
+		else {
+			for (const event of this.events) {
+				const row = this.contentEl.createDiv({ cls: "ione-hub-calendar__event-row" });
+				row.createEl("strong", { text: event.title });
+				row.createSpan({ text: (event.time ? " · " + event.time : "") + (event.description ? " · " + event.description : "") });
+				row.createEl("button", { text: "Editar" }).onclick = () => { this.close(); this.callbacks.editEvent(event); };
+			}
+			this.button("➕ Criar evento", this.callbacks.createEvent);
 		}
-		this.action("📝 Nota vazia (só com os metadados)", { kind: "note", template: null });
-
-		this.contentEl.createEl("h3", { text: "Marcar evento" });
-		this.action("🔔 Criar um evento nesta data", { kind: "event" });
 	}
 
-	private action(label: string, action: DayAction): void {
-		const btn = this.contentEl.createEl("button", { text: label });
-		btn.style.display = "block";
-		btn.style.width = "100%";
-		btn.style.marginBottom = "6px";
-		btn.style.textAlign = "left";
-		btn.onclick = async () => {
-			await this.onChoose(action);
-			this.close();
+	private renderTemplates(): void {
+		const input = this.contentEl.createEl("input", { type: "search", placeholder: "Pesquisar template..." });
+		const list = this.contentEl.createDiv({ cls: "ione-hub-calendar__template-list" });
+		const render = () => {
+			list.empty();
+			const q = input.value.trim().toLowerCase();
+			for (const template of this.templates.filter((x) => !q || x.toLowerCase().includes(q))) this.buttonInto(list, template, () => this.callbacks.createTemplate(template));
 		};
+		input.oninput = render;
+		render();
 	}
 
-	onClose(): void {
-		this.contentEl.empty();
+	private button(label: string, action: () => void | Promise<void>): void { this.buttonInto(this.contentEl, label, action); }
+	private buttonInto(parent: HTMLElement, label: string, action: () => void | Promise<void>): void {
+		const button = parent.createEl("button", { text: label });
+		button.style.display = "block"; button.style.width = "100%"; button.style.marginBottom = "6px";
+		button.onclick = () => { void action(); this.close(); };
 	}
+	onClose(): void { this.contentEl.empty(); }
 }
 
 /**
