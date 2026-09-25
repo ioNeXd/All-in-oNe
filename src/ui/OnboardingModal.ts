@@ -1,9 +1,11 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import type { HubCore } from "../core/HubCore";
 import { ensureVaultFolder } from "../core/VaultPaths";
-import { DEFAULT_PATHS, resolvePaths } from "../core/PathResolver";
+import { resolvePaths } from "../core/PathResolver";
+import { DEFAULT_PATHS } from "../core/types";
 
 type Step = "tour" | "config" | "style";
+type PathKey = "calendarFolder" | "calendarTemplatesFolder" | "inboxFolder" | "systemFolder" | "filesFolder";
 
 export class OnboardingModal extends Modal {
 	private step: Step = "tour";
@@ -58,7 +60,7 @@ export class OnboardingModal extends Modal {
 	private renderConfig(): void {
 		this.contentEl.createEl("h2", { text: "Configuração inicial" });
 		this.contentEl.createEl("p", { text: "Os caminhos derivados acompanham as raízes. Caminhos personalizados existentes são preservados." });
-		const fields: Array<[keyof this, string, string]> = [
+		const fields: Array<[PathKey, string, string]> = [
 			["calendarFolder", "Calendário", DEFAULT_PATHS.calendarFolder],
 			["calendarTemplatesFolder", "Templates", DEFAULT_PATHS.calendarTemplatesFolder],
 			["eventNotesFolder", "Notas de eventos", DEFAULT_PATHS.eventNotesFolder],
@@ -70,7 +72,7 @@ export class OnboardingModal extends Modal {
 			new Setting(this.contentEl).setName(label).addText((text) => {
 				text.setValue(String(this[key]));
 				text.setPlaceholder(placeholder);
-				text.onChange((value) => { (this as unknown as Record<string, unknown>)[key as string] = value.trim(); });
+				text.onChange((value) => { this[key] = value.trim(); });
 			});
 		}
 		const footer = this.contentEl.createDiv({ cls: "ione-hub-onboarding__footer" });
@@ -107,6 +109,7 @@ export class OnboardingModal extends Modal {
 				inboxFolder: this.inboxFolder,
 				systemFolder: this.systemFolder,
 				filesFolder: this.filesFolder,
+				eventNotesFolder: this.eventNotesFolder,
 			},
 			modules: {
 				...settings.modules,
