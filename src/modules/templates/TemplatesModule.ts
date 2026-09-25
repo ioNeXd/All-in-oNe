@@ -51,7 +51,7 @@ export class TemplatesModule implements HubModule {
 		id: "templates",
 		displayName: "Templates por pasta",
 		description:
-			"Aplica templates e metadados automáticos conforme a pasta onde a nota é criada; notas incompletas vão para Pendente.",
+			"Aplica templates e metadados automáticos conforme a pasta onde a nota é criada; notas incompletas vão para a pasta configurada de notas incompletas.",
 		icon: "file-stack",
 		version: "0.2.0",
 		contractVersion: "2.0.0",
@@ -72,12 +72,15 @@ export class TemplatesModule implements HubModule {
 	private pendingSuggestions: PendingSuggestion[] = [];
 	/** Caminhos em movimentação — evita reentrância nos handlers de modify. */
 	private movingFiles = new Set<string>();
+	/** Impede callbacks assíncronos de continuar após a desativação do módulo. */
+	private stopped = false;
 
 	onRegister(context: ModuleContext): void {
 		this.context = context;
 	}
 
 	onEnable(): void {
+		this.stopped = false;
 		const context = this.context!;
 
 		// Escuta o evento do módulo de Ciclo de Vida (nota já com nome definitivo)
@@ -88,6 +91,7 @@ export class TemplatesModule implements HubModule {
 			if (!path) return;
 			const file = context.app.vault.getAbstractFileByPath(path);
 			if (file instanceof TFile && file.extension === "md") {
+				if (this.stopped) return;
 				void this.handleNoteCreated(file);
 			}
 		});
@@ -119,6 +123,7 @@ export class TemplatesModule implements HubModule {
 		// foi reprocessado — é a garantia certa de "frontmatter atualizado".
 		const modifyRef = context.app.metadataCache.on("changed", (file) => {
 			if (file instanceof TFile && file.extension === "md") {
+				if (this.stopped) return;
 				void this.handleNoteModified(file);
 			}
 		});
@@ -327,6 +332,7 @@ export class TemplatesModule implements HubModule {
 	}
 
 	onDisable(): void {
+		this.stopped = true;
 		this.detachCreate?.();
 		this.detachModify?.();
 		// Fila de sugestões é estado vivo do listener: desligado o módulo, não
@@ -393,6 +399,7 @@ export class TemplatesModule implements HubModule {
 	 * tratar tudo como texto comum e os metadados somem.
 	 */
 	async applyRuleToNote(file: TFile, rule: FolderTemplateRule): Promise<void> {
+		if (this.stopped) return;
 		const templateBody = this.buildTemplateContent(rule);
 
 		// Conteúdo e frontmatter pertencem à mesma operação serializada. Isso evita
@@ -413,6 +420,7 @@ export class TemplatesModule implements HubModule {
 				fm.origem = file.path;
 			});
 		});
+		if (this.stopped) return;
 		await this.movePendingToCategoryFolder(file);
 		this.context?.bus.emit("templates:note-pending", { path: file.path }, "templates");
 		this.context?.log("Nota criada e marcada como incompleta", { path: file.path });
@@ -463,6 +471,7 @@ export class TemplatesModule implements HubModule {
 			// reentrância — travando qualquer operação futura com a nota.
 		const pathBefore = file.path;
 		this.movingFiles.add(pathBefore);
+		this.movingFiles.add(origem);
 		try {
 			if (action.rewriteStatus) {
 				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
@@ -489,15 +498,18 @@ export class TemplatesModule implements HubModule {
 			}
 		} finally {
 			this.movingFiles.delete(pathBefore);
+			this.movingFiles.delete(origem);
 		}
 	}
 
-	private buildTemplateContent(rule: FolderTemplateRule): string {
+	private buildTemplateContent(rule: FolderTemplateRule, seen = new Set<string>()): string {
+		if (seen.has(rule.id)) throw new Error("Herança circular de templates detectada.");
+		seen.add(rule.id);
 		const settings = this.readSettings();
 		let content = "";
 		if (rule.extendsRuleId) {
 			const parent = settings.rules.find((r) => r.id === rule.extendsRuleId);
-			if (parent) content += this.buildTemplateContent(parent) + "\n";
+			if (parent) content += this.buildTemplateContent(parent, seen) + "\n";
 		}
 		content += rule.templateContent;
 		return content;
@@ -523,12 +535,14 @@ export class TemplatesModule implements HubModule {
 		// porque o TFile.path muda in-place no meio desta operação.
 		const pathBefore = file.path;
 		this.movingFiles.add(pathBefore);
+		this.movingFiles.add(newPath);
 		try {
 			await this.context!.fileWriteQueueRun(pathBefore, () =>
 				this.context!.app.fileManager.renameFile(file, newPath)
 			);
 		} finally {
 			this.movingFiles.delete(pathBefore);
+			this.movingFiles.delete(newPath);
 		}
 	}
 
