@@ -448,7 +448,8 @@ export class TemplatesModule implements HubModule {
 		// de decisão (normalizar status, devolver à origem, evitar loop) está
 		// centralizada em NoteStatus.decidePendingAction — testada em
 		// tests/NoteStatus.test.ts contra o código real.
-		const action = decidePendingAction(fm.status, origem, file.path);
+		const effectiveStatus = fm.concluido === true ? STATUS_COMPLETE_NORMALIZED : fm.status;
+		const action = decidePendingAction(effectiveStatus, origem, file.path);
 		if (!action.rewriteStatus && !action.move) return; // nada a fazer
 
 		// Captura o caminho ANTES de qualquer operação que o mude — o TFile é
