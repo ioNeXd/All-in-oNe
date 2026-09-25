@@ -3,8 +3,6 @@ import type { HubModule, ModuleContext, ModuleManifest } from "../../core/Module
 import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
 import {
 	decidePendingAction,
-	isPendingStatus as isStillPending,
-	STATUS_PENDING_INITIAL,
 	STATUS_COMPLETE_NORMALIZED,
 } from "../../core/NoteStatus";
 import {
@@ -407,13 +405,14 @@ export class TemplatesModule implements HubModule {
 				await this.context!.app.vault.modify(file, merged);
 			}
 
-			await this.context!.app.fileManager.processFrontMatter(file, (fm) => {
-				fm.date = fm.date ?? new Date().toISOString().slice(0, 10);
-				fm.thema = this.deriveThemaFromPath(file.path);
-				fm.concluido = false;
-				fm.status = STATUS_PENDING_INITIAL;
-				fm.origem = file.path;
+			await this.context!.noteMetadata.update(file, {
+				date:
+					(this.context!.app.metadataCache.getFileCache(file)?.frontmatter?.date as string | undefined) ??
+					new Date().toISOString().slice(0, 10),
+				thema: this.deriveThemaFromPath(file.path),
+				origem: file.path,
 			});
+			await this.context!.noteMetadata.setCompletionStatus(file, false, "array");
 		});
 		await this.movePendingToCategoryFolder(file);
 		this.context?.bus.emit("templates:note-pending", { path: file.path }, "templates");
@@ -444,11 +443,7 @@ export class TemplatesModule implements HubModule {
 		// A conclusão é controlada exclusivamente por concluido.
 		// Enquanto for false/ausente, a nota permanece em Pendente com status Incompleto.
 		if (fm.concluido !== true) {
-			if (JSON.stringify(fm.status) !== JSON.stringify(STATUS_PENDING_INITIAL)) {
-				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
-					frontmatter.status = STATUS_PENDING_INITIAL;
-				});
-			}
+			await this.context!.noteMetadata.setCompletionStatus(file, false, "array");
 			return;
 		}
 
@@ -465,9 +460,7 @@ export class TemplatesModule implements HubModule {
 		this.movingFiles.add(pathBefore);
 		try {
 			if (action.rewriteStatus) {
-				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
-					frontmatter.status = STATUS_COMPLETE_NORMALIZED;
-				});
+				await this.context!.noteMetadata.setCompletionStatus(file, true, "array");
 			}
 
 			if (action.move) {

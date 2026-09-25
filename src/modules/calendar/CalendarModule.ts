@@ -672,10 +672,10 @@ export class CalendarModule implements HubModule {
 		if (this.syncingDailyNoteStatus.has(file.path)) return;
 		this.syncingDailyNoteStatus.add(file.path);
 		try {
-			await this.context!.app.fileManager.processFrontMatter(file, (fm) => {
-				const status = fm.concluido === true ? "Completo" : "Incompleto";
-				if (fm.status !== status) fm.status = status;
-			});
+			await this.context!.noteMetadata.setCompletionStatus(
+				file,
+				this.context!.app.metadataCache.getFileCache(file)?.frontmatter?.concluido === true,
+			);
 		} finally {
 			this.syncingDailyNoteStatus.delete(file.path);
 		}
@@ -690,12 +690,12 @@ export class CalendarModule implements HubModule {
 	async createDailyNote(date: Date): Promise<TFile>{
 		const path=this.pathForDate(date),existing=this.context!.app.vault.getAbstractFileByPath(path);if(existing instanceof TFile)return existing;await ensureVaultFolder(this.context!.app,path.substring(0,path.lastIndexOf("/")));
 		const tp=normalizePath(this.context!.getFullSettings().paths.calendarTemplatesFolder+"/calendario/Nota diaria.md"),tf=this.context!.app.vault.getAbstractFileByPath(tp);const body=tf instanceof TFile?stripFrontmatter(await this.context!.app.vault.read(tf)).trim():"";
-		const file=await this.context!.app.vault.create(path,body);await this.context!.app.fileManager.processFrontMatter(file,fm=>{fm.date=dateKey(date);fm.thema=["Calendario",String(date.getFullYear()),MONTH_NAMES[date.getMonth()]];fm.origem=path;fm.concluido=false;fm.status="Incompleto"});await this.context?.bus.emit("calendar:note-created",{path,templateName:"Nota diaria"},"calendar");return file;
+		const file=await this.context!.app.vault.create(path,body);await this.context!.noteMetadata.update(file,{date:dateKey(date),thema:["Calendario",String(date.getFullYear()),MONTH_NAMES[date.getMonth()]],origem:path});await this.context!.noteMetadata.setCompletionStatus(file,false,"scalar");await this.context?.bus.emit("calendar:note-created",{path,templateName:"Nota diaria"},"calendar");return file;
 	}
 	async createTemplateNote(date: Date,template: string): Promise<TFile>{
 		const root=normalizePath(this.context!.getFullSettings().paths.calendarTemplatesFolder),source=this.context!.app.vault.getAbstractFileByPath(normalizePath(root+"/"+template));if(!(source instanceof TFile))throw new Error("Template não encontrado: "+template);
 		const folder=normalizePath(this.context!.getFullSettings().paths.calendarFolder+"/"+date.getFullYear()+"/"+monthFolderName(date.getMonth()));await ensureVaultFolder(this.context!.app,folder);
-		const suffix=firstAvailableTemplateSuffix(this.findNotesForDate(date).map(f=>f.name),source.basename,date),path=normalizePath(folder+"/"+templateNoteFilename(source.basename,date,suffix));const file=await this.context!.app.vault.create(path,stripFrontmatter(await this.context!.app.vault.read(source)).trim());await this.context!.app.fileManager.processFrontMatter(file,fm=>{fm.date=dateKey(date);fm.thema=["Calendario",String(date.getFullYear()),MONTH_NAMES[date.getMonth()]];fm.origem=path;fm.concluido=false});await this.context?.bus.emit("calendar:note-created",{path,templateName:template},"calendar");return file;
+		const suffix=firstAvailableTemplateSuffix(this.findNotesForDate(date).map(f=>f.name),source.basename,date),path=normalizePath(folder+"/"+templateNoteFilename(source.basename,date,suffix));const file=await this.context!.app.vault.create(path,stripFrontmatter(await this.context!.app.vault.read(source)).trim());await this.context!.noteMetadata.update(file,{date:dateKey(date),thema:["Calendario",String(date.getFullYear()),MONTH_NAMES[date.getMonth()]],origem:path});await this.context!.noteMetadata.setCompletionStatus(file,false,"scalar");await this.context?.bus.emit("calendar:note-created",{path,templateName:template},"calendar");return file;
 	}
 	async listAvailableTemplates(): Promise<string[]>{
 		const root=normalizePath(this.context!.getFullSettings().paths.calendarTemplatesFolder),folder=this.context!.app.vault.getAbstractFileByPath(root);if(!(folder instanceof TFolder))return[];const out:string[]=[];const walk=(f:TFolder)=>{for(const child of f.children){if(child instanceof TFolder)walk(child);else if(child instanceof TFile&&child.extension==="md"&&child.basename!=="Nota diaria")out.push(child.path.slice(root.length+1))}};walk(folder);return out.sort((a,b)=>a.localeCompare(b,"pt-BR"));
@@ -791,9 +791,7 @@ export class CalendarModule implements HubModule {
 		}
 		const moved = this.context!.app.vault.getAbstractFileByPath(target);
 		if (moved instanceof TFile) {
-			await this.context!.app.fileManager.processFrontMatter(moved, (fm) => {
-				fm.origem_evento = refId;
-			});
+			await this.context!.noteMetadata.update(moved, { origem_evento: refId });
 			await this.openInBackground(moved);
 		}
 	}
@@ -804,10 +802,10 @@ export class CalendarModule implements HubModule {
 		await ensureVaultFolder(this.context!.app, folder);
 		const path = await uniqueVaultPath(this.context!.app, normalizePath(`${folder}/${name}.md`));
 		const file = await this.context!.app.vault.create(path, "");
-		await this.context!.app.fileManager.processFrontMatter(file, (fm) => {
-			fm.origem_evento = refId;
-			fm.date = new Date().toISOString().slice(0, 10);
-			fm.thema = ["Calendario", "Eventos"];
+		await this.context!.noteMetadata.update(file, {
+			origem_evento: refId,
+			date: new Date().toISOString().slice(0, 10),
+			thema: ["Calendario", "Eventos"],
 		});
 		await this.openInBackground(file);
 		return file;

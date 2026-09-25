@@ -2,6 +2,7 @@ import type { App } from "obsidian";
 import { EventBus } from "./EventBus";
 import { SettingsManager } from "./SettingsManager";
 import { FileWriteQueue } from "./FileWriteQueue";
+import { NoteMetadataService } from "./NoteMetadata";
 import type { HubModule, ModuleContext, ModuleId } from "./ModuleContract";
 import type { HubSettings } from "./types";
 
@@ -26,6 +27,7 @@ export class HubCore {
 	readonly bus = new EventBus();
 	readonly fileWriteQueue = new FileWriteQueue();
 	readonly settings: SettingsManager;
+	readonly noteMetadata: NoteMetadataService;
 
 	private modules = new Map<ModuleId, HubModule>();
 	private enabledModuleIds = new Set<ModuleId>();
@@ -40,6 +42,7 @@ export class HubCore {
 		persist: (data: HubSettings) => Promise<void>
 	) {
 		this.settings = new SettingsManager(load, persist);
+		this.noteMetadata = new NoteMetadataService(this.app);
 		this.bus.setThrottle("file:created", 500);
 	}
 
@@ -95,6 +98,7 @@ export class HubCore {
 		return {
 			app: this.app,
 			bus: this.bus,
+			noteMetadata: this.noteMetadata,
 			getSettings: () => this.settings.getModuleSettings(id),
 			updateSettings: async (patch) => {
 				const issues = await this.settings.updateModuleSettings(id, patch);

@@ -1,6 +1,7 @@
 import type { App } from "obsidian";
 import type { EventBus } from "./EventBus";
 import type { HubSettings } from "./types";
+import type { NoteMetadataService } from "./NoteMetadata";
 
 /**
  * CONTRATO DE MÓDULO
@@ -104,6 +105,8 @@ export interface ModuleManifest {
 export interface ModuleContext {
 	app: App;
 	bus: EventBus;
+	/** Serviço central para leitura/escrita consistente de metadados de notas. */
+	noteMetadata: NoteMetadataService;
 	/** Lê a fatia de configuração deste módulo (settings.modules[moduleId]). */
 	getSettings: <T = Record<string, unknown>>() => T;
 	/**
