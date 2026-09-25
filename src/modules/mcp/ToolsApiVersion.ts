@@ -24,7 +24,7 @@ export const TOOLS_API_VERSION = "1.0.0";
 export interface ToolsApiNegotiation {
 	/** true = handshake segue; false = cliente pediu major além do suportado. */
 	compatible: boolean;
-	/** Versão acordada: a pedida (compatível) ou a suportada (incompatível). */
+	/** Versão efetivamente acordada após a negociação. */
 	version: string;
 	/** Motivo da rejeição — texto em português para o erro JSON-RPC. */
 	reason?: string;
@@ -76,8 +76,9 @@ export function negotiateToolsApiVersion(
 }
 
 function parseMajor(version: string): number | undefined {
-	// Formato completo exigido: major.minor[.patch] numérico — "1.x.0" ou "v1" não passam.
-	if (!/^\d+\.\d+(\.\d+)?$/.test(version)) return undefined;
+	// SemVer estrito para a forma numérica usada na negociação: major.minor.patch.
+	// Leading zeroes e formas incompletas ("1.0", "01.0.0", "v1.0.0") não passam.
+	if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) return undefined;
 	const major = Number.parseInt(version.split(".")[0] ?? "", 10);
 	return Number.isFinite(major) && major >= 0 ? major : undefined;
 }
