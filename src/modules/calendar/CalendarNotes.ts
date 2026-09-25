@@ -9,9 +9,10 @@ export function dailyNoteFilename(date: Date): string {
 }
 
 export function templateNoteFilename(templateName: string, date: Date, suffix = 1): string {
+	if (!Number.isInteger(suffix) || suffix < 1) throw new RangeError("O sufixo do template deve ser um inteiro >= 1");
 	const base = sanitizeTemplateName(templateName);
 	const key = dateKey(date);
-	return suffix <= 1 ? base + "-" + key + ".md" : base + "-" + suffix + "-" + key + ".md";
+	return suffix === 1 ? base + "-" + key + ".md" : base + "-" + suffix + "-" + key + ".md";
 }
 
 export function sanitizeTemplateName(name: string): string {
