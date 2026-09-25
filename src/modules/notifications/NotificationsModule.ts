@@ -561,9 +561,13 @@ export class NotificationsModule implements HubModule {
 		// usuário vê na hora; só o DISCO é que é coalescido. A fila aplica o
 		// teto internamente ao confirmar (o flush grava no máximo MAX_HISTORY).
 		this.pendingNotifications.enqueue(entry);
-		if (!this.flushTimer) {
-			this.flushTimer = setTimeout(() => void this.flushNow(), FLUSH_INTERVAL_MS);
-		}
+		this.scheduleFlush();
+	}
+
+	private scheduleFlush(): void {
+		if (this.flushTimer || this.pendingNotifications.size === 0) return;
+		this.flushTimer = setTimeout(() => void this.flushNow(), FLUSH_INTERVAL_MS);
+	}
 	}
 
 	/**
@@ -593,8 +597,10 @@ export class NotificationsModule implements HubModule {
 		} catch {
 			// Save falhou: libera o lote para um retry real. Sem isso, os ids
 			// permaneceriam marcados como em voo e nenhum drain futuro poderia
-			// recolocá-los no lote.
+			// recolocá-los no lote. O retry precisa ser reagendado aqui: neste
+			// ponto o timer que iniciou este flush já foi consumido.
 			drain.release();
+			this.scheduleFlush();
 		}
 	}
 
