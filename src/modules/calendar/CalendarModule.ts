@@ -45,9 +45,7 @@ const WEEKDAY_LABELS = ["D", "S", "T", "Q", "Q", "S", "S"];
  * `context.getFullSettings().paths`.
  *
  * Três visões: mês (grade navegável), semana e agenda (lista dos próximos
- * dias). A grade indica visualmente quais dias já têm nota, quais têm nota
- * pendente (cruzamento com o módulo de Templates via frontmatter `status`)
- * e quais têm eventos marcados. O Calendário não interpreta `status`/`concluido`; pendências são responsabilidade de outro módulo.
+ * dias). A grade indica visualmente quais dias já têm nota e quais têm eventos marcados. O Calendário sincroniza `concluido`/`status` para o frontmatter canônico; a regra de conclusão continua no módulo responsável.
  */
 export class CalendarModule implements HubModule {
 	readonly manifest: ModuleManifest = {
@@ -617,7 +615,7 @@ export class CalendarModule implements HubModule {
 		const gen = this.generation;
 		for(const event of events)await this.context?.bus.emit("calendar:event-fired",{event},"calendar");const reminders=events.filter(e=>e.reminder);
 		if(reminders.length){new ReminderModal(this.context!.app,reminders,refId=>this.openNoteByRef(refId),event=>this.editEvent(event),this.readSettings().autoFocusOnReminder).open();void playReminderChime(this.audioUnlocker)}
-		for(const event of events.filter(e=>!e.reminder&&e.noteRefId))await this.openNoteByRef(event.noteRefId!);const settings=this.readSettings(),ids=new Set(events.map(e=>e.id));const next=settings.events.filter(e=>e.recurrence!=="once"||!ids.has(e.id)).map(e=>ids.has(e.id)?{...e,lastFiredYear:now.getFullYear()}:e);await this.context?.updateSettings({events:next});this.scheduleNextCheck();
+		for(const event of events.filter(e=>!e.reminder&&e.noteRefId))await this.openNoteByRef(event.noteRefId!);const settings=this.readSettings(),ids=new Set(events.map(e=>e.id));const next=settings.events.filter(e=>e.recurrence!=="once"||!ids.has(e.id)).map(e=>ids.has(e.id)?{...e,lastFiredYear:now.getFullYear()}:e);await this.context?.updateSettings({events:next});if(this.generation!==gen)return;this.scheduleNextCheck();
 	}
 
 	private pathForDate(date: Date): string {
