@@ -165,6 +165,7 @@ export class FileLifecycleModule implements HubModule {
 
 	/** Pergunta o nome logo na criação e só então libera o resto do plugin. */
 	private async handleCreate(file: TFile): Promise<void> {
+		if (this.stopped) return;
 		const settings = this.readSettings();
 
 		if (!settings.askNameOnCreate || !isUntitled(file.basename)) {
@@ -220,7 +221,9 @@ export class FileLifecycleModule implements HubModule {
 	 * para notas em vez de emitir cedo demais com "Untitled").
 	 */
 	private async announceReady(file: TFile): Promise<void> {
+		if (this.stopped) return;
 		await this.context?.bus.emit("lifecycle:note-ready", { path: file.path }, "filelifecycle");
+		if (this.stopped) return;
 		await this.context?.bus.emit("file:created", { path: file.path }, "filelifecycle");
 	}
 
@@ -235,6 +238,7 @@ export class FileLifecycleModule implements HubModule {
 		if (this.stopped || !name || name === file.basename) return;
 
 		const doRename = async () => {
+			if (this.stopped) return;
 			const folder = file.path.substring(0, file.path.lastIndexOf("/"));
 			const target = await uniqueVaultPath(this.context!.app, 
 				normalizePath(`${folder ? folder + "/" : ""}${name}.md`)
