@@ -92,8 +92,8 @@ describe("OnboardingModal — regressão de save bloqueado", () => {
 
 		expect(capturedNotices).toHaveLength(0);
 		expect(core.settings.save).toHaveBeenCalledTimes(1);
-		// Criação recursiva segmento a segmento: 2 segmentos no caminho aninhado.
-		expect(core.app.vault.createFolder).toHaveBeenCalledTimes(2);
+		// A nova configuração inicial cria todas as pastas configuradas, segmento a segmento.
+		expect(core.app.vault.createFolder).toHaveBeenCalledTimes(9);
 	});
 
 	it("conflito com case/trailing slash diferentes também mostra o erro ao usuário", async () => {
