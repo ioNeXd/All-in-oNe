@@ -40,9 +40,9 @@ export class LobbyRenderer {
 	private activeSection: Section = "geral";
 	private searchQuery = "";
 	/** Drag-and-drop da lista de módulos: nulo fora de um arrasto. */
-	private drag: DragState | null = null;\n\tprivate detachCalendarOpen?: () => void;
+	private drag: DragState | null = null;\n	private detachCalendarOpen?: () => void;
 
-	constructor(private app: App, private core: HubCore, private containerEl: HTMLElement) {\n\t\tthis.detachCalendarOpen = this.core.bus.on("calendar:open-main", "lobby-calendar", () => { this.activeSection = "calendar"; this.render(); });\n\t}\n\n\tdestroy(): void { this.detachCalendarOpen?.(); this.detachCalendarOpen = undefined; }
+	constructor(private app: App, private core: HubCore, private containerEl: HTMLElement) {\n		this.detachCalendarOpen = this.core.bus.on("calendar:open-main", "lobby-calendar", () => { this.activeSection = "calendar"; this.render(); });\n	}\n\n	destroy(): void { this.detachCalendarOpen?.(); this.detachCalendarOpen = undefined; }
 
 	render(): void {
 		const container = this.containerEl;
