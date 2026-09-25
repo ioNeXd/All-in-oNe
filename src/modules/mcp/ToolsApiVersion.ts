@@ -49,7 +49,14 @@ export function negotiateToolsApiVersion(
 		};
 	}
 
-	const supportedMajor = parseMajor(supported) ?? 0;
+	const supportedMajor = parseMajor(supported);
+	if (supportedMajor === undefined) {
+		return {
+			compatible: false,
+			version: supported,
+			reason: `Versão da API de ferramentas do servidor em formato inválido: "${supported}". Formato esperado: major.minor.patch.`,
+		};
+	}
 	if (requestedMajor > supportedMajor) {
 		return {
 			compatible: false,
@@ -61,9 +68,11 @@ export function negotiateToolsApiVersion(
 		};
 	}
 
-	// Major menor ou igual: compatível. A versão acordada é a pedida (o
-	// servidor se compromete a não quebrar dentro do mesmo major).
-	return { compatible: true, version: requested };
+	// Major menor: o servidor pode falar a versão pedida por compatibilidade
+	// retroativa. No mesmo major, porém, nunca anuncie uma minor/patch que o
+	// servidor não suporta: a versão acordada é a versão efetivamente suportada.
+	const negotiatedVersion = requestedMajor === supportedMajor ? supported : requested;
+	return { compatible: true, version: negotiatedVersion };
 }
 
 function parseMajor(version: string): number | undefined {
