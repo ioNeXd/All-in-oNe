@@ -129,7 +129,9 @@ export class CalendarModule implements HubModule {
 			if (!(file instanceof TFile) || file.extension !== "md") return;
 			const fm = this.context!.app.metadataCache.getFileCache(file)?.frontmatter;
 			if (!fm || typeof fm.date !== "string") return;
-			if (!isCalendarNoteForDate(file, new Date(fm.date))) return;
+			const noteDate = new Date(fm.date);
+			if (Number.isNaN(noteDate.getTime())) return;
+			if (!isCalendarNoteForDate(file, noteDate)) return;
 			const completed = fm.concluido === true;
 			const status = Array.isArray(fm.status) ? fm.status : [fm.status];
 			const hasExpected = status.length === 1 && String(status[0]).toLowerCase() === (completed ? "completo" : "incompleto");
