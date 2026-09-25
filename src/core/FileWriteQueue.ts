@@ -40,8 +40,8 @@ export class FileWriteQueue {
 	/**
 	 * Serializa uma operação que toca múltiplos paths (ex.: rename A→B).
 	 *
-	 * CLAIM-FIRST: o Map é atualizado ANTES de ler filas existentes.
-	 * Isso garante que chamadas concorrentes veem os claims e se encadeiam.
+	 * CHAIN + PUBLISH: primeiro monta a cadeia a partir das filas existentes;
+	 * depois publica os claims sem qualquer ponto de suspensão assíncrona.
 	 *
 	 * Dedup + sort: [B, A] e [A, B] produzem a mesma ordem → sem deadlock.
 	 */
