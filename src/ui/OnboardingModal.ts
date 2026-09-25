@@ -48,7 +48,6 @@ export class OnboardingModal extends Modal {
 
 	private async finish(completed: boolean): Promise<void> {
 		const settings = this.core.settings.get();
-		const currentModules = settings.modules ?? {};
 		const next = {
 			...settings,
 			onboardingCompleted: completed,
