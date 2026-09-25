@@ -65,7 +65,6 @@ describe("AudioUnlocker — destravamento por gesto", () => {
 		await Promise.resolve(); // await do resume()
 		expect(unlocker.isUnlocked()).toBe(true);
 		expect(ctx.resumeCalls).toBe(1);
-		expect(unlocker.getRunningContext()).toBeUndefined ?? undefined; // saneamento: linha seguinte é a real
 		expect(unlocker.getRunningContext()).toBe(ctx);
 	});
 
