@@ -441,13 +441,19 @@ export class TemplatesModule implements HubModule {
 		const origem = typeof fm.origem === "string" ? fm.origem : undefined;
 		if (!origem) return;
 
-		if (fm.concluido !== true && isStillPending(fm.status)) return; // ainda incompleta — nada a fazer
+		if (fm.concluido === false) {
+			const status = Array.isArray(fm.status) ? fm.status : [fm.status];
+			const alreadyIncomplete = status.length === 1 && String(status[0]).trim().toLowerCase() === "incompleto";
+			if (!alreadyIncomplete) {
+				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
+					frontmatter.status = STATUS_PENDING_INITIAL;
+				});
+			}
+			return;
+		}
 
-		// Chegou aqui: "Pendente" não está mais presente (usuário removeu o
-		// chip, apagou o campo inteiro, ou escreveu "Completo" à mão). A regra
-		// de decisão (normalizar status, devolver à origem, evitar loop) está
-		// centralizada em NoteStatus.decidePendingAction — testada em
-		// tests/NoteStatus.test.ts contra o código real.
+		// A conclusão é a fonte de verdade: quando concluido é true, a nota deve
+		// ser normalizada para completo e devolvida à origem.
 		const effectiveStatus = fm.concluido === true ? STATUS_COMPLETE_NORMALIZED : fm.status;
 		const action = decidePendingAction(effectiveStatus, origem, file.path);
 		if (!action.rewriteStatus && !action.move) return; // nada a fazer
