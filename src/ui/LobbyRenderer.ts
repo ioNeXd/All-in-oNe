@@ -40,9 +40,14 @@ export class LobbyRenderer {
 	private activeSection: Section = "geral";
 	private searchQuery = "";
 	/** Drag-and-drop da lista de módulos: nulo fora de um arrasto. */
-	private drag: DragState | null = null;\n	private detachCalendarOpen?: () => void;
+	private drag: DragState | null = null;
+	private detachCalendarOpen?: () => void;
 
-	constructor(private app: App, private core: HubCore, private containerEl: HTMLElement) {\n		this.detachCalendarOpen = this.core.bus.on("calendar:open-main", "lobby-calendar", () => { this.activeSection = "calendar"; this.render(); });\n	}\n\n	destroy(): void { this.detachCalendarOpen?.(); this.detachCalendarOpen = undefined; }
+	constructor(private app: App, private core: HubCore, private containerEl: HTMLElement) {
+		this.detachCalendarOpen = this.core.bus.on("calendar:open-main", "lobby-calendar", () => { this.activeSection = "calendar"; this.render(); });
+	}
+
+	destroy(): void { this.detachCalendarOpen?.(); this.detachCalendarOpen = undefined; }
 
 	render(): void {
 		const container = this.containerEl;
@@ -336,7 +341,8 @@ export class LobbyRenderer {
 						});
 						const blocking = issues.filter((i) => i.level === "error");
 						if (blocking.length > 0) {
-							new Notice(blocking.map((i) => i.message).join("\n"), 8000);
+							new Notice(blocking.map((i) => i.message).join("
+"), 8000);
 							return;
 						}
 						new Notice("Caminho salvo.");
