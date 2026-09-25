@@ -38,11 +38,9 @@ src/
       HistoryFilter.ts   ← regra pura: filtro combinado tipo + texto (testada)
 
   ui/
-    LobbyRenderer.ts     ← toda a UI do Lobby (cascas finas: LobbyView/LobbyModal)
+    LobbyRenderer.ts     ← toda a UI do Lobby (renderização e interação)
+    LobbyView.ts         ← view do painel central do plugin
     OnboardingModal.ts   ← assistente de primeira execução
-    ResetModal.ts        ← modal "Restaurar tudo" (3 níveis)
-    OpenModeModal.ts     ← aba/janela/perguntar sempre
-    ThemePreviewModal.ts ← preview de tema do Estilos
     FilterSuggest.ts     ← campo de texto com sugestão filtrada (reutilizável)
     interactiveRows.ts   ← linha clicável acessível (teclado/ARIA) reutilizável
     lobbyOrder.ts        ← regras puras da ordem de módulos no Lobby (testadas)
