@@ -38,6 +38,8 @@ import { CalendarSidebarView, CALENDAR_SIDEBAR_VIEW_TYPE } from "./modules/calen
 export default class IoneHubPlugin extends Plugin {
 	core!: HubCore;
 	private vaultBridge?: VaultEventBridge;
+	private calendarRibbonIcon?: HTMLElement;
+	private removeCalendarUiListener?: () => void;
 
 	async onload(): Promise<void> {
 		this.core = new HubCore(
@@ -108,6 +110,26 @@ export default class IoneHubPlugin extends Plugin {
 			await this.core.registerModule(module);
 		}
 
+		this.removeCalendarUiListener = this.core.bus.on(
+			"core:module-enabled",
+			"core-ui",
+			(event) => {
+				if ((event.payload as { moduleId?: string }).moduleId === "calendar") {
+					this.showCalendarRibbonIcon();
+				}
+			}
+		);
+		this.core.bus.on(
+			"core:module-disabled",
+			"core-ui",
+			(event) => {
+				if ((event.payload as { moduleId?: string }).moduleId === "calendar") {
+					this.hideCalendarRibbonIcon();
+				}
+			}
+		);
+		if (this.core.isModuleEnabled("calendar")) this.showCalendarRibbonIcon();
+
 		this.addRibbonIcon("layout-dashboard", "Abrir All iₙ oNe", () => {
 			void this.openLobby();
 		});
@@ -127,8 +149,36 @@ export default class IoneHubPlugin extends Plugin {
 	}
 
 	async onunload(): Promise<void> {
+		this.removeCalendarUiListener?.();
+		this.removeCalendarUiListener = undefined;
+		this.hideCalendarRibbonIcon();
 		this.vaultBridge?.stop();
 		await this.core.disableAll();
+	}
+
+	private showCalendarRibbonIcon(): void {
+		if (this.calendarRibbonIcon) return;
+		this.calendarRibbonIcon = this.addRibbonIcon("calendar", "Abrir Calendário", () => {
+			void this.openCalendarSidebar();
+		});
+	}
+
+	private hideCalendarRibbonIcon(): void {
+		this.calendarRibbonIcon?.remove();
+		this.calendarRibbonIcon = undefined;
+	}
+
+	private async openCalendarSidebar(): Promise<void> {
+		if (!this.core.isModuleEnabled("calendar")) return;
+		const existing = this.app.workspace.getLeavesOfType(CALENDAR_SIDEBAR_VIEW_TYPE)[0];
+		if (existing) {
+			this.app.workspace.revealLeaf(existing);
+			return;
+		}
+		const leaf = this.app.workspace.getRightLeaf(false);
+		if (!leaf) return;
+		await leaf.setViewState({ type: CALENDAR_SIDEBAR_VIEW_TYPE, active: true });
+		this.app.workspace.revealLeaf(leaf);
 	}
 
 	private async openLobby(): Promise<void> {
