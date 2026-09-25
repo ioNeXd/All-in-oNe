@@ -203,6 +203,7 @@ export class CalendarModule implements HubModule {
 	 * só a UI de edição é que vive dentro do módulo.
 	 */
 	private renderSettingsTab(container: HTMLElement): void {
+		const settings = this.readSettings();
 		const paths = this.context!.getFullSettings().paths;
 
 		container.createEl("h3", { text: "Pastas" });
