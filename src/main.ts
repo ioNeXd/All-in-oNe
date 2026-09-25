@@ -78,7 +78,7 @@ export default class IoneHubPlugin extends Plugin {
 				if (!this.calendarRibbon) {
 					this.calendarRibbon = this.addRibbonIcon("calendar", "Abrir Calendário", () => {
 						const leaf = this.app.workspace.getLeavesOfType(CALENDAR_SIDEBAR_VIEW_TYPE)[0];
-						if (leaf) this.app.workspace.revealLeaf(leaf);
+						if (leaf) void this.app.workspace.revealLeaf(leaf);
 						else {
 							const target = this.app.workspace.getLeaf("tab");
 							void target.setViewState({ type: CALENDAR_SIDEBAR_VIEW_TYPE, active: true });
@@ -90,14 +90,6 @@ export default class IoneHubPlugin extends Plugin {
 				this.calendarRibbon = undefined;
 			}
 		};
-		syncCalendarRibbon();
-		const enabledRef = this.core.bus.on("core:module-enabled", "main-calendar-ribbon", ({ moduleId }) => {
-			if (moduleId === "calendar") syncCalendarRibbon();
-		});
-		const disabledRef = this.core.bus.on("core:module-disabled", "main-calendar-ribbon", ({ moduleId }) => {
-			if (moduleId === "calendar") syncCalendarRibbon();
-		});
-		this.calendarRibbonUnsub = () => { enabledRef(); disabledRef(); };
 
 
 		// Traduz eventos nativos do vault para o barramento interno. Fica no
