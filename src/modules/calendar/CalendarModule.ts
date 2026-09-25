@@ -616,9 +616,9 @@ export class CalendarModule implements HubModule {
 	}
 	private async fireEvents(events: CalendarEvent[],now: Date): Promise<void>{
 		const gen = this.generation;
-		for(const event of events)await this.context?.bus.emit("calendar:event-fired",{event},"calendar");const reminders=events.filter(e=>e.reminder);
+		for(const event of events)await this.context?.bus.emit("calendar:event-fired",{event},"calendar");if(this.generation!==gen)return;const reminders=events.filter(e=>e.reminder);
 		if(reminders.length){new ReminderModal(this.context!.app,reminders,refId=>this.openNoteByRef(refId),event=>this.editEvent(event),this.readSettings().autoFocusOnReminder).open();void playReminderChime(this.audioUnlocker)}
-		for(const event of events.filter(e=>!e.reminder&&e.noteRefId))await this.openNoteByRef(event.noteRefId!);const settings=this.readSettings(),ids=new Set(events.map(e=>e.id));const next=settings.events.filter(e=>e.recurrence!=="once"||!ids.has(e.id)).map(e=>ids.has(e.id)?{...e,lastFiredYear:now.getFullYear()}:e);await this.context?.updateSettings({events:next});if(this.generation!==gen)return;this.scheduleNextCheck();
+		for(const event of events.filter(e=>!e.reminder&&e.noteRefId))await this.openNoteByRef(event.noteRefId!);if(this.generation!==gen)return;const settings=this.readSettings(),ids=new Set(events.map(e=>e.id));const next=settings.events.filter(e=>e.recurrence!=="once"||!ids.has(e.id)).map(e=>ids.has(e.id)?{...e,lastFiredYear:now.getFullYear()}:e);await this.context?.updateSettings({events:next});if(this.generation!==gen)return;this.scheduleNextCheck();
 	}
 
 	private pathForDate(date: Date): string {
