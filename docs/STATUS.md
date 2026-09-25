@@ -159,10 +159,9 @@ dispensada, mensagens de erro honestas.
 
 **Funciona:** regras por pasta com herança e derivação automática de
 `thema` pela hierarquia, template aplicado sem quebrar o frontmatter,
-`status` como lista clicável `["Pendente","Completo"]` (com regra
-centralizada em `NoteStatus.ts`, testada contra o código real), movimentação
-para pasta Pendente por categoria com fallback, retorno automático ao
-completar, proteção anti-loop, histórico de versões de regras, painel no
+`status` como lista clicável `["Incompleto"]` enquanto `concluido: false` e `["Completo"]` quando concluída, com metadados escritos pelo `NoteMetadataService` do core, movimentação
+para a pasta física `Pendente` por categoria com fallback, retorno automático à
+origem ao concluir, proteção anti-loop, histórico de versões de regras, painel no
 Lobby para criar, editar e remover regras (formulário único de criação e
 edição, com dropdown "Herdar de (regra pai)" gravando `extendsRuleId` e
 trava contra ciclos de herança via `wouldCreateInheritanceLoop`), e seção
