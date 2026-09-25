@@ -22,6 +22,15 @@ export function isNormalizedComplete(status: unknown): boolean {
 	return Array.isArray(status) && status.length === 1 && String(status[0]).trim().toLowerCase() === "completo";
 }
 
+/** Considera pendente uma nota ainda não concluída; aceita o formato legado para migração gradual. */
+export function isPendingStatus(status: unknown): boolean {
+	const values = Array.isArray(status) ? status : [status];
+	return values.some((value) => {
+		const normalized = String(value ?? "").trim().toLowerCase();
+		return normalized === "incompleto" || normalized === "pendente";
+	});
+}
+
 /** Compatibilidade temporária para consumidores antigos. */
 export const decidePendingAction = (status: unknown, origem: string | undefined, currentPath: string): CompletionDecision => {
 	void status;
