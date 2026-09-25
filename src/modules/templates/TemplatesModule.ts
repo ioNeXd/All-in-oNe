@@ -410,6 +410,7 @@ export class TemplatesModule implements HubModule {
 			await this.context!.app.fileManager.processFrontMatter(file, (fm) => {
 				fm.date = fm.date ?? new Date().toISOString().slice(0, 10);
 				fm.thema = this.deriveThemaFromPath(file.path);
+				fm.concluido = false;
 				fm.status = STATUS_PENDING_INITIAL;
 				fm.origem = file.path;
 			});
@@ -440,15 +441,20 @@ export class TemplatesModule implements HubModule {
 		const origem = typeof fm.origem === "string" ? fm.origem : undefined;
 		if (!origem) return;
 
-		if (isStillPending(fm.status)) return; // ainda tem o chip "Pendente" — nada a fazer
+		// A conclusão é controlada exclusivamente por concluido.
+		// Enquanto for false/ausente, a nota permanece em Pendente com status Incompleto.
+		if (fm.concluido !== true) {
+			if (JSON.stringify(fm.status) !== JSON.stringify(STATUS_PENDING_INITIAL)) {
+				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
+					frontmatter.status = STATUS_PENDING_INITIAL;
+				});
+			}
+			return;
+		}
 
-		// Chegou aqui: "Pendente" não está mais presente (usuário removeu o
-		// chip, apagou o campo inteiro, ou escreveu "Completo" à mão). A regra
-		// de decisão (normalizar status, devolver à origem, evitar loop) está
-		// centralizada em NoteStatus.decidePendingAction — testada em
-		// tests/NoteStatus.test.ts contra o código real.
-		const action = decidePendingAction(fm.status, origem, file.path);
-		if (!action.rewriteStatus && !action.move) return; // nada a fazer
+		// concluido: true é o único gatilho para concluir e devolver a nota à origem.
+		const action = decidePendingAction(STATUS_COMPLETE_NORMALIZED, origem, file.path);
+		if (!action.rewriteStatus && !action.move) return;
 
 		// Captura o caminho ANTES de qualquer operação que o mude — o TFile é
 		// mutado in-place pelo Obsidian no rename (mesma armadilha da v0.4.0,
