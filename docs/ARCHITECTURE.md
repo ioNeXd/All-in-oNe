@@ -192,7 +192,7 @@ módulos continuam funcionando normalmente.
 
 Como todos os caminhos são configuráveis pelo usuário (decisão de design),
 existe risco real de dois módulos apontarem, sem querer, para a mesma pasta
-(ex.: pasta de templates do calendário = pasta de Pendente do módulo de
+(ex.: pasta de templates do calendário = pasta de notas incompletas do módulo de
 Templates). Centralizar essa checagem em `SettingsManager.validate()`
 garante que ela rode toda vez que QUALQUER configuração for salva, de
 qualquer módulo, sem cada módulo precisar reimplementar essa lógica. A
