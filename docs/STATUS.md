@@ -6,7 +6,7 @@ A v0.1.0 é a linha de base (v0.1.1 corrige 15 achados da primeira revisão
 externa; v0.2.0 fecha as 8 partes do plano pós-auditoria — anexos do MCP,
 .ics no Calendário, assinatura GPG + BRAT no Auto-update, realce de CSS,
 filtros de Notificações/Histórico, teclado/drag-and-drop no Lobby — ver
-CHANGELOG): a arquitetura está completa e auditada, cada
+CHANGELOG): a arquitetura está documentada, cada
 módulo está funcional na sua função principal, e as lacunas conhecidas estão
 listadas aqui sem rodeio.
 
