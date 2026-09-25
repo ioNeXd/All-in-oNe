@@ -416,16 +416,15 @@ export class TemplatesModule implements HubModule {
 		});
 		await this.movePendingToCategoryFolder(file);
 		this.context?.bus.emit("templates:note-pending", { path: file.path }, "templates");
-		this.context?.log("Nota criada e marcada como Pendente", { path: file.path });
+		this.context?.log("Nota criada e marcada como Incompleto", { path: file.path });
 	}
 
 	/**
 	 * Devolve a nota ao lugar de origem quando ela deixa de estar pendente.
 	 *
 	 * Regras (conforme definido no design):
-	 *   - `status` removido  → vira `completo` e a nota volta para `origem`.
-	 *   - `status: completo` → volta para `origem`.
-	 *   - `status: pendente` → não faz nada.
+	 *   - `concluido: false` → status `Incompleto`, permanece pendente.
+	 *   - `concluido: true` → status `Completo`, volta para `origem` e remove `origem`.
 	 *
 	 * O `movingFiles` evita reentrância: mover a nota dispara outro evento de
 	 * modify, que entraria aqui de novo no meio da operação anterior.
@@ -472,9 +471,7 @@ export class TemplatesModule implements HubModule {
 					this.context!.app.fileManager.renameFile(file, finalPath)
 				);
 
-				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
-					delete frontmatter.origem;
-				});
+				await this.context!.noteMetadata.remove(file, ["origem"]);
 
 				this.context?.bus.emit("templates:note-restored", { path: finalPath }, "templates");
 				new Notice(`Nota completada e devolvida para ${finalPath}`);
