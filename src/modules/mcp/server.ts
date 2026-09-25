@@ -644,7 +644,6 @@ function validateToolArgs(
 				return `Campo obrigatório ausente: "${field}".`;
 		}
 	}
-	}
 
 	// Tipo por campo (se declarado no schema).
 	for (const [field, prop] of Object.entries(schema.properties)) {
