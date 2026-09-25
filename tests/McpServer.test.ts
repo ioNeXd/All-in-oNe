@@ -208,7 +208,7 @@ describe("MCP — contrato HTTP (Content-Type e Accept)", () => {
 		expect(res.status).toBe(200);
 	});
 
-	it("aceita Accept \*/* ( curinga padrão)", async () => {
+	it("aceita Accept */* (curinga padrão)", async () => {
 		const h = await start();
 		const res = await fetch(`http://127.0.0.1:${h.port}`, {
 			method: "POST",
