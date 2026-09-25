@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { moveModuleId, orderedModules } from "../src/ui/lobbyOrder";
+import { moveBefore, moveModuleId, orderedModules } from "../src/ui/lobbyOrder";
 
 /**
  * Regras puras da ordem dos módulos no Lobby (drag-and-drop e Alt+↑/↓).
@@ -42,6 +42,11 @@ describe("lobbyOrder — ordem dos módulos", () => {
 	it("move sobre uma ordem salva existente (não zera a preferência)", () => {
 		const result = moveModuleId(["c", "a", "b", "d"], "a", -1, NATURAL);
 		expect(result).toEqual(["a", "c", "b", "d"]);
+	});
+
+	it("moveBefore coloca a origem imediatamente antes do destino nos dois sentidos", () => {
+		expect(moveBefore(NATURAL, "a", "c")).toEqual(["b", "a", "c", "d"]);
+		expect(moveBefore(NATURAL, "c", "a")).toEqual(["c", "a", "b", "d"]);
 	});
 
 	it("normaliza ordem defasada ao mover: novo entra no fim, removido sai", () => {
