@@ -29,6 +29,15 @@ const migrations: Record<number, (old: HubSettings) => HubSettings> = {
 		void _p;
 		return { ...rest, schemaVersion: 2 };
 	},
+	2: (old) => {
+		const paths = { ...old.paths };
+		if (paths.calendarFolder === "Calendario") paths.calendarFolder = "01 - Calendario";
+		if (paths.calendarTemplatesFolder === "Calendario/templates") paths.calendarTemplatesFolder = "99 - Sistema/Templates/Calendário";
+		if (!paths.inboxFolder) paths.inboxFolder = "00 - Inbox";
+		if (!paths.systemFolder) paths.systemFolder = "99 - Sistema";
+		if (!paths.filesFolder) paths.filesFolder = "99 - Sistema/arquivos";
+		return { ...old, schemaVersion: 3, paths };
+	},
 };
 
 const INSTANCE_ID = randomId();
