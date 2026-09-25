@@ -1,5 +1,4 @@
 import type { ModuleId } from "./ModuleContract";
-import { DEFAULT_PATHS } from "./PathResolver";
 
 /** Nível de log de uma entrada de Histórico. */
 export type HistoryEventType =
@@ -68,6 +67,15 @@ export interface HubSettings {
 	};
 }
 
+export const DEFAULT_PATHS = {
+	inboxFolder: "00 - Inbox",
+	calendarFolder: "01 - Calendario",
+	systemFolder: "99 - Sistema",
+	calendarTemplatesFolder: "99 - Sistema/Templates/Calendário",
+	eventNotesFolder: "01 - Calendario/Notas-Eventos",
+	filesFolder: "99 - Sistema/arquivos",
+} as const;
+
 export const SETTINGS_SCHEMA_VERSION = 2;
 
 export function createDefaultSettings(): HubSettings {
@@ -95,6 +103,7 @@ export function createDefaultSettings(): HubSettings {
 			inboxFolder: DEFAULT_PATHS.inboxFolder,
 			systemFolder: DEFAULT_PATHS.systemFolder,
 			filesFolder: DEFAULT_PATHS.filesFolder,
+			eventNotesFolder: DEFAULT_PATHS.eventNotesFolder,
 		},
 		sync: {
 			lastWrittenBy: randomId(),
