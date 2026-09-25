@@ -28,12 +28,21 @@ describe("validateMcpDraft — validação do formulário do MCP (código real)"
 		expect(validateMcpDraft({ port: 8080.5, rateLimitPerMinute: 10 })).toHaveLength(1);
 	});
 
+	it("rejeita porta não finita (NaN/Infinity)", () => {
+		expect(validateMcpDraft({ port: Number.NaN, rateLimitPerMinute: 10 })).toHaveLength(1);
+		expect(validateMcpDraft({ port: Infinity, rateLimitPerMinute: 10 })).toHaveLength(1);
+	});
+
 	it("aceita uma porta válida", () => {
 		expect(validateMcpDraft({ port: 27931, rateLimitPerMinute: 120 })).toHaveLength(0);
 	});
 
 	it("rejeita limite de ações menor que 1", () => {
 		expect(validateMcpDraft({ port: 27931, rateLimitPerMinute: 0 })).toHaveLength(1);
+	});
+
+	it("rejeita limite de ações fracionário", () => {
+		expect(validateMcpDraft({ port: 27931, rateLimitPerMinute: 1.5 })).toHaveLength(1);
 	});
 
 	it("rejeita limite de ações não finito (NaN/Infinity)", () => {
