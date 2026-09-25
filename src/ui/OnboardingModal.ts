@@ -73,8 +73,14 @@ export class OnboardingModal extends Modal {
 			new Notice(blocking.map((i) => i.message).join("\n"), 8000);
 			return;
 		}
-		for (const path of [this.inboxFolder, this.calendarFolder, this.systemFolder, this.filesFolder, this.calendarTemplatesFolder]) {
-			await ensureVaultFolder(this.core.app, path);
+		try {
+			for (const path of [this.inboxFolder, this.calendarFolder, this.systemFolder, this.filesFolder, this.calendarTemplatesFolder]) {
+				await ensureVaultFolder(this.core.app, path);
+			}
+		} catch (err) {
+			console.error("[All iₙ oNe] Onboarding: falha ao criar pastas iniciais:", err);
+			new Notice("A configuração foi salva, mas não foi possível criar todas as pastas iniciais. Tente novamente.", 8000);
+			return;
 		}
 		this.close();
 	}
