@@ -38,8 +38,8 @@ export class OnboardingModal extends Modal {
 	private renderConfig():void{
 		this.contentEl.createEl("h2",{text:"Configuração inicial"});this.contentEl.createEl("p",{text:"Revise os caminhos. Nada será criado até confirmar."});
 		const fields:Array<["calendarFolder"|"calendarTemplatesFolder"|"inboxFolder"|"systemFolder"|"filesFolder",string,string]> = [
-			["calendarFolder","Calendário","01 - Calendario"],["calendarTemplatesFolder","Templates","99 - Sistema/Templates/Calendário"],["inboxFolder","Inbox","00 - Inbox"],["systemFolder","Sistema","99 - Sistema"],["filesFolder","Arquivos","99 - Sistema/arquivos"]];
-		for(const [key,label,placeholder] of fields)new Setting(this.contentEl).setName(label).addText(t=>{t.setValue(String(this[key]));t.setPlaceholder(placeholder);t.onChange(v=>{(this as unknown as Record<string,unknown>)[key as string]=v})});
+			["calendarFolder","Calendário","01 - Calendario"],["calendarTemplatesFolder","Pasta de Templates","99 - Sistema/Templates/Calendário"],["inboxFolder","Inbox","00 - Inbox"],["systemFolder","Sistema","99 - Sistema"],["filesFolder","Arquivos","99 - Sistema/arquivos"]];
+		for(const [key,label,placeholder] of fields)new Setting(this.contentEl).setName(label).setDesc(key==="calendarTemplatesFolder"?"Onde ficam os modelos usados para criar notas. O padrão é 99 - Sistema/Templates/; cada módulo pode usar uma subpasta, como Calendário.":"").addText(t=>{t.setValue(String(this[key]));t.setPlaceholder(placeholder);t.onChange(v=>{(this as unknown as Record<string,unknown>)[key as string]=v})});
 		const footer=this.contentEl.createDiv({cls:"ione-hub-onboarding__footer"});
 		footer.createEl("button",{text:"Pular configuração"}).onclick=()=>{this.step="style";this.render()};
 		footer.createEl("button",{text:"Continuar",cls:"mod-cta"}).onclick=()=>{this.step="style";this.render()};
