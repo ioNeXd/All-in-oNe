@@ -1,4 +1,5 @@
 import type { ModuleId } from "./ModuleContract";
+import { DEFAULT_PATHS } from "./PathResolver";
 
 /** Nível de log de uma entrada de Histórico. */
 export type HistoryEventType =
@@ -89,8 +90,11 @@ export function createDefaultSettings(): HubSettings {
 			theme: "match-obsidian",
 		},
 		paths: {
-			calendarFolder: "Calendario",
-			calendarTemplatesFolder: "Calendario/templates",
+			calendarFolder: DEFAULT_PATHS.calendarFolder,
+			calendarTemplatesFolder: DEFAULT_PATHS.calendarTemplatesFolder,
+			inboxFolder: DEFAULT_PATHS.inboxFolder,
+			systemFolder: DEFAULT_PATHS.systemFolder,
+			filesFolder: DEFAULT_PATHS.filesFolder,
 		},
 		sync: {
 			lastWrittenBy: randomId(),
