@@ -20,7 +20,7 @@
  * constantes.
  */
 
-/** Valor do chip pendente (formato v0.6.0 nasce com os DOIS valores). */
+/** Estado canônico de uma nota ainda não concluída. */
 export const STATUS_PENDING = "incompleto";
 
 /** Valor do chip de conclusão. */
@@ -29,16 +29,16 @@ export const STATUS_COMPLETE = "completo";
 /** Status normalizado de nota COMPLETADA. */
 export const STATUS_COMPLETE_NORMALIZED = [STATUS_COMPLETE];
 
-/** Status de nota recém-criada por template: pendente (os DOIS chips). */
+/** Status de nota recém-criada por template. */
 export const STATUS_PENDING_INITIAL = [STATUS_PENDING];
 
 /** Ainda tem o chip "Pendente"? Aceita lista ou string solta, qualquer capitalização. */
 export function isPendingStatus(status: unknown): boolean {
 	const values = Array.isArray(status) ? status : [status];
-	return values.some((v) => typeof v === "string" && v.trim().toLowerCase() === "pendente");
+	return values.some((v) => typeof v === "string" && ["incompleto", "pendente"].includes(v.trim().toLowerCase()));
 }
 
-/** Já está exatamente no formato normalizado de completada (["Completo"]). */
+/** Já está exatamente no formato normalizado de completada (["completo"]). */
 export function isNormalizedComplete(status: unknown): boolean {
 	return (
 		Array.isArray(status) &&
