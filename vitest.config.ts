@@ -8,7 +8,7 @@ export default defineConfig({
 			// dentro do app). Nos testes que importam código real do plugin, este
 			// stub o substitui em runtime; o tsc segue resolvendo os tipos
 			// oficiais. Antes disto, os testes tinham que ESPELHAR as regras à
-			// mão (ver comentários em McpValidation.test.ts e TemplateStatus.test.ts).
+			// mão (ver comentários em McpValidation.test.ts e NoteStatus.test.ts).
 			obsidian: fileURLToPath(new URL("./tests/mocks/obsidian.ts", import.meta.url)),
 		},
 	},
