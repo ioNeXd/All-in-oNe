@@ -40,6 +40,7 @@ interface RawIcsEvent {
 	summary?: string;
 	description?: string;
 	dtstart?: IcsDateTime;
+	dtstartInvalid?: boolean;
 	rrule?: string;
 }
 
@@ -172,7 +173,11 @@ function collectRawEvents(lines: IcsLine[]): { raws: RawIcsEvent[]; orphans: num
 			case "UID": current.uid = line.value.trim(); break;
 			case "SUMMARY": current.summary = unescapeIcsText(line.value.trim()); break;
 			case "DESCRIPTION": current.description = unescapeIcsText(line.value.trim()); break;
-			case "DTSTART": current.dtstart = parseIcsDate(line.value, line.params); break;
+			case "DTSTART": {
+				current.dtstart = parseIcsDate(line.value, line.params);
+				current.dtstartInvalid = !current.dtstart;
+				break;
+			}
 			case "RRULE": current.rrule = line.value.trim(); break;
 		}
 	}
@@ -194,7 +199,11 @@ function eventIdFor(raw: RawIcsEvent, index: number): string {
 
 function toCalendarEvent(raw: RawIcsEvent, index: number): { event?: CalendarEvent; warning?: string } {
 	if (!raw.dtstart) {
-		return { warning: `Evento${raw.summary ? ` "${raw.summary}"` : ` ${index + 1}`} ignorado: sem data de início (DTSTART) legível.` };
+		return {
+			warning: raw.dtstartInvalid
+				? `Evento${raw.summary ? ` "${raw.summary}"` : ` ${index + 1}`} ignorado: data de início (DTSTART) inválida.`
+				: `Evento${raw.summary ? ` "${raw.summary}"` : ` ${index + 1}`} ignorado: sem data de início (DTSTART) legível.`,
+		};
 	}
 	const d = raw.dtstart.date;
 	if (Number.isNaN(d.getTime())) {
