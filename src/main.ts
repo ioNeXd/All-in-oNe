@@ -87,7 +87,8 @@ export default class IoneHubPlugin extends Plugin {
 		);
 		this.vaultBridge.start();
 
-		this.registerView(LOBBY_VIEW_TYPE, (leaf) => new LobbyView(leaf, this.core));\n\t\tthis.registerView(CALENDAR_SIDEBAR_VIEW_TYPE, (leaf) => new CalendarSidebarView(leaf, this.core));
+		this.registerView(LOBBY_VIEW_TYPE, (leaf) => new LobbyView(leaf, this.core));
+		this.registerView(CALENDAR_SIDEBAR_VIEW_TYPE, (leaf) => new CalendarSidebarView(leaf, this.core));
 
 		const autoUpdate = new AutoUpdateModule();
 		autoUpdate.setCurrentVersion(this.manifest.version);
