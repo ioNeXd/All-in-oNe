@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { uniqueNameWith, validateVaultPath } from "../src/core/PathUtils";
+import { isPathWithinBase, uniqueNameWith, validateVaultPath } from "../src/core/PathUtils";
 
 /**
  * IMPORTA O CÓDIGO REAL (PathUtils.ts) — a regra de colisão de nomes era
