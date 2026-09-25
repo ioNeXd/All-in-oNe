@@ -3,7 +3,6 @@ import type { HubModule, ModuleContext, ModuleManifest } from "../../core/Module
 import { ensureVaultFolder, uniqueVaultPath } from "../../core/VaultPaths";
 import {
 	decidePendingAction,
-	isPendingStatus as isStillPending,
 	STATUS_PENDING_INITIAL,
 	STATUS_COMPLETE_NORMALIZED,
 } from "../../core/NoteStatus";
