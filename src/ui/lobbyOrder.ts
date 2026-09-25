@@ -43,15 +43,17 @@ export function orderedModules<T extends OrderableModule>(
 
 /**
  * Move `source` para imediatamente ANTES de `target` (drag-and-drop: soltar
- * em cima da linha de destino). Ambos os sentidos funcionam porque a remoção
- * do source desloca o target para a esquerda antes da inserção.
+ * em cima da linha de destino). Ambos os sentidos funcionam ajustando o índice
+ * do destino quando o source está antes dele.
  */
 export function moveBefore(order: readonly string[], source: string, target: string): string[] {
 	const next = [...order];
 	const from = next.indexOf(source);
 	const to = next.indexOf(target);
 	if (from === -1 || to === -1 || from === to) return next;
-	next.splice(to, 0, ...next.splice(from, 1));
+	const targetIndex = from < to ? to - 1 : to;
+	const [moved] = next.splice(from, 1);
+	next.splice(targetIndex, 0, moved);
 	return next;
 }
 
