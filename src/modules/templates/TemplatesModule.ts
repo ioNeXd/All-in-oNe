@@ -41,7 +41,7 @@ const MAX_RULE_HISTORY = 15;
  * configurada, aplica o template (com suporte a herança via extendsRuleId),
  * preenche automaticamente os metadados deriváveis (`date`, `thema` — este
  * último a partir da hierarquia de pastas) e, se algum campo obrigatório
- * não puder ser preenchido, marca a nota como `status: pendente` e a move
+ * não puder ser preenchido, marca a nota como `status: incompleto` e a move
  * para a pasta "Pendente" um nível abaixo do root da categoria (criando essa
  * pasta se necessário; cai para "Pendente" na raiz se a categoria não puder
  * ser determinada).
@@ -239,7 +239,7 @@ export class TemplatesModule implements HubModule {
 			cls: "ione-hub-lobby__description",
 			text:
 				"Toda nota criada nesta pasta recebe o template abaixo, ganha os metadados " +
-				"date, thema e origem automaticamente, e nasce com status: Pendente na pasta " +
+				"date, thema e origem automaticamente, e nasce com status: incompleto na pasta " +
 				"Pendente da categoria. Quando você apagar o campo status (ou escrever Completo), " +
 				"a nota volta sozinha para a pasta de origem.",
 		});
