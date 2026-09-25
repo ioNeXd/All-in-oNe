@@ -141,6 +141,24 @@ describe("searchVault — estratégia de leitura", () => {
 		expect(reads.length).toBeLessThanOrEqual(6); // 5 aceitos + 1 que revelou o estouro
 	});
 
+	it("candidatos de metadata são ordenados por score antes do teto", async () => {
+		const { primitives } = makePrimitives([
+			{ path: "z.md", tags: [], frontmatter: ["status: alvo"], content: "" },
+			{ path: "a-alvo.md", tags: [], frontmatter: [], content: "" },
+			{ path: "alvo.md", tags: ["alvo"], frontmatter: [], content: "" },
+		]);
+		const result = await searchVault({ query: "alvo", maxResults: 2 }, primitives);
+		expect(result.matches.map((m) => m.path)).toEqual(["a-alvo.md", "alvo.md"]);
+		expect(result.truncated).toBe(true);
+	});
+
+	it("maxResults inválido é rejeitado", async () => {
+		const { primitives } = makePrimitives([]);
+		for (const maxResults of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			await expect(searchVault({ query: "alvo", maxResults }, primitives)).rejects.toThrow(RangeError);
+		}
+	});
+
 	it("teto default é aplicado quando maxResults não vem", async () => {
 		const notes: Note[] = [];
 		for (let i = 0; i < DEFAULT_MAX_RESULTS + 10; i++) {
