@@ -29,7 +29,7 @@ src/
     autoupdate/          ← auto-update via GitHub Releases
       ReleaseUtils.ts    ← regra pura: SemVer/assets/checksums (testada)
       SignatureUtils.ts  ← regra pura: decisão/parse da verificação GPG (testada)
-    templates/           ← templates por pasta + fluxo Pendente
+    templates/           ← templates por pasta + fluxo de notas incompletas
     calendar/            ← calendário, eventos recorrentes e lembretes
       IcsParser.ts       ← parser puro de iCalendar (testado)
     notifications/       ← pop-ups com som e não-perturbe
@@ -171,7 +171,7 @@ criação recursiva de pastas (o `vault.createFolder` do Obsidian NÃO cria
 pastas-pai) e nome único com extensão preservada.
 
 O mesmo princípio gerou módulos puras ao lado dos módulos de vault:
-`NoteStatus.ts` (pendente/completo), `WriteRules.ts` (permissões de pasta
+`NoteStatus.ts` (incompleto/completo), `WriteRules.ts` (permissões de pasta
 do MCP) e `ReleaseUtils.ts` (SemVer). Na v0.2.0 o padrão virou a norma:
 `ToolsApiVersion`, `SignatureUtils`, `IcsParser`, `NotificationList`,
 `HistoryFilter`, `CssHighlight` e `lobbyOrder` — toda regra de decisão
