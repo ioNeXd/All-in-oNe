@@ -245,7 +245,7 @@ módulos escutam); toggles com navegação por teclado e `aria-label`.
 
 Navegação por teclado em todos os controles: linhas da Central de Eventos
 (copiam o evento como JSON), dias do calendário (com aria-label descritivo),
-visões de semana/agenda, notas pendentes e referência de CSS têm `tabIndex`,
+visões de semana/agenda, notas incompletas e referência de CSS têm `tabIndex`,
 `role`/`aria-label` e Enter/Espaço; abas internas movem o foco com ←/→
 (modo manual ARIA) e ativam com Enter/Espaço; foco visível padronizado.
 Reordenação dos módulos na barra lateral: arrastar pela alça ⠿ ou
