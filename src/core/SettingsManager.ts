@@ -35,6 +35,8 @@ const INSTANCE_ID = randomId();
 
 export class SettingsManager {
 	private current: HubSettings;
+	/** Callback opcional após uma gravação aceita, usado para documentos derivados como o manual. */
+	onSaved?: (settings: HubSettings) => void | Promise<void>;
 	private modules: Map<ModuleId, HubModule> = new Map();
 	/**
 	 * Serializa as gravações (fila de promises encadeada). O read-modify-write

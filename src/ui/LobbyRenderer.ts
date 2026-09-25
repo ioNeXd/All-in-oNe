@@ -41,8 +41,16 @@ export class LobbyRenderer {
 	private searchQuery = "";
 	/** Drag-and-drop da lista de módulos: nulo fora de um arrasto. */
 	private drag: DragState | null = null;
+	private detachCalendarOpen?: () => void;
 
-	constructor(private app: App, private core: HubCore, private containerEl: HTMLElement) {}
+	constructor(private app: App, private core: HubCore, private containerEl: HTMLElement) {
+		this.detachCalendarOpen = this.core.bus.on("calendar:open-main", "lobby-calendar", () => { this.activeSection = "calendar"; this.render(); });
+	}
+
+	destroy(): void {
+		this.detachCalendarOpen?.();
+		this.detachCalendarOpen = undefined;
+	}
 
 	render(): void {
 		const container = this.containerEl;

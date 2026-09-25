@@ -33,6 +33,7 @@ export class LobbyView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		this.renderer?.destroy();
 		this.contentEl.empty();
 	}
 }
