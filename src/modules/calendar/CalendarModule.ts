@@ -442,11 +442,13 @@ export class CalendarModule implements HubModule {
 		const year=this.displayedMonth.getFullYear(), month=this.displayedMonth.getMonth();
 		const rerenderCurrent=rerender ?? (()=>this.rerenderView());
 		const header=container.createDiv({cls:"ione-hub-calendar__header"});
-		const prev=header.createEl("button",{text:"<"}), next=header.createEl("button",{text:">"});
-		header.createSpan({text:this.displayedMonth.toLocaleDateString("pt-BR",{month:"long",year:"numeric"}),cls:"ione-hub-calendar__title"});
+		const prev=header.createEl("button",{text:"<"});
+		const title=header.createSpan({text:this.displayedMonth.toLocaleDateString("pt-BR",{month:"long",year:"numeric"}),cls:"ione-hub-calendar__title"});
+		const today=header.createEl("button",{text:"Hoje"});
+		const next=header.createEl("button",{text:">"});
 		prev.setAttr("aria-label","Mês anterior"); next.setAttr("aria-label","Próximo mês");
 		prev.onclick=()=>{this.displayedMonth=new Date(year,month-1,1);rerenderCurrent()}; next.onclick=()=>{this.displayedMonth=new Date(year,month+1,1);rerenderCurrent()};
-		const today=header.createEl("button",{text:"Hoje"});today.onclick=()=>{this.displayedMonth=new Date();rerenderCurrent()};
+		today.onclick=()=>{this.displayedMonth=new Date();rerenderCurrent()};
 		if(compact) { header.classList.add("ione-hub-calendar__header--compact"); }
 		const grid=container.createDiv({cls:"ione-hub-calendar"+(compact?" ione-hub-calendar--compact":"")});
 		for(const label of WEEKDAY_LABELS)grid.createDiv({cls:"ione-hub-calendar__weekday",text:label});
