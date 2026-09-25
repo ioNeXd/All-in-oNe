@@ -13,11 +13,12 @@ import { createDefaultSettings, type HubSettings } from "./types";
  *   com o MESMO _v. Se crash no meio, _v permite detectar inconsistência.
  *
  *   Na leitura:
- *     - Calcula o _v MÁXIMO entre data.json e todos os arquivos splitados.
- *     - Qualquer arquivo com _v < máximo é descartado (stale after crash).
- *     - Se algum arquivo tem _v significativamente diferente, sinaliza
- *       corrupção potencial mas aceita o snapshot mais recente.
- *     - Arquivos sem _v são aceitos (backward compat).
+ *     - data.json é o commit point da geração: seu _v define o snapshot
+ *       aceito quando ele existe.
+ *     - Fatias com _v diferente do _v do data.json são ignoradas, evitando
+ *       montar silenciosamente uma configuração híbrida após crash.
+ *     - Se o data.json não tem _v, fatias também podem ser lidas sem versão
+ *       para manter backward compatibility.
  *
  *   NUNCA monta silenciosamente uma config híbrida de versões incompatíveis.
  */
@@ -38,8 +39,8 @@ export interface SplitPersistenceHandle {
 	corruptedPaths: string[];
 	/**
 	 * true quando a última leitura detectou arquivos com versões incompatíveis.
-	 * A config carregada usa o snapshot mais recente, mas o flag sinaliza
-	 * que algum arquivo ficou para trás (crash entre gravações).
+	 * A config carregada usa o último data.json como snapshot com commit;
+	 * o flag sinaliza que alguma fatia ficou para trás ou à frente dele.
 	 */
 	versionInconsistencyDetected: boolean;
 }

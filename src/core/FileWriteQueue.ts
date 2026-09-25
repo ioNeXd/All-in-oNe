@@ -12,22 +12,17 @@
  * rodem em sequência, nunca em paralelo — sem bloquear operações em arquivos
  * diferentes, que continuam concorrentes normalmente.
  *
- * MECANISMO: claim-first + delegate.
+ * MECANISMO: chain + publish + delegate.
  *
  *   run(path, op) delega a runMany([path], op) — mecanismo idêntico.
  *   runMany(paths, op):
  *     1. Dedup + sort das chaves (deadlock-free, determinístico).
- *     2. REGISTRA claims no Map PRIMEIRO (write-before-read).
- *        Claims são promises que resolvem quando a operação encadeada
- *        (não a imediata) termina — incluindo a fila existente da chave.
- *     3. LÊ filas existentes e encadeia atrás delas (read-after-write).
- *     4. operation() roda só quando TODA fila anterior drou + claim drou.
- *     5. Limpeza automática quando a fila drou sem novo claim.
- *
- * Por que claim-first:
- *   No passo 2, os claims já estão no Map antes do passo 3 ler. Qualquer
- *   chamada concorrente que execute no mesmo tick síncrono encontra os claims
- *   e se encadeia — nunca há duas chamadas lendo o Map vazio ao mesmo tempo.
+ *     2. LÊ as filas existentes e monta uma cadeia determinística por chave.
+ *     3. PUBLICA os claims no Map em uma única sequência síncrona.
+ *        Como JavaScript não intercala outra chamada durante este trecho,
+ *        nenhuma chamada concorrente observa um estado parcialmente publicado.
+ *     4. operation() roda só quando TODA fila anterior + a cadeia interna termina.
+ *     5. Limpeza automática quando a fila termina sem novo claim.
  *
  * Uso: await fileWriteQueue.run(path, () => app.vault.modify(file, content))
  */
@@ -45,15 +40,15 @@ export class FileWriteQueue {
 	/**
 	 * Serializa uma operação que toca múltiplos paths (ex.: rename A→B).
 	 *
-	 * CLAIM-FIRST: o Map é atualizado ANTES de ler filas existentes.
-	 * Isso garante que chamadas concorrentes veem os claims e se encadeiam.
+	 * CHAIN + PUBLISH: primeiro monta a cadeia a partir das filas existentes;
+	 * depois publica os claims sem qualquer ponto de suspensão assíncrona.
 	 *
 	 * Dedup + sort: [B, A] e [A, B] produzem a mesma ordem → sem deadlock.
 	 */
 	runMany<T>(paths: string[], operation: () => Promise<T>): Promise<T> {
 		const keys = [...new Set(paths)].sort();
 
-		// --- FASE 1-2: CLAIM (write-before-read) ---
+		// --- FASE 1-2: CHAIN + PUBLISH ---
 		// Monta claims encadeando na ordem das chaves, depois registra no Map.
 		// Cada claim aguarda: (a) a fila existente da chave E (b) o claim
 		// anterior dentro do mesmo conjunto. Isso serializa internamente.
@@ -66,8 +61,8 @@ export class FileWriteQueue {
 			claimPromises.push(chainHead);
 		}
 
-		// Registra claims no Map ANTES de qualquer leitura futura.
-		// Chamadas concorrentes neste mesmo tick síncrono verão os claims.
+		// Publica os claims depois de montar toda a cadeia. O trecho é síncrono,
+		// portanto outra chamada não pode intercalar uma leitura parcial do Map.
 		for (let i = 0; i < keys.length; i++) {
 			this.queues.set(keys[i], claimPromises[i]);
 		}
@@ -84,7 +79,7 @@ export class FileWriteQueue {
 		}
 
 		// --- FASE 4: CLEANUP ---
-		// Remove do Map quando ESTA promessa drou e ninguém mais assumiu.
+		// Remove do Map quando ESTA promessa terminou e ninguém mais assumiu.
 		void chained.then(() => {
 			for (const key of keys) {
 				if (this.queues.get(key) === chained) this.queues.delete(key);

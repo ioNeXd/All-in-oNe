@@ -45,9 +45,7 @@ const WEEKDAY_LABELS = ["D", "S", "T", "Q", "Q", "S", "S"];
  * `context.getFullSettings().paths`.
  *
  * Três visões: mês (grade navegável), semana e agenda (lista dos próximos
- * dias). A grade indica visualmente quais dias já têm nota, quais têm nota
- * pendente (cruzamento com o módulo de Templates via frontmatter `status`)
- * e quais têm eventos marcados. O Calendário não interpreta `status`/`concluido`; pendências são responsabilidade de outro módulo.
+ * dias). A grade indica visualmente quais dias já têm nota e quais têm eventos marcados. O Calendário sincroniza `concluido`/`status` para o frontmatter canônico; a regra de conclusão continua no módulo responsável.
  */
 export class CalendarModule implements HubModule {
 	readonly manifest: ModuleManifest = {
@@ -78,6 +76,9 @@ export class CalendarModule implements HubModule {
 	private context?: ModuleContext;
 	/** Timer do agendador de lembretes (loop de setTimeout, ver scheduleNextCheck). */
 	private dailyCheckInterval?: number;
+	/** Generation/epoch: invalida callbacks de timers e disparos de ciclos anteriores. */
+	private generation = 0;
+	private enabled = false;
 	/**
 	 * Desbloqueio de áudio próprio (core/AudioUnlock): cada módulo tem sua
 	 * instância, com ciclo de vida independente. O lembrete dispara sozinho —
@@ -105,6 +106,8 @@ export class CalendarModule implements HubModule {
 	}
 
 	onEnable(): void {
+		this.generation++;
+		this.enabled = true;
 		// Arma o destravamento de áudio no primeiro gesto (política de autoplay).
 		this.audioUnlocker.arm();
 		// Verificação RETROATIVA imediata: se o Obsidian abriu depois da hora
@@ -156,6 +159,8 @@ export class CalendarModule implements HubModule {
 		this.metadataUnsubscribe?.();
 		this.metadataUnsubscribe = undefined;
 		this.audioUnlocker.disarm();
+		this.enabled = false;
+		this.generation++;
 		// Limpa a dedupe de minuto junto: sem isto, um desligar→ligar dentro
 		// do mesmo minuto pulava a checagem retroativa (e um lembrete sem
 		// horário, elegível o dia todo, podia demorar até 1h para aparecer).
@@ -586,9 +591,11 @@ export class CalendarModule implements HubModule {
 	 * cobre o wake-up tardio do Obsidian/suspensão do SO.
 	 */
 	private scheduleNextCheck(): void {
-		if (typeof window === "undefined") return;
+		if (!this.enabled || typeof window === "undefined") return;
+		const gen = this.generation;
 		if (this.dailyCheckInterval) window.clearTimeout(this.dailyCheckInterval);
 		this.dailyCheckInterval = window.setTimeout(() => {
+			if (this.generation !== gen) return;
 			this.checkTodaysEvents();
 			this.scheduleNextCheck();
 		}, nextEventDelayMs(this.readSettings().events, new Date()));
@@ -608,9 +615,10 @@ export class CalendarModule implements HubModule {
 		const now=new Date(),key=now.toDateString()+" "+now.getHours()+":"+now.getMinutes();if(key===this.lastCheckedMinute)return;this.lastCheckedMinute=key;const fired=this.readSettings().events.filter(e=>shouldFire(e,now));if(fired.length)void this.fireEvents(fired,now);
 	}
 	private async fireEvents(events: CalendarEvent[],now: Date): Promise<void>{
-		for(const event of events)await this.context?.bus.emit("calendar:event-fired",{event},"calendar");const reminders=events.filter(e=>e.reminder);
+		const gen = this.generation;
+		for(const event of events)await this.context?.bus.emit("calendar:event-fired",{event},"calendar");if(this.generation!==gen)return;const reminders=events.filter(e=>e.reminder);
 		if(reminders.length){new ReminderModal(this.context!.app,reminders,refId=>this.openNoteByRef(refId),event=>this.editEvent(event),this.readSettings().autoFocusOnReminder).open();void playReminderChime(this.audioUnlocker)}
-		for(const event of events.filter(e=>!e.reminder&&e.noteRefId))await this.openNoteByRef(event.noteRefId!);const settings=this.readSettings(),ids=new Set(events.map(e=>e.id));const next=settings.events.filter(e=>e.recurrence!=="once"||!ids.has(e.id)).map(e=>ids.has(e.id)?{...e,lastFiredYear:now.getFullYear()}:e);await this.context?.updateSettings({events:next});this.scheduleNextCheck();
+		for(const event of events.filter(e=>!e.reminder&&e.noteRefId))await this.openNoteByRef(event.noteRefId!);if(this.generation!==gen)return;const settings=this.readSettings(),ids=new Set(events.map(e=>e.id));const next=settings.events.filter(e=>e.recurrence!=="once"||!ids.has(e.id)).map(e=>ids.has(e.id)?{...e,lastFiredYear:now.getFullYear()}:e);await this.context?.updateSettings({events:next});if(this.generation!==gen)return;this.scheduleNextCheck();
 	}
 
 	private pathForDate(date: Date): string {
@@ -845,7 +853,6 @@ class DateActionModal extends Modal {
 			for (const note of this.notes) this.button(note.basename, () => this.callbacks.openNote(note));
 		}
 		this.contentEl.createEl("h3", { text: "📋 Nota template" });
-		this.button("➕ Criar nota adicional", () => this.renderTemplates());
 		this.renderTemplates();
 		this.contentEl.createEl("h3", { text: "🔔 Eventos" });
 		if (this.events.length === 0) this.button("Criar evento", this.callbacks.createEvent);
@@ -1088,18 +1095,12 @@ class EventEditorModal extends Modal {
 			.addButton((btn) => btn.setButtonText("Cancelar").onClick(() => this.close()));
 	}
 
-	/** Lista de pastas do vault, para o filtro de digitação da pasta de destino. */
-	private allFolders(): string[] {
-		const folders: string[] = [];
-		for (const file of this.app.vault.getAllLoadedFiles()) {
-			if (file instanceof TFolder && file.path !== "/") folders.push(file.path);
-		}
-		return folders.sort();
-	}
-
 	private validate(): string[] {
 		const errors: string[] = [];
 		if (!this.draft.title.trim()) errors.push("Dê um título ao evento.");
+		if (!Number.isInteger(this.draft.month) || this.draft.month < 1 || this.draft.month > 12) {
+			errors.push("Mês inválido: escolha um mês entre janeiro e dezembro.");
+		}
 		if (!Number.isInteger(this.draft.day) || this.draft.day < 1 || this.draft.day > 31) {
 			errors.push("Dia inválido: use um número entre 1 e 31.");
 		} else {
@@ -1121,7 +1122,7 @@ class EventEditorModal extends Modal {
 				errors.push("Informe um ano válido para o evento de data única.");
 			}
 		}
-		if (this.draft.time && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(this.draft.time)) {
+		if (this.draft.time && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(this.draft.time)) {
 			errors.push("Horário inválido: use o formato HH:MM, como 14:30.");
 		}
 		return errors;

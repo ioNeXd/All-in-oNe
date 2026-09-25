@@ -61,9 +61,10 @@ export function validateVaultPath(raw: string): string {
 	// Colapsa slashes múltiplos (preserva o slash inicial se houver).
 	normalized = normalized.replace(/\/{2,}/g, "/");
 
-	// Remove ./ no início (diretório atual implícito).
-	if (normalized.startsWith("./")) {
-		normalized = normalized.slice(2);
+	// Remove ./ no início (diretório atual implícito), inclusive repetições.
+	while (normalized.startsWith("./")) normalized = normalized.slice(2);
+	if (normalized === "." || normalized.length === 0) {
+		throw new Error("Path não pode apontar apenas para o diretório atual.");
 	}
 
 	// Rejeita paths absolutos ( Unix: /...  Windows: C:\... ).
@@ -81,8 +82,8 @@ export function validateVaultPath(raw: string): string {
 		);
 	}
 
-	// Rejeita caracteres de controle (0x00-0x1F).
-	if (/[\x00-\x1f]/.test(normalized)) {
+	// Rejeita caracteres de controle ASCII (0x00-0x1F e DEL 0x7F).
+	if (/[\x00-\x1f\x7f]/.test(normalized)) {
 		throw new Error(
 			`Path inválido: "${raw}" — contém caracteres de controle.`
 		);

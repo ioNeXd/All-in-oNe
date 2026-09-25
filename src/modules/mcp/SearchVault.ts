@@ -127,8 +127,12 @@ export async function searchVault<F>(
 	if (!query) return { matches: [], truncated: false, scanned: 0 };
 
 	const maxResults = input.maxResults ?? DEFAULT_MAX_RESULTS;
+	if (!Number.isInteger(maxResults) || maxResults < 1) {
+		throw new RangeError("maxResults deve ser um inteiro maior ou igual a 1.");
+	}
 	const notes = primitives.listNotes();
-	const deferred: { file: F; path: string; baseScore: number }[] = [];
+	const deferred: { file: F; path: string }[] = [];
+	const cachedMatches: { match: SearchMatch; score: number }[] = [];
 	const matches: SearchMatch[] = [];
 	let truncated = false;
 	let scanned = 0;
@@ -150,24 +154,32 @@ export async function searchVault<F>(
 		const frontmatterMatch = meta.frontmatterValues.some((v) => v.toLowerCase().includes(query));
 
 		if (pathMatch || tagMatch || frontmatterMatch) {
-			// Não precisa ler conteúdo: aceita agora, ordenado pela pontuação.
-			const baseScore = scoreCandidate({ path: meta.path, pathMatch, tagMatch, frontmatterMatch }, query);
-			const ok = accept({
-				path: meta.path,
-				hits: 0,
-				snippet: "",
-				matchedIn: [
-					...(pathMatch ? (["path"] as const) : []),
-					...(tagMatch ? (["tag"] as const) : []),
-					...(frontmatterMatch ? (["frontmatter"] as const) : []),
-				],
+			cachedMatches.push({
+				match: {
+					path: meta.path,
+					hits: 0,
+					snippet: "",
+					matchedIn: [
+						...(pathMatch ? (["path"] as const) : []),
+						...(tagMatch ? (["tag"] as const) : []),
+						...(frontmatterMatch ? (["frontmatter"] as const) : []),
+					],
+				},
+				score: scoreCandidate({ path: meta.path, pathMatch, tagMatch, frontmatterMatch }, query),
 			});
-			void baseScore;
-			if (!ok) break;
 		} else {
 			// Sem match no cache: só a leitura decide — deixa para depois.
-			deferred.push({ file, path: meta.path, baseScore: 0 });
+			deferred.push({ file, path: meta.path });
 		}
+	}
+
+	cachedMatches.sort((a, b) => b.score - a.score);
+	for (const { match } of cachedMatches) {
+		if (matches.length >= maxResults) {
+			truncated = true;
+			break;
+		}
+		matches.push(match);
 	}
 
 	// Fase 2: leitura dos que o cache não resolveu — PARA no teto.

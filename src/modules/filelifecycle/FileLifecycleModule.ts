@@ -165,6 +165,7 @@ export class FileLifecycleModule implements HubModule {
 
 	/** Pergunta o nome logo na criação e só então libera o resto do plugin. */
 	private async handleCreate(file: TFile): Promise<void> {
+		if (this.stopped) return;
 		const settings = this.readSettings();
 
 		if (!settings.askNameOnCreate || !isUntitled(file.basename)) {
@@ -187,6 +188,7 @@ export class FileLifecycleModule implements HubModule {
 
 		try {
 			const name = await this.askName(file.basename, "Nome da nova nota");
+			if (this.stopped) return;
 			let target = file;
 
 			if (name && name !== file.basename) {
@@ -196,6 +198,7 @@ export class FileLifecycleModule implements HubModule {
 				await this.context!.fileWriteQueueRun(originalPath, () =>
 					this.context!.app.fileManager.renameFile(file, finalPath)
 				);
+				if (this.stopped) return;
 				const renamed = this.context!.app.vault.getAbstractFileByPath(finalPath);
 				if (renamed instanceof TFile) target = renamed;
 			}
@@ -207,10 +210,6 @@ export class FileLifecycleModule implements HubModule {
 	}
 
 	/**
-	 * Sinaliza que a nota tem nome definitivo. Os outros módulos (Templates,
-	 * Histórico) usam este evento em vez do `file:created` cru.
-	 */
-	/**
 	 * Sinaliza que a nota tem nome definitivo. Emite dois eventos: o interno
 	 * `lifecycle:note-ready` (usado por Templates) e o `file:created` "oficial"
 	 * — este módulo é quem manda essa notícia pro resto do plugin quando está
@@ -218,7 +217,9 @@ export class FileLifecycleModule implements HubModule {
 	 * para notas em vez de emitir cedo demais com "Untitled").
 	 */
 	private async announceReady(file: TFile): Promise<void> {
+		if (this.stopped) return;
 		await this.context?.bus.emit("lifecycle:note-ready", { path: file.path }, "filelifecycle");
+		if (this.stopped) return;
 		await this.context?.bus.emit("file:created", { path: file.path }, "filelifecycle");
 	}
 
@@ -230,9 +231,10 @@ export class FileLifecycleModule implements HubModule {
 
 	async promptRename(file: TFile): Promise<void> {
 		const name = await this.askName(file.basename, "Renomear nota");
-		if (!name || name === file.basename) return;
+		if (this.stopped || !name || name === file.basename) return;
 
 		const doRename = async () => {
+			if (this.stopped) return;
 			const folder = file.path.substring(0, file.path.lastIndexOf("/"));
 			const target = await uniqueVaultPath(this.context!.app, 
 				normalizePath(`${folder ? folder + "/" : ""}${name}.md`)
@@ -263,6 +265,7 @@ export class FileLifecycleModule implements HubModule {
 	}
 
 	async promptDelete(file: TFile): Promise<void> {
+		if (this.stopped) return;
 		if (!this.readSettings().confirmOnDelete) {
 			await this.context!.fileWriteQueueRun(
 				file.path,
@@ -286,9 +289,11 @@ export class FileLifecycleModule implements HubModule {
 	}
 
 	async promptMove(file: TFile): Promise<void> {
+		if (this.stopped) return;
 		const folders = this.listFolders();
 		new MovePromptModal(this.context!.app, file, folders, async (targetFolder) => {
 			const doMove = async () => {
+				if (this.stopped) return;
 				const desired = normalizePath(`${targetFolder}/${file.name}`);
 				const finalPath = await uniqueVaultPath(this.context!.app, desired);
 				await ensureVaultFolder(this.context!.app, targetFolder);
@@ -490,8 +495,12 @@ class ConfirmModal extends Modal {
 					.setButtonText("Confirmar")
 					.setWarning()
 					.onClick(async () => {
-						await this.onConfirm();
-						this.close();
+						try {
+							await this.onConfirm();
+							this.close();
+						} catch (error) {
+							new Notice(error instanceof Error ? error.message : "A operação falhou.");
+						}
 					})
 			)
 			.addButton((btn) => btn.setButtonText("Cancelar").onClick(() => this.close()));
@@ -537,8 +546,12 @@ class MovePromptModal extends Modal {
 					.setButtonText("Mover")
 					.setCta()
 					.onClick(async () => {
-						await this.onMove(this.target === "/" ? "" : this.target);
-						this.close();
+						try {
+							await this.onMove(this.target === "/" ? "" : this.target);
+							this.close();
+						} catch (error) {
+							new Notice(error instanceof Error ? error.message : "A operação falhou.");
+						}
 					})
 			)
 			.addButton((btn) => btn.setButtonText("Cancelar").onClick(() => this.close()));

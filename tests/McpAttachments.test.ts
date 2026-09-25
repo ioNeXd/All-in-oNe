@@ -291,7 +291,7 @@ describe("get_attachment — ida e volta com put_attachment", () => {
 });
 
 describe("decodeBase64 — validação estrita (código real)", () => {
-	it("aceita base64 válido, com ou sem padding", () => {
+	it("aceita base64 válido com padding canônico", () => {
 		expect(decodeBase64("aGVsbG8=").toString()).toBe("hello");
 		expect(decodeBase64("cG5nLWZha2UtYnl0ZXM=").toString()).toBe("png-fake-bytes");
 	});

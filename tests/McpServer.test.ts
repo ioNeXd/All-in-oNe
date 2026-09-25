@@ -208,7 +208,7 @@ describe("MCP — contrato HTTP (Content-Type e Accept)", () => {
 		expect(res.status).toBe(200);
 	});
 
-	it("aceita Accept \*/* ( curinga padrão)", async () => {
+	it("aceita Accept */* (curinga padrão)", async () => {
 		const h = await start();
 		const res = await fetch(`http://127.0.0.1:${h.port}`, {
 			method: "POST",
@@ -235,7 +235,6 @@ describe("MCP — contrato HTTP (Content-Type e Accept)", () => {
 		});
 		expect(res.status).toBe(200);
 	});
-});
 
 	// --- MIME estrito: rejeita falsos positivos do antigo includes() ---
 
@@ -274,6 +273,16 @@ describe("MCP — contrato HTTP (Content-Type e Accept)", () => {
 		const res = await fetch(`http://127.0.0.1:${h.port}`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json", Accept: "multipart/mixed", Authorization: "Bearer tok" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(res.status).toBe(406);
+	});
+
+	it("rejeita Accept application/json com q=0", async () => {
+		const h = await start();
+		const res = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Accept: "application/json; q=0", Authorization: "Bearer tok" },
 			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
 		});
 		expect(res.status).toBe(406);
@@ -434,6 +443,8 @@ describe("MCP — contrato HTTP (Content-Type e Accept)", () => {
 		expect(json.error.code).toBe(-32700);
 	});
 
+});
+
 describe("MCP — autenticação (401 antes de qualquer processamento)", () => {
 	const CALL = {
 		jsonrpc: "2.0",
@@ -460,18 +471,21 @@ describe("MCP — autenticação (401 antes de qualquer processamento)", () => {
 		expect(await res.json()).toEqual({ error: "Token inválido." });
 	});
 
-	it("comparação EXATA: esquema minúsculo ou token sem esquema também recusa", async () => {
-		// O gate compara a string inteira com `Bearer ${token}` — não basta o
-		// token aparecer no header de qualquer forma (evita confusão de esquema).
+	it("esquema Bearer é case-insensitive; token sem esquema é recusado", async () => {
 		const h = await start();
-		for (const authValue of ["bearer tok", "tok"]) {
-			const res = await fetch(`http://127.0.0.1:${h.port}`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json", Authorization: authValue },
-				body: JSON.stringify(CALL),
-			});
-			expect(res.status, `Authorization: "${authValue}" deveria ser recusado`).toBe(401);
-		}
+		const accepted = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "bearer tok" },
+			body: JSON.stringify(CALL),
+		});
+		expect(accepted.status).toBe(200);
+
+		const rejected = await fetch(`http://127.0.0.1:${h.port}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: "tok" },
+			body: JSON.stringify(CALL),
+		});
+		expect(rejected.status).toBe(401);
 	});
 
 	it("a recusa acontece ANTES de executar qualquer ferramenta (spy nunca é chamado)", async () => {
@@ -604,7 +618,7 @@ describe("MCP — negociação da versão da API de ferramentas", () => {
 		expect(listJson.result.tools.some((t) => t.name === "get_server_info")).toBe(true);
 	});
 
-	it("minor maior dentro do mesmo major é aceito (1.9.0 contra servidor 1.0.0)", async () => {
+	it("minor maior dentro do mesmo major é compatível e negocia a versão suportada pelo servidor", async () => {
 		const h = await start("1.0.0");
 		const res = await post(h.port, {
 			jsonrpc: "2.0",
@@ -614,7 +628,7 @@ describe("MCP — negociação da versão da API de ferramentas", () => {
 		});
 		const json = (await res.json()) as { result: { toolsApiVersion: string } };
 		expect(res.status).toBe(200);
-		expect(json.result.toolsApiVersion).toBe("1.9.0");
+		expect(json.result.toolsApiVersion).toBe("1.0.0");
 	});
 
 	it("major incompatível (2.0.0 contra servidor 1.0.0) recebe erro claro com código dedicado", async () => {

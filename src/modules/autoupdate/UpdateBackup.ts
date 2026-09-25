@@ -40,6 +40,9 @@ export interface LegacyVersionBackup {
 
 /** Caminho absoluto no vault de um arquivo do backup. */
 export function backupFilePath(pluginDir: string, name: string): string {
+	if (!isBackupFileName(name)) {
+		throw new RangeError(`Arquivo de backup não permitido: ${name}`);
+	}
 	return `${pluginDir}/${BACKUP_DIR}/${name}`;
 }
 

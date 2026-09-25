@@ -90,7 +90,7 @@ export class LobbyRenderer {
 		const quickActions = sidebar.createDiv({ cls: "ione-hub-lobby__quick-actions" });
 		quickActions.createEl("div", { text: "Ações rápidas", cls: "ione-hub-lobby__section-title" });
 		this.quickButton(quickActions, "Nota de hoje", () => void this.quickOpenToday());
-		this.quickButton(quickActions, "Ver pendentes", () => void this.quickShowPending());
+		this.quickButton(quickActions, "Ver incompletas", () => void this.quickShowPending());
 
 		const nav = sidebar.createDiv({ cls: "ione-hub-lobby__nav" });
 		nav.createEl("div", { text: "Módulos", cls: "ione-hub-lobby__section-title" });
@@ -198,7 +198,7 @@ export class LobbyRenderer {
 			const source = this.drag?.sourceId ?? evt.dataTransfer?.getData("text/plain");
 			this.drag = null;
 			if (!source || source === id) return;
-			const current = this.core.settings.get().lobby.moduleOrder ?? [];
+			const current = this.modulesInOrder().map((module) => module.manifest.id);
 			void this.saveModuleOrder(moveBefore(current, source, id));
 		};
 		item.ondragend = () => {
@@ -487,7 +487,7 @@ export class LobbyRenderer {
 			return isPendingStatus(fm?.status);
 		});
 		if (pending.length === 0) {
-			new Notice("Nenhuma nota pendente no vault.");
+			new Notice("Nenhuma nota incompleta no vault.");
 			return;
 		}
 		new PendingNotesModal(this.app, pending).open();
@@ -547,7 +547,7 @@ class PendingNotesModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.contentEl.createEl("h2", { text: `${this.files.length} nota(s) pendente(s)` });
+		this.contentEl.createEl("h2", { text: `${this.files.length} nota(s) incompleta(s)` });
 		for (const file of this.files) {
 			const row = this.contentEl.createDiv({ cls: "ione-hub-lobby__history-row" });
 			row.setText(file.path);

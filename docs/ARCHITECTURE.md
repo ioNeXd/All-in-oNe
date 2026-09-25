@@ -14,7 +14,7 @@ src/
     CommandBridge.ts     ← ponte módulos→Command Palette (registro único + checkCallback)
     PathUtils.ts         ← regras puras de caminho (testadas sem vault)
     VaultPaths.ts        ← operações de vault: pastas recursivas, nome único
-    NoteStatus.ts        ← regra pura: pendente/completo (testada) — compartilhada
+    NoteStatus.ts        ← regra pura: incompleto/completo (testada) — compartilhada
                            por templates/calendar/Lobby, sem acoplamento entre módulos
     secureStore.ts       ← ofuscação de campos sensíveis (ex.: token MCP)
     types.ts             ← formato de HubSettings
@@ -29,7 +29,7 @@ src/
     autoupdate/          ← auto-update via GitHub Releases
       ReleaseUtils.ts    ← regra pura: SemVer/assets/checksums (testada)
       SignatureUtils.ts  ← regra pura: decisão/parse da verificação GPG (testada)
-    templates/           ← templates por pasta + fluxo Pendente
+    templates/           ← templates por pasta + fluxo de notas incompletas
     calendar/            ← calendário, eventos recorrentes e lembretes
       IcsParser.ts       ← parser puro de iCalendar (testado)
     notifications/       ← pop-ups com som e não-perturbe
@@ -40,9 +40,9 @@ src/
   ui/
     LobbyRenderer.ts     ← toda a UI do Lobby (cascas finas: LobbyView/LobbyModal)
     OnboardingModal.ts   ← assistente de primeira execução
-    ResetModal.ts        ← modal "Restaurar tudo" (3 níveis)
-    OpenModeModal.ts     ← aba/janela/perguntar sempre
-    ThemePreviewModal.ts ← preview de tema do Estilos
+    ResetModal (em LobbyRenderer.ts) ← modal "Restaurar tudo" (3 níveis)
+    OpenModeModal (em main.ts)       ← aba/janela/perguntar sempre
+    ThemePreviewModal (em StylesModule.ts) ← preview de tema do Estilos
     FilterSuggest.ts     ← campo de texto com sugestão filtrada (reutilizável)
     interactiveRows.ts   ← linha clicável acessível (teclado/ARIA) reutilizável
     lobbyOrder.ts        ← regras puras da ordem de módulos no Lobby (testadas)
@@ -68,7 +68,7 @@ mesmos métodos (`onRegister`, `onEnable`, `onDisable`, `getHealthStatus`,
 `onSettingsChange`, `onResetData`) em todos, sem saber o que cada um faz
 por dentro.
 
-O contrato na linha de base v0.1.0:
+O contrato vigente nesta linha de base:
 
 - `onRegister(context)` — roda sempre, no registro; guarda o context.
 - `onEnable()` / `onDisable()` — ativação e desativação de fato (coisas
@@ -135,15 +135,14 @@ partir disso.
 
 O vault do Obsidian é assíncrono. Dois módulos diferentes podem, em teoria,
 mexer no mesmo arquivo dentro da mesma janela de tempo (ex.: o módulo de
-Templates movendo uma nota para `Pendente` no exato momento em que uma
+Templates movendo uma nota para a pasta de notas incompletas no exato momento em que uma
 chamada MCP está editando essa nota a pedido de um cliente externo). Sem
 serialização, a escrita que "chegar por último" no event loop pode
 sobrescrever a outra silenciosamente.
 
 `FileWriteQueue.run(path, operation)` garante que toda operação de escrita
 para o MESMO `path` rode em sequência — nunca em paralelo — sem bloquear
-operações em arquivos diferentes. Na linha de base, **todas** as escritas
-de módulos e do MCP passam por ela.
+operações em arquivos diferentes. Na linha de base, as operações de escrita que podem concorrer entre módulos e MCP passam por ela; operações internas do Obsidian que apenas normalizam frontmatter são mantidas no próprio módulo.
 
 ## Por que uma ponte de eventos do vault (`VaultEventBridge`)
 
@@ -171,7 +170,7 @@ criação recursiva de pastas (o `vault.createFolder` do Obsidian NÃO cria
 pastas-pai) e nome único com extensão preservada.
 
 O mesmo princípio gerou módulos puras ao lado dos módulos de vault:
-`NoteStatus.ts` (pendente/completo), `WriteRules.ts` (permissões de pasta
+`NoteStatus.ts` (incompleto/completo), `WriteRules.ts` (permissões de pasta
 do MCP) e `ReleaseUtils.ts` (SemVer). Na v0.2.0 o padrão virou a norma:
 `ToolsApiVersion`, `SignatureUtils`, `IcsParser`, `NotificationList`,
 `HistoryFilter`, `CssHighlight` e `lobbyOrder` — toda regra de decisão
@@ -192,7 +191,7 @@ módulos continuam funcionando normalmente.
 
 Como todos os caminhos são configuráveis pelo usuário (decisão de design),
 existe risco real de dois módulos apontarem, sem querer, para a mesma pasta
-(ex.: pasta de templates do calendário = pasta de Pendente do módulo de
+(ex.: pasta de templates do calendário = pasta de notas incompletas do módulo de
 Templates). Centralizar essa checagem em `SettingsManager.validate()`
 garante que ela rode toda vez que QUALQUER configuração for salva, de
 qualquer módulo, sem cada módulo precisar reimplementar essa lógica. A

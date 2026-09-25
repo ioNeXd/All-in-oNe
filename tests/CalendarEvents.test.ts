@@ -21,7 +21,9 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
 		reminder: true,
 		...overrides,
 	};
-}	describe("disparo de eventos do calendário", () => {
+}
+
+describe("disparo de eventos do calendário", () => {
 	it("dispara no dia certo de um evento anual", () => {
 		expect(shouldFire(makeEvent(), new Date(2026, 8, 15, 10, 0))).toBe(true);
 	});
@@ -48,6 +50,11 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
 		expect(shouldFire(event, new Date(2026, 8, 15, 14, 29))).toBe(false);
 		expect(shouldFire(event, new Date(2026, 8, 15, 14, 30))).toBe(true);
 		expect(shouldFire(event, new Date(2026, 8, 15, 23, 0))).toBe(true);
+	});
+
+	it("horário inválido nunca dispara", () => {
+		const event = makeEvent({ time: "25:99" });
+		expect(shouldFire(event, new Date(2026, 8, 15, 23, 59))).toBe(false);
 	});
 
 	/**
@@ -94,6 +101,12 @@ describe("pasta do mês", () => {
 		expect(monthFolderName(0)).toBe("01 - Janeiro");
 		expect(monthFolderName(8)).toBe("09 - Setembro");
 		expect(monthFolderName(11)).toBe("12 - Dezembro");
+	});
+
+	it("rejeita índice de mês fora do intervalo", () => {
+		expect(() => monthFolderName(-1)).toThrow(RangeError);
+		expect(() => monthFolderName(12)).toThrow(RangeError);
+		expect(() => monthFolderName(1.5)).toThrow(RangeError);
 	});
 });
 
@@ -189,11 +202,21 @@ describe("nextEventDelayMs — agendamento por evento (em vez de polling)", () =
 		expect(nextEventDelayMs(events, NOW)).toBe(30 * 60 * 1000);
 	});
 
-	it("horário de hoje que JÁ PASSOU: o candidato amanhã entra na conta (preciso se < 1h)", () => {
+	it("usa a data do evento, não a data de hoje, para a próxima ocorrência", () => {
+		const events = [makeEvent({ day: 24, month: 9, time: "10:30" })];
+		expect(nextEventDelayMs(events, NOW)).toBe(MAX_SCHEDULE_DELAY_MS);
+	});
+
+	it("evento anual em outro mês é agendado na próxima ocorrência", () => {
+		const events = [makeEvent({ day: 23, month: 10, time: "10:30" })];
+		expect(nextEventDelayMs(events, NOW)).toBe(MAX_SCHEDULE_DELAY_MS);
+	});
+
+	it("horário anual que JÁ PASSOU espera a próxima ocorrência anual", () => {
 		const lateNight = new Date(2026, 8, 23, 23, 40, 0, 0); // 23:40
 		const events = [makeEvent({ day: 23, month: 9, time: "00:10" })];
-		// Hoje 00:10 já passou; amanhã 00:10 = 30min de distância:
-		expect(nextEventDelayMs(events, lateNight)).toBe(30 * 60 * 1000);
+		// O horário de hoje já passou; a próxima ocorrência é 23/09/2027.
+		expect(nextEventDelayMs(events, lateNight)).toBe(MAX_SCHEDULE_DELAY_MS);
 	});
 
 	it("sem eventos com horário: teto de rotina (1h), nunca polling curto", () => {
@@ -217,6 +240,16 @@ describe("nextEventDelayMs — agendamento por evento (em vez de polling)", () =
 
 	it("time malformado é ignorado (sem agendar para NaN)", () => {
 		const events = [makeEvent({ day: 23, month: 9, time: " bananas " })];
+		expect(nextEventDelayMs(events, NOW)).toBe(MAX_SCHEDULE_DELAY_MS);
+	});
+
+	it("time fora do intervalo também é ignorado", () => {
+		const events = [makeEvent({ day: 23, month: 9, time: "25:99" })];
+		expect(nextEventDelayMs(events, NOW)).toBe(MAX_SCHEDULE_DELAY_MS);
+	});
+
+	it("data de calendário impossível não gera um disparo normalizado pelo Date", () => {
+		const events = [makeEvent({ day: 31, month: 2, time: "10:30" })];
 		expect(nextEventDelayMs(events, NOW)).toBe(MAX_SCHEDULE_DELAY_MS);
 	});
 

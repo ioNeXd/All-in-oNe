@@ -42,18 +42,18 @@ const MAX_RULE_HISTORY = 15;
  * preenche automaticamente os metadados deriváveis (`date`, `thema` — este
  * último a partir da hierarquia de pastas) e, se algum campo obrigatório
  * não puder ser preenchido, marca a nota como `status: incompleto` e a move
- * para a pasta "Pendente" um nível abaixo do root da categoria (criando essa
- * pasta se necessário; cai para "Pendente" na raiz se a categoria não puder
- * ser determinada).
+ * para a pasta de notas incompletas um nível abaixo do root da categoria
+ * (criando essa pasta se necessário; cai para a pasta de notas incompletas
+ * na raiz se a categoria não puder ser determinada).
  */
 export class TemplatesModule implements HubModule {
 	readonly manifest: ModuleManifest = {
 		id: "templates",
 		displayName: "Templates por pasta",
 		description:
-			"Aplica templates e metadados automáticos conforme a pasta onde a nota é criada; notas incompletas vão para Pendente.",
+			"Aplica templates e metadados automáticos conforme a pasta onde a nota é criada; notas incompletas vão para a pasta configurada de notas incompletas.",
 		icon: "file-stack",
-		version: "0.1.0",
+		version: "0.2.0",
 		contractVersion: "2.0.0",
 		desktopOnly: false,
 		emits: [
@@ -72,12 +72,15 @@ export class TemplatesModule implements HubModule {
 	private pendingSuggestions: PendingSuggestion[] = [];
 	/** Caminhos em movimentação — evita reentrância nos handlers de modify. */
 	private movingFiles = new Set<string>();
+	/** Impede callbacks assíncronos de continuar após a desativação do módulo. */
+	private stopped = false;
 
 	onRegister(context: ModuleContext): void {
 		this.context = context;
 	}
 
 	onEnable(): void {
+		this.stopped = false;
 		const context = this.context!;
 
 		// Escuta o evento do módulo de Ciclo de Vida (nota já com nome definitivo)
@@ -88,6 +91,7 @@ export class TemplatesModule implements HubModule {
 			if (!path) return;
 			const file = context.app.vault.getAbstractFileByPath(path);
 			if (file instanceof TFile && file.extension === "md") {
+				if (this.stopped) return;
 				void this.handleNoteCreated(file);
 			}
 		});
@@ -119,6 +123,7 @@ export class TemplatesModule implements HubModule {
 		// foi reprocessado — é a garantia certa de "frontmatter atualizado".
 		const modifyRef = context.app.metadataCache.on("changed", (file) => {
 			if (file instanceof TFile && file.extension === "md") {
+				if (this.stopped) return;
 				void this.handleNoteModified(file);
 			}
 		});
@@ -240,7 +245,8 @@ export class TemplatesModule implements HubModule {
 			text:
 				"Toda nota criada nesta pasta recebe o template abaixo, ganha os metadados " +
 				"date, thema e origem automaticamente, e nasce com status: incompleto na pasta " +
-				"Pendente da categoria. Quando `concluido` for true, o status vira `completo` e a nota volta sozinha para a pasta de origem.",
+				"de notas incompletas da categoria. Quando `concluido` for true, o status vira " +
+				"`completo` e a nota volta sozinha para a pasta de origem.",
 		});
 
 		// Seletor de regra "pai" (herança de template).
@@ -327,6 +333,7 @@ export class TemplatesModule implements HubModule {
 	}
 
 	onDisable(): void {
+		this.stopped = true;
 		this.detachCreate?.();
 		this.detachModify?.();
 		// Fila de sugestões é estado vivo do listener: desligado o módulo, não
@@ -393,6 +400,7 @@ export class TemplatesModule implements HubModule {
 	 * tratar tudo como texto comum e os metadados somem.
 	 */
 	async applyRuleToNote(file: TFile, rule: FolderTemplateRule): Promise<void> {
+		if (this.stopped) return;
 		const templateBody = this.buildTemplateContent(rule);
 
 		// Conteúdo e frontmatter pertencem à mesma operação serializada. Isso evita
@@ -413,6 +421,7 @@ export class TemplatesModule implements HubModule {
 				fm.origem = file.path;
 			});
 		});
+		if (this.stopped) return;
 		await this.movePendingToCategoryFolder(file);
 		this.context?.bus.emit("templates:note-pending", { path: file.path }, "templates");
 		this.context?.log("Nota criada e marcada como incompleta", { path: file.path });
@@ -450,6 +459,8 @@ export class TemplatesModule implements HubModule {
 			return;
 		}
 
+		if (this.stopped) return;
+
 		// A conclusão é a fonte de verdade: quando concluido é true, a nota deve
 		// ser normalizada para completo e devolvida à origem.
 		const effectiveStatus = fm.concluido === true ? STATUS_COMPLETE_NORMALIZED : fm.status;
@@ -463,6 +474,7 @@ export class TemplatesModule implements HubModule {
 			// reentrância — travando qualquer operação futura com a nota.
 		const pathBefore = file.path;
 		this.movingFiles.add(pathBefore);
+		this.movingFiles.add(origem);
 		try {
 			if (action.rewriteStatus) {
 				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
@@ -476,6 +488,7 @@ export class TemplatesModule implements HubModule {
 				await ensureVaultFolder(this.context!.app, targetFolder);
 
 				const finalPath = await uniqueVaultPath(this.context!.app, origem);
+				this.movingFiles.add(finalPath);
 				await this.context!.fileWriteQueueRun(file.path, () =>
 					this.context!.app.fileManager.renameFile(file, finalPath)
 				);
@@ -483,21 +496,25 @@ export class TemplatesModule implements HubModule {
 				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
 					delete frontmatter.origem;
 				});
+				if (this.stopped) return;
 
 				this.context?.bus.emit("templates:note-restored", { path: finalPath }, "templates");
 				new Notice(`Nota completada e devolvida para ${finalPath}`);
 			}
 		} finally {
 			this.movingFiles.delete(pathBefore);
+			this.movingFiles.delete(origem);
 		}
 	}
 
-	private buildTemplateContent(rule: FolderTemplateRule): string {
+	private buildTemplateContent(rule: FolderTemplateRule, seen = new Set<string>()): string {
+		if (seen.has(rule.id)) throw new Error("Herança circular de templates detectada.");
+		seen.add(rule.id);
 		const settings = this.readSettings();
 		let content = "";
 		if (rule.extendsRuleId) {
 			const parent = settings.rules.find((r) => r.id === rule.extendsRuleId);
-			if (parent) content += this.buildTemplateContent(parent) + "\n";
+			if (parent) content += this.buildTemplateContent(parent, seen) + "\n";
 		}
 		content += rule.templateContent;
 		return content;
@@ -510,25 +527,28 @@ export class TemplatesModule implements HubModule {
 		return parts;
 	}
 
-	/** Move a nota para CategoriaX/Pendente/, criando a pasta se necessário; cai para Pendente na raiz se não achar categoria. */
+	/** Move a nota para a pasta de notas incompletas da categoria, criando-a se necessário. */
 	private async movePendingToCategoryFolder(file: TFile): Promise<void> {
 		const parts = file.path.split("/");
 		const category = parts.length > 1 ? parts[0] : undefined;
 		const pendingFolder = category ? `${category}/Pendente` : "Pendente";
 
 		await ensureVaultFolder(this.context!.app, pendingFolder);
+		if (this.stopped) return;
 		const newPath = await uniqueVaultPath(this.context!.app, normalizePath(`${pendingFolder}/${file.name}`));
 
 		// Mesma regra do handleNoteModified: capturar o caminho ANTES do rename,
 		// porque o TFile.path muda in-place no meio desta operação.
 		const pathBefore = file.path;
 		this.movingFiles.add(pathBefore);
+		this.movingFiles.add(newPath);
 		try {
 			await this.context!.fileWriteQueueRun(pathBefore, () =>
 				this.context!.app.fileManager.renameFile(file, newPath)
 			);
 		} finally {
 			this.movingFiles.delete(pathBefore);
+			this.movingFiles.delete(newPath);
 		}
 	}
 
@@ -544,7 +564,7 @@ export class TemplatesModule implements HubModule {
 	async saveRule(rule: FolderTemplateRule): Promise<void> {
 		const settings = this.readSettings();
 		const existingIndex = settings.rules.findIndex((r) => r.id === rule.id);
-		const versions = settings.ruleVersions[rule.id] ?? [];
+		const versions = [...(settings.ruleVersions[rule.id] ?? [])];
 
 		if (existingIndex >= 0) {
 			versions.unshift({ content: settings.rules[existingIndex].templateContent, savedAt: Date.now() });

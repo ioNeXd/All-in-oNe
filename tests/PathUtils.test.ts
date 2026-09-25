@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { uniqueNameWith, validateVaultPath } from "../src/core/PathUtils";
+import { isPathWithinBase, uniqueNameWith, validateVaultPath } from "../src/core/PathUtils";
 
 /**
  * IMPORTA O CÓDIGO REAL (PathUtils.ts) — a regra de colisão de nomes era
@@ -56,6 +56,27 @@ describe("uniqueNameWith — primeiro nome livre", () => {
 			return p === "X.md"; // só X.md existe; X 2.md livre
 		});
 		expect(perguntas).toEqual(["X.md", "X 2.md"]);
+	});
+});
+
+
+describe("isPathWithinBase — contenção", () => {
+	it("aceita o próprio diretório base e descendentes", () => {
+		expect(isPathWithinBase("Notas", "Notas")).toBe(true);
+		expect(isPathWithinBase("Notas/2026/Relatorio.md", "Notas")).toBe(true);
+	});
+
+	it("não confunde prefixo de nome com descendência", () => {
+		expect(isPathWithinBase("NotasExtras/Relatorio.md", "Notas")).toBe(false);
+	});
+
+	it("normaliza separadores e comparação de caixa", () => {
+		expect(isPathWithinBase("Notas\\2026\\Relatorio.md", "notas")).toBe(true);
+	});
+
+	it("rejeita qualquer path contendo .. antes de considerar a base", () => {
+		expect(isPathWithinBase("Notas/../segredo.md", "Notas")).toBe(false);
+		expect(isPathWithinBase("Notas/relatorio..final.md", "Notas")).toBe(false);
 	});
 });
 

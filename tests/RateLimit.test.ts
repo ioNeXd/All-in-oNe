@@ -57,6 +57,22 @@ describe("createRateLimiter — janela deslizante", () => {
 		expect(a.remaining(42_001)).toBe(b.remaining(42_001));
 		expect(a.remaining(42_001)).toBe(0);
 	});
+
+	it("rejeita limites inválidos", () => {
+		for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(() => createRateLimiter(bad)).toThrow(RangeError);
+		}
+	});
+
+	it("rejeita instantes não finitos", () => {
+		const limiter = createRateLimiter(1);
+		for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+			expect(() => limiter.remaining(bad)).toThrow(RangeError);
+			expect(() => limiter.count(bad)).toThrow(RangeError);
+			expect(() => limiter.tryConsume(bad)).toThrow(RangeError);
+			expect(() => limiter.release(bad)).toThrow(RangeError);
+		}
+	});
 });
 
 describe("wouldAllow — pré-checagem sem consumir", () => {

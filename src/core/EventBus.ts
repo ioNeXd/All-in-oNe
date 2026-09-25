@@ -57,8 +57,8 @@ export class EventBus {
 	private historyLimit = DEFAULT_HISTORY_LIMIT;
 	private throttleWindows = new Map<HubEventName, number>(); // ms
 	/**
-	 * Chaves evento:fonte — CRESCE LIMITADA por construção: só eventos COM
-	 * janela de throttle registrada escrevem aqui (o `set` está dentro do
+	 * Chaves compostas evento+fonte — CRESCE LIMITADA por construção: só
+	 * eventos COM janela de throttle registrada escrevem aqui (o `set` está dentro do
 	 * branch do throttle no emit), então o teto é (#eventos com throttle) ×
 	 * (#fontes distintas de cada um). Hoje: 1 evento ("file:created") × 2
 	 * fontes ("core", "filelifecycle"). Eventos sem janela nunca tocam a Map.
@@ -119,15 +119,20 @@ export class EventBus {
 	 */
 	private cancelIdleCoalescers(): void {
 		for (const [throttleKey, timer] of this.coalesceTimers.entries()) {
-			// A chave é "evento:fonte"; o evento pode conter ":" no nome — remove
-			// só o ÚLTIMO segmento (a fonte), nunca o primeiro (o nome).
-			const lastColon = throttleKey.lastIndexOf(":");
-			const eventName = lastColon === -1 ? throttleKey : throttleKey.slice(0, lastColon);
+			let eventName: HubEventName;
+			try {
+				const parsed = JSON.parse(throttleKey) as unknown;
+				if (!Array.isArray(parsed) || typeof parsed[0] !== "string") continue;
+				eventName = parsed[0];
+			} catch {
+				continue;
+			}
 			const hasListeners = (this.subscriptions.get(eventName) ?? []).length > 0;
 			if (!hasListeners) {
 				clearTimeout(timer);
 				this.coalesceTimers.delete(throttleKey);
 				this.coalescedPayloads.delete(throttleKey);
+				this.lastEmitAt.delete(throttleKey);
 			}
 		}
 	}
@@ -138,11 +143,14 @@ export class EventBus {
 	 * para eventos de alta frequência como escrita de arquivo em vaults grandes.
 	 */
 	setThrottle(eventName: HubEventName, windowMs: number): void {
+		if (!Number.isFinite(windowMs) || windowMs <= 0) {
+			throw new RangeError("A janela de throttle deve ser um número finito maior que zero.");
+		}
 		this.throttleWindows.set(eventName, windowMs);
 	}
 
 	async emit<T = unknown>(eventName: HubEventName, payload: T, source: string): Promise<void> {
-		const throttleKey = `${eventName}:${source}`;
+		const throttleKey = JSON.stringify([eventName, source]);
 		const windowMs = this.throttleWindows.get(eventName);
 		if (windowMs) {
 			const last = this.lastEmitAt.get(throttleKey) ?? 0;

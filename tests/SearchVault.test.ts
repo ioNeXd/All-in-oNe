@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
 	normalizeQuery,
 	countOccurrences,
@@ -129,7 +129,7 @@ describe("searchVault — estratégia de leitura", () => {
 		expect(result.matches[0].snippet).toContain("orquídeas");
 	});
 
-	it("teto interrompe a leitura (não varre o vault inteiro)", async () => {
+	it("teto interrompe a leitura de conteúdo (não lê o vault inteiro)", async () => {
 		const notes: Note[] = [];
 		for (let i = 0; i < 200; i++) {
 			notes.push({ path: `n${i}.md`, tags: [], frontmatter: [], content: `contém alvo aqui ${i}` });
@@ -139,6 +139,24 @@ describe("searchVault — estratégia de leitura", () => {
 		expect(result.matches).toHaveLength(5);
 		expect(result.truncated).toBe(true);
 		expect(reads.length).toBeLessThanOrEqual(6); // 5 aceitos + 1 que revelou o estouro
+	});
+
+	it("candidatos de metadata são ordenados por score antes do teto", async () => {
+		const { primitives } = makePrimitives([
+			{ path: "z.md", tags: [], frontmatter: ["status: alvo"], content: "" },
+			{ path: "a-alvo.md", tags: [], frontmatter: [], content: "" },
+			{ path: "alvo.md", tags: ["alvo"], frontmatter: [], content: "" },
+		]);
+		const result = await searchVault({ query: "alvo", maxResults: 2 }, primitives);
+		expect(result.matches.map((m) => m.path)).toEqual(["alvo.md", "a-alvo.md"]);
+		expect(result.truncated).toBe(true);
+	});
+
+	it("maxResults inválido é rejeitado", async () => {
+		const { primitives } = makePrimitives([]);
+		for (const maxResults of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			await expect(searchVault({ query: "alvo", maxResults }, primitives)).rejects.toThrow(RangeError);
+		}
 	});
 
 	it("teto default é aplicado quando maxResults não vem", async () => {

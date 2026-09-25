@@ -53,6 +53,8 @@ export class LobbyModal extends Modal {
 	}
 
 	onClose(): void {
+		this.renderer?.destroy();
+		this.renderer = undefined;
 		this.contentEl.empty();
 	}
 }

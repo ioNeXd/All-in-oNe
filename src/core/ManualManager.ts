@@ -7,11 +7,11 @@ export class ManualManager {
 	constructor(private app: App) {}
 
 	async update(settings: HubSettings): Promise<void> {
-		const system = settings.paths.systemFolder || "99 - Sistema";
+		const system = (settings.paths.systemFolder || "99 - Sistema").replace(/\/+$/, "");
 		const path = system + "/00 - Manual.md";
 		await ensureVaultFolder(this.app, system);
 		const p = settings.paths;
-		const eventFolder = `${p.calendarFolder.replace(/\/+$/, "")}/Notas-Eventos`;
+		const eventFolder = `${(p.calendarFolder || "01 - Calendario").replace(/\/+$/, "")}/Notas-Eventos`;
 		const content = [
 			"---", "title: Manual All-in-oNe", "type: system", "---", "",
 			"# All-in-oNe", "", "## Estrutura atual do vault", "",

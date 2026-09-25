@@ -150,10 +150,6 @@
 	border-color: var(--interactive-accent);
 }
 
-.ione-hub-calendar__day--pending {
-	border-color: var(--text-error);
-}
-
 /* ---- Calendário: cabeçalho, grade e visões ---- */
 .ione-hub-calendar__header {
 	display: flex;

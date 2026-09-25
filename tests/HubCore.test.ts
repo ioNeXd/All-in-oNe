@@ -202,8 +202,8 @@ describe("HubCore — ciclo de vida de módulos", () => {
 		expect(core.isModuleEnabled("mcp")).toBe(true);
 		expect(exited).toEqual([{ moduleId: "mcp" }]);
 
-		// Bloqueio encerrado: registro de módulos volta a habilitar de fato.
-		await core.registerModule(makeTestModule({ id: "styles", onEnable: onEnable2 }));
+		// Bloqueio encerrado: um módulo já registrado pode ser habilitado normalmente.
+		await core.enableModule("styles");
 		expect(onEnable2).toHaveBeenCalledTimes(1);
 		expect(core.isModuleEnabled("styles")).toBe(true);
 	});

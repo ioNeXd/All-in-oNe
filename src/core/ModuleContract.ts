@@ -10,8 +10,8 @@ import type { HubSettings } from "./types";
  * Notificações, Histórico) e qualquer módulo futuro — precisa implementar.
  *
  * O núcleo (HubCore) nunca conhece os detalhes internos de um módulo. Ele só
- * conhece esta interface. Isso é o que permite adicionar um 7º, 8º, 9º módulo
- * no futuro sem alterar o núcleo, o Lobby ou o event bus: basta escrever uma
+ * conhece esta interface. Isso é o que permite adicionar um novo módulo no
+ * futuro sem alterar o núcleo, o Lobby ou o event bus: basta escrever uma
  * classe que implemente HubModule e registrá-la.
  *
  * REGRAS DO CONTRATO (documentadas aqui para quem for escrever um novo

@@ -56,6 +56,12 @@ describe("addSuggestion — teto", () => {
 		expect(list[list.length - 1].path).toBe(`n${MAX_PENDING_SUGGESTIONS + 4}.md`);
 	});
 
+	it("rejeita teto zero, negativo e fracionário", () => {
+		expect(() => addSuggestion([], s("a.md"), 0)).toThrow(RangeError);
+		expect(() => addSuggestion([], s("a.md"), -1)).toThrow(RangeError);
+		expect(() => addSuggestion([], s("a.md"), 1.5)).toThrow(RangeError);
+	});
+
 	it("respeita um teto menor passado por parâmetro", () => {
 		let list: PendingSuggestion[] = [];
 		for (let i = 0; i < 5; i++) list = addSuggestion(list, s(`n${i}.md`), 3).list;

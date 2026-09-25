@@ -1,11 +1,11 @@
 # Checklist de validação manual — v0.2.0
 
-O que os **258 testes automatizados** não cobrem é o runtime de verdade
+O que os **testes automatizados registrados para esta linha de base** não cobrem é o runtime de verdade
 dentro do Obsidian: ciclo de vida do plugin, interações de UI, portas,
 arquivos e o comportamento sob uso real. Este checklist guia essa validação
 no vault. Marque cada item só depois de ver o resultado com os próprios
-olhos — o objetivo é gerar confiança para o primeiro bump de versão
-(0.1.x) e, no caminho, achar bugs que análise estática não pega.
+olhos — o objetivo é gerar confiança para o próximo bump de versão
+(0.2.x) e, no caminho, achar bugs que análise estática não pega.
 
 ## Preparação
 
@@ -156,19 +156,19 @@ olhos — o objetivo é gerar confiança para o primeiro bump de versão
       motivo e painel intacto — nada é gravado;
 - [ ] Cancelar o seletor de arquivo: nada acontece, sem erro.
 
-## 5. Templates — fluxo Pendente de ponta a ponta
+## 5. Templates — fluxo de status de ponta a ponta
 
 - [ ] Criar regra para uma pasta (ex.: `Projetos`) pelo painel do módulo;
 - [ ] Criar nota nessa pasta: pergunta o nome (módulo de Ciclo de Vida), e
       depois o template é aplicado — **frontmatter intacto** (o corpo entra
       primeiro; o frontmatter é gravado via `processFrontMatter`);
-- [ ] A nota nasce com `status: ["Pendente", "Completo"]` — chip clicável no
+- [ ] A nota nasce com `status: "incompleto"` — chip clicável no
       painel de Propriedades;
-- [ ] Mover a nota para fora / remover o chip "Pendente" → nota vai para a
-      pasta Pendente (por categoria, com fallback);
+- [ ] Mover a nota para fora / remover o chip `incompleto` → nota vai para
+      a pasta Pendente (por categoria, com fallback);
 - [ ] Apagar o campo `status` por inteiro (o Obsidian às vezes remove a
       propriedade toda) → nota **volta** para a pasta de origem;
-- [ ] Escrever "Completo" à mão → também devolve à origem;
+- [ ] Escrever "completo" à mão → também devolve à origem;
 - [ ] **Histórico** (aba Histórico do Lobby): criação aparece **uma** vez
       com o nome definitivo — sem "Untitled" duplicado (regressão antiga);
 - [ ] `Ctrl+N` seguidas vezes: a pergunta de nome funciona em **todas** as
@@ -225,7 +225,7 @@ olhos — o objetivo é gerar confiança para o primeiro bump de versão
 
 ### Assinatura GPG (opt-in)
 
-> Precisa de um release com assets `.sig`/`.asc` publicados pelo workflow
+> Precisa de um release com assets `.sig`/ `.asc` publicados pelo workflow
 > (seção 7b abaixo) e do binário `gpg` instalado. Sem release assinado,
 > valide só o caminho "sem assinatura no release".
 
@@ -308,6 +308,6 @@ olhos — o objetivo é gerar confiança para o primeiro bump de versão
 
 Tudo marcado = baseline validada em runtime. Bugs achados: registrar em
 issue com passo a passo e console anexado, corrigir, e reexecutar **só** a
-seção afetada + a seção 10 (estabilidade). Com isso, o projeto está pronto
-para o bump `0.2.0` e para usar o fluxo `npm version` + tag do `release.yml`
-com confiança.
+seção afetada + a seção 10 (estabilidade). Com isso, a baseline está pronta
+para manutenção da linha `0.2.x` e para seguir o fluxo `npm version` +
+tag do `release.yml` quando for preparado o próximo release.

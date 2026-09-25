@@ -34,7 +34,7 @@ export const TRIGGER_LABELS: Record<NotifiableTrigger, string> = {
 	"calendar:event-fired": "Evento do calendário chegou",
 	"calendar:note-created": "Nota de calendário criada",
 	"autoupdate:available": "Atualização disponível",
-	"templates:note-pending": "Nota marcada como pendente",
+	"templates:note-pending": "Nota marcada como incompleta",
 	"templates:note-restored": "Nota completada e devolvida",
 	"core:safe-mode-entered": "Módulo desligado por falha",
 };
@@ -403,7 +403,20 @@ export class NotificationsModule implements HubModule {
 	}
 
 	private readSettings(): NotificationsModuleSettings {
-		const settings = { ...NOTIFICATIONS_DEFAULTS, ...this.context?.getSettings<NotificationsModuleSettings>() };
+		const raw = this.context?.getSettings<NotificationsModuleSettings>();
+		const settings = { ...NOTIFICATIONS_DEFAULTS, ...raw };
+		const validFilter =
+			settings.viewFilter === "all" ||
+			(Object.keys(TRIGGER_LABELS) as NotifiableTrigger[]).includes(settings.viewFilter);
+		if (!validFilter) settings.viewFilter = "all";
+		settings.groupByDay = settings.groupByDay !== false;
+		const normalizeHour = (value: number, fallback: number): number =>
+			Number.isInteger(value) && value >= 0 && value <= 23 ? value : fallback;
+		settings.doNotDisturb = {
+			enabled: settings.doNotDisturb?.enabled === true,
+			startHour: normalizeHour(settings.doNotDisturb?.startHour, NOTIFICATIONS_DEFAULTS.doNotDisturb.startHour),
+			endHour: normalizeHour(settings.doNotDisturb?.endHour, NOTIFICATIONS_DEFAULTS.doNotDisturb.endHour),
+		};
 		// As pendentes do write-behind fazem parte do estado lógico — leitura
 		// (painel, contagem de não lidas) inclui o que ainda não chegou ao disco.
 		const pending = this.pendingNotifications.pendingSnapshot();
@@ -453,7 +466,7 @@ export class NotificationsModule implements HubModule {
 			case "autoupdate:available":
 				return `⬆️ Nova versão disponível: ${payload.version}`;
 			case "templates:note-pending":
-				return `📝 Nota criada pendente: ${payload.path}`;
+				return `📝 Nota criada incompleta: ${payload.path}`;
 			case "templates:note-restored":
 				return `✅ Nota completada e restaurada: ${payload.path}`;
 			case "core:safe-mode-entered":
@@ -548,9 +561,12 @@ export class NotificationsModule implements HubModule {
 		// usuário vê na hora; só o DISCO é que é coalescido. A fila aplica o
 		// teto internamente ao confirmar (o flush grava no máximo MAX_HISTORY).
 		this.pendingNotifications.enqueue(entry);
-		if (!this.flushTimer) {
-			this.flushTimer = setTimeout(() => void this.flushNow(), FLUSH_INTERVAL_MS);
-		}
+		this.scheduleFlush();
+	}
+
+	private scheduleFlush(): void {
+		if (this.flushTimer || this.pendingNotifications.size === 0) return;
+		this.flushTimer = setTimeout(() => void this.flushNow(), FLUSH_INTERVAL_MS);
 	}
 
 	/**
@@ -578,8 +594,12 @@ export class NotificationsModule implements HubModule {
 			}
 			drain.confirm();
 		} catch {
-			// Save falhou: SEM confirm — o lote segue pendente para o próximo
-			// flush re-tentar (a notificação não se perde na variável local).
+			// Save falhou: libera o lote para um retry real. Sem isso, os ids
+			// permaneceriam marcados como em voo e nenhum drain futuro poderia
+			// recolocá-los no lote. O retry precisa ser reagendado aqui: neste
+			// ponto o timer que iniciou este flush já foi consumido.
+			drain.release();
+			this.scheduleFlush();
 		}
 	}
 

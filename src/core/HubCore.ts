@@ -30,9 +30,11 @@ export class HubCore {
 	private modules = new Map<ModuleId, HubModule>();
 	private enabledModuleIds = new Set<ModuleId>();
 	private runtimeEnabledIds = new Set<ModuleId>();
+	private registeredModuleIds = new Set<ModuleId>();
 	private crashCounts = new Map<ModuleId, number>();
 	private lastEnableErrors = new Map<ModuleId, string>();
 	private safeMode = false;
+	private safeModeOffenderId: ModuleId | undefined;
 
 	constructor(
 		readonly app: App,
@@ -66,14 +68,21 @@ export class HubCore {
 	 * Se onRegister falha, o módulo fica registrado mas não habilitado.
 	 */
 	async registerModule(module: HubModule): Promise<void> {
-		this.modules.set(module.manifest.id, module);
+		const id = module.manifest.id;
+		if (this.modules.has(id)) {
+			console.warn(`[All iₙ oNe] Módulo "${id}" já está registrado; registro duplicado ignorado.`);
+			return;
+		}
+
+		this.modules.set(id, module);
 		this.settings.registerModuleForValidation(module);
 
-		const context = this.buildContext(module.manifest.id);
-		this.moduleContexts.set(module.manifest.id, context);
+		const context = this.buildContext(id);
+		this.moduleContexts.set(id, context);
 
 		try {
 			module.onRegister(context);
+			this.registeredModuleIds.add(id);
 		} catch (err) {
 			console.error(`[All iₙ oNe] Módulo "${module.manifest.id}" falhou no onRegister:`, err);
 			this.lastEnableErrors.set(module.manifest.id, describeError(err));
@@ -85,9 +94,9 @@ export class HubCore {
 			return;
 		}
 
-		const shouldEnable = this.enabledModuleIds.has(module.manifest.id) && !this.safeMode;
+		const shouldEnable = this.enabledModuleIds.has(id) && !this.safeMode;
 		if (shouldEnable) {
-			await this.enableModule(module.manifest.id);
+			await this.enableModule(id);
 		}
 	}
 
@@ -130,7 +139,9 @@ export class HubCore {
 	 */
 	async enableModule(id: ModuleId): Promise<void> {
 		const module = this.modules.get(id);
-		if (!module) return;
+		if (!module || !this.registeredModuleIds.has(id)) return;
+
+		if (this.safeMode && id !== this.safeModeOffenderId) return;
 
 		if (module.manifest.contractVersion.split(".")[0] !== CONTRACT_VERSION.split(".")[0]) {
 			console.warn(
@@ -145,8 +156,9 @@ export class HubCore {
 			this.crashCounts.set(id, 0);
 			this.lastEnableErrors.delete(id);
 			void this.bus.emit("core:module-enabled", { moduleId: id }, "core");
-			if (this.safeMode) {
+			if (this.safeMode && id === this.safeModeOffenderId) {
 				this.safeMode = false;
+				this.safeModeOffenderId = undefined;
 				this.crashCounts.clear();
 				void this.bus.emit("core:safe-mode-exited", { moduleId: id }, "core");
 			}
@@ -205,6 +217,7 @@ export class HubCore {
 
 	private async enterSafeMode(offendingModuleId: ModuleId, error: unknown): Promise<void> {
 		this.safeMode = true;
+		this.safeModeOffenderId = offendingModuleId;
 		this.enabledModuleIds.delete(offendingModuleId);
 		this.runtimeEnabledIds.delete(offendingModuleId);
 		await this.bus.emit(

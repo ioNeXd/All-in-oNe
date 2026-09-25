@@ -20,12 +20,10 @@ describe("negotiateToolsApiVersion — cliente compatível", () => {
 		expect(n.version).toBe("0.9.0");
 	});
 
-	it("aceita minor/patch maiores dentro do mesmo major (cliente mais novo, mesma API)", () => {
-		// Um cliente que fala 1.9.0 continua funcionando contra um servidor 1.0.0:
-		// recursos que faltarem falham por ferramenta, com erro claro — nunca no handshake.
+	it("aceita minor/patch maiores dentro do mesmo major, mas negocia a versão suportada pelo servidor", () => {
 		const n = negotiateToolsApiVersion("1.9.0", "1.0.0");
 		expect(n.compatible).toBe(true);
-		expect(n.version).toBe("1.9.0");
+		expect(n.version).toBe("1.0.0");
 	});
 
 	it("sem pedido, o servidor dita a versão suportada", () => {
@@ -54,9 +52,19 @@ describe("negotiateToolsApiVersion — major incompatível", () => {
 	});
 
 	it("formato inválido é rejeitado em vez de adivinhado", () => {
-		for (const bad of ["banana", "v1.0.0", ".5", "1.x.0"]) {
+		for (const bad of ["banana", "v1.0.0", ".5", "1.x.0", "1.0", "01.0.0", "1.01.0", "1.0.01"]) {
 			const n = negotiateToolsApiVersion(bad, "1.0.0");
 			expect(n.compatible).toBe(false, `deveria rejeitar "${bad}"`);
+			expect(n.reason).toContain(bad);
+		}
+	});
+});
+
+describe("negotiateToolsApiVersion — versão do servidor", () => {
+	it("rejeita versão suportada pelo servidor em formato inválido", () => {
+		for (const bad of ["banana", "v1.0.0", "1.0", "01.0.0"]) {
+			const n = negotiateToolsApiVersion("1.0.0", bad);
+			expect(n.compatible).toBe(false, `deveria rejeitar servidor "${bad}"`);
 			expect(n.reason).toContain(bad);
 		}
 	});
