@@ -15,6 +15,8 @@ import { FileLifecycleModule } from "./modules/filelifecycle/FileLifecycleModule
 import { VaultEventBridge } from "./core/VaultEventBridge";
 import { CommandBridge } from "./core/CommandBridge";
 import { ManualManager } from "./core/ManualManager";
+import { resolvePaths } from "./core/PathResolver";
+import { ensureVaultFolder } from "./core/VaultPaths";
 import { CalendarSidebarView, CALENDAR_SIDEBAR_VIEW_TYPE } from "./modules/calendar/CalendarSidebarView";
 
 /**
@@ -74,6 +76,14 @@ export default class IoneHubPlugin extends Plugin {
 		await this.core.init();
 
 		// O manual é um documento derivado da configuração atual e é atualizado em todo startup.
+		try {
+			const paths = resolvePaths(this.core.settings.get().paths);
+			for (const path of new Set(Object.values(paths))) await ensureVaultFolder(this.app, path);
+		} catch (err) {
+			console.error("[All iₙ oNe] Falha ao preparar caminhos configurados:", err);
+			new Notice("Algum caminho configurado não pôde ser criado. Verifique a configuração de caminhos.", 8000);
+		}
+
 		try {
 			await new ManualManager(this.app).update(this.core.settings.get());
 		} catch (err) {
