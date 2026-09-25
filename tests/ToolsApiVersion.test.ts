@@ -60,6 +60,16 @@ describe("negotiateToolsApiVersion — major incompatível", () => {
 	});
 });
 
+describe("negotiateToolsApiVersion — versão do servidor", () => {
+	it("rejeita versão suportada pelo servidor em formato inválido", () => {
+		for (const bad of ["banana", "v1.0.0", "1.0", "01.0.0"]) {
+			const n = negotiateToolsApiVersion("1.0.0", bad);
+			expect(n.compatible).toBe(false, `deveria rejeitar servidor "${bad}"`);
+			expect(n.reason).toContain(bad);
+		}
+	});
+});
+
 describe("TOOLS_API_VERSION", () => {
 	it("bate com o default da fatia de settings do módulo MCP", async () => {
 		const { MCP_DEFAULTS } = await import("../src/modules/mcp/McpModule");
