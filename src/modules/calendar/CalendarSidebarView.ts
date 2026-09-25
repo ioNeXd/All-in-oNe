@@ -11,18 +11,22 @@ export class CalendarSidebarView extends ItemView {
 	getIcon(): string { return "calendar"; }
 	async onOpen(): Promise<void> {
 		this.contentEl.empty();
+		if (!this.core.isModuleEnabled("calendar")) {
+			this.contentEl.createEl("p", { text: "O módulo Calendário está desligado." });
+			return;
+		}
 		const calendar = this.core.getModules().find((m) => m.manifest.id === "calendar");
 		if (!(calendar instanceof CalendarModule)) {
-			this.contentEl.createEl("p",{text:"O módulo Calendário está desligado."});
+			this.contentEl.createEl("p", { text: "O módulo Calendário está indisponível." });
 			return;
 		}
 		await calendar.renderSidebarCalendar(this.contentEl);
-		const open = this.contentEl.createEl("button",{text:"Abrir Calendário"});
+		const open = this.contentEl.createEl("button", { text: "Abrir Calendário" });
 		open.onclick = async () => {
 			const leaf = this.app.workspace.getLeaf("tab");
-			await leaf.setViewState({type:"ione-hub-lobby-view",active:true});
+			await leaf.setViewState({ type: "ione-hub-lobby-view", active: true });
 			this.app.workspace.revealLeaf(leaf);
-			await this.core.bus.emit("calendar:open-main",{}, "calendar-sidebar");
+			await this.core.bus.emit("calendar:open-main", {}, "calendar-sidebar");
 		};
 	}
 	async onClose(): Promise<void> { this.contentEl.empty(); }
