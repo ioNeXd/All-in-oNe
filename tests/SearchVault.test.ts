@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
 	normalizeQuery,
 	countOccurrences,
@@ -129,7 +129,7 @@ describe("searchVault — estratégia de leitura", () => {
 		expect(result.matches[0].snippet).toContain("orquídeas");
 	});
 
-	it("teto interrompe a leitura (não varre o vault inteiro)", async () => {
+	it("teto interrompe a leitura de conteúdo (não lê o vault inteiro)", async () => {
 		const notes: Note[] = [];
 		for (let i = 0; i < 200; i++) {
 			notes.push({ path: `n${i}.md`, tags: [], frontmatter: [], content: `contém alvo aqui ${i}` });
