@@ -53,7 +53,7 @@ export class TemplatesModule implements HubModule {
 		description:
 			"Aplica templates e metadados automáticos conforme a pasta onde a nota é criada; notas incompletas vão para Pendente.",
 		icon: "file-stack",
-		version: "0.1.0",
+		version: "0.2.0",
 		contractVersion: "2.0.0",
 		desktopOnly: false,
 		emits: [
