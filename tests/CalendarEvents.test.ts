@@ -210,11 +210,11 @@ describe("nextEventDelayMs — agendamento por evento (em vez de polling)", () =
 		expect(nextEventDelayMs(events, NOW)).toBe(MAX_SCHEDULE_DELAY_MS);
 	});
 
-	it("horário de hoje que JÁ PASSOU: o candidato amanhã entra na conta (preciso se < 1h)", () => {
+	it("horário anual que JÁ PASSOU espera a próxima ocorrência anual", () => {
 		const lateNight = new Date(2026, 8, 23, 23, 40, 0, 0); // 23:40
 		const events = [makeEvent({ day: 23, month: 9, time: "00:10" })];
-		// Hoje 00:10 já passou; amanhã 00:10 = 30min de distância:
-		expect(nextEventDelayMs(events, lateNight)).toBe(30 * 60 * 1000);
+		// O horário de hoje já passou; a próxima ocorrência é 23/09/2027.
+		expect(nextEventDelayMs(events, lateNight)).toBe(MAX_SCHEDULE_DELAY_MS);
 	});
 
 	it("sem eventos com horário: teto de rotina (1h), nunca polling curto", () => {
