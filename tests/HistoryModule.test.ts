@@ -135,6 +135,11 @@ describe("HistoryModule — write-behind e leitura fresca", () => {
 		expect(module.getHealthStatus().summary).toContain("5 entrada");
 	});
 
+	it("limite inválido cai no padrão seguro", () => {
+		const { module } = setup({ maxEntries: 10.5 });
+		expect(module.getHealthStatus().summary).toContain("0 entrada");
+	});
+
 	it("LEITURA FRESCA: pendente aparece na contagem ANTES do flush (item 19)", async () => {
 		const { module, emit } = setup();
 		module.onEnable();
