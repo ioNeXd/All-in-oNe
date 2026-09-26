@@ -477,6 +477,17 @@ export class TemplatesModule implements HubModule {
 		this.movingFiles.add(pathBefore);
 		this.movingFiles.add(origem);
 		try {
+			if (!action.move) {
+				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
+					if (fm.concluido === true) {
+						applyCompletionMetadata(frontmatter);
+					} else if (action.rewriteStatus) {
+						frontmatter.status = STATUS_COMPLETE_NORMALIZED;
+					}
+				});
+				return;
+			}
+
 			if (action.move) {
 				const targetFolder = origem.substring(0, origem.lastIndexOf("/"));
 				await ensureVaultFolder(this.context!.app, targetFolder);
