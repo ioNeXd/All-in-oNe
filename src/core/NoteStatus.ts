@@ -32,6 +32,14 @@ export const STATUS_COMPLETE_NORMALIZED = [STATUS_COMPLETE];
 /** Status de nota recém-criada por template. */
 export const STATUS_PENDING_INITIAL = [STATUS_PENDING];
 
+/**
+ * Normaliza uma nota concluída: o flag transitório `concluido` deixa de existir e o estado persistente passa a ser `completo`.
+ */
+export function applyCompletionMetadata(frontmatter: Record<string, unknown>): void {
+	frontmatter.status = STATUS_COMPLETE_NORMALIZED;
+	delete frontmatter.concluido;
+}
+
 /** Ainda tem o chip "Pendente"? Aceita lista ou string solta, qualquer capitalização. */
 export function isPendingStatus(status: unknown): boolean {
 	const values = Array.isArray(status) ? status : [status];
