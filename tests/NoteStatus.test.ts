@@ -3,6 +3,7 @@ import {
 	isPendingStatus,
 	isNormalizedComplete,
 	decidePendingAction,
+	applyCompletionMetadata,
 } from "../src/core/NoteStatus";
 
 /**
@@ -126,5 +127,18 @@ describe("decidePendingAction — o que fazer quando 'Pendente' saiu do status",
 			rewriteStatus: true,
 			move: false,
 		});
+	});
+});
+
+
+describe("applyCompletionMetadata", () => {
+	it("remove concluido e mantém apenas status completo", () => {
+		const frontmatter: Record<string, unknown> = {
+			status: ["incompleto"], concluido: true, origem: "Estudos/Matematica/nota.md",
+		};
+		applyCompletionMetadata(frontmatter);
+		expect(frontmatter.status).toEqual(["completo"]);
+		expect(frontmatter).not.toHaveProperty("concluido");
+		expect(frontmatter.origem).toBe("Estudos/Matematica/nota.md");
 	});
 });
