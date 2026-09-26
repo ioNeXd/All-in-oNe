@@ -20,8 +20,9 @@ export class CalendarSidebarView extends ItemView {
 			this.contentEl.createEl("p", { text: "O módulo Calendário está indisponível." });
 			return;
 		}
-		await calendar.renderSidebarCalendar(this.contentEl);
-		const open = this.contentEl.createEl("button", { text: "Abrir Calendário" });
+		const calendarContainer = this.contentEl.createDiv({ cls: "ione-hub-calendar-sidebar" });
+		await calendar.renderSidebarCalendar(calendarContainer);
+		const open = this.contentEl.createEl("button", { text: "Abrir Calendário", cls: "ione-hub-calendar-sidebar__open" });
 		open.onclick = async () => {
 			const leaf = this.app.workspace.getLeaf("tab");
 			await leaf.setViewState({ type: "ione-hub-lobby-view", active: true });

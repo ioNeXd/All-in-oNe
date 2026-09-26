@@ -40,6 +40,7 @@ export default class IoneHubPlugin extends Plugin {
 	private vaultBridge?: VaultEventBridge;
 	private calendarRibbon?: HTMLElement;
 	private calendarRibbonUnsub?: () => void;
+	private onboardingClickHandled = false;
 
 	async onload(): Promise<void> {
 		this.core = new HubCore(
@@ -77,12 +78,10 @@ export default class IoneHubPlugin extends Plugin {
 			if (this.core.isModuleEnabled("calendar")) {
 				if (!this.calendarRibbon) {
 					this.calendarRibbon = this.addRibbonIcon("calendar", "Abrir Calendário", () => {
-						const leaf = this.app.workspace.getLeavesOfType(CALENDAR_SIDEBAR_VIEW_TYPE)[0];
-						if (leaf) void this.app.workspace.revealLeaf(leaf);
-						else {
-							const target = this.app.workspace.getLeaf("tab");
-							void target.setViewState({ type: CALENDAR_SIDEBAR_VIEW_TYPE, active: true });
-						}
+						const existing = this.app.workspace.getLeavesOfType(CALENDAR_SIDEBAR_VIEW_TYPE);
+						for (const leaf of existing) leaf.detach();
+						const target = this.app.workspace.getLeaf("tab");
+						void target.setViewState({ type: CALENDAR_SIDEBAR_VIEW_TYPE, active: true });
 					});
 				}
 			} else if (this.calendarRibbon) {
@@ -150,6 +149,13 @@ export default class IoneHubPlugin extends Plugin {
 		syncCalendarRibbon();
 
 		this.addRibbonIcon("layout-dashboard", "Abrir All iₙ oNe", () => {
+			if (!this.onboardingClickHandled) {
+				this.onboardingClickHandled = true;
+				if (!this.core.settings.get().onboardingCompleted) {
+					new OnboardingModal(this.app, this.core).open();
+					return;
+				}
+			}
 			void this.openLobby();
 		});
 
@@ -159,12 +165,6 @@ export default class IoneHubPlugin extends Plugin {
 			callback: () => void this.openLobby(),
 		});
 
-		if (!this.core.settings.get().onboardingCompleted) {
-			// Espera o layout do Obsidian estabilizar antes de abrir o modal.
-			this.app.workspace.onLayoutReady(() => {
-				new OnboardingModal(this.app, this.core).open();
-			});
-		}
 	}
 
 	async onunload(): Promise<void> {

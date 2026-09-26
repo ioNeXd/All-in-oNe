@@ -2,17 +2,26 @@
    respeitar automaticamente o tema claro/escuro ativo, além do sistema de
    Estilos próprio do plugin (que pode sobrescrever qualquer coisa aqui). */
 
+.ione-hub-lobby-host {
+	overflow: hidden !important;
+	min-height: 0 !important;
+}
+
 .ione-hub-lobby {
 	height: 100%;
+	min-height: 0;
+	overflow: hidden;
 }
 
 .ione-hub-lobby__layout {
 	display: flex;
 	height: 100%;
+	min-height: 0;
 }
 
 .ione-hub-lobby__sidebar {
 	width: 240px;
+	min-height: 0;
 	border-right: 1px solid var(--background-modifier-border);
 	padding: var(--size-4-2);
 	display: flex;
@@ -23,6 +32,8 @@
 
 .ione-hub-lobby__content {
 	flex: 1;
+	min-width: 0;
+	min-height: 0;
 	padding: var(--size-4-4);
 	overflow-y: auto;
 }
@@ -182,13 +193,6 @@
 }
 
 .ione-hub-calendar__event-indicator { display:block; text-align:center; line-height:1; margin-top:2px; }
-.ione-hub-calendar__day--has-event::after {
-	content: "•";
-	display: block;
-	text-align: center;
-	line-height: 0.6;
-	color: var(--interactive-accent);
-}
 
 .ione-hub-calendar__week-row,
 .ione-hub-calendar__agenda > div {
@@ -607,3 +611,24 @@ textarea.ione-hub-styles__editor-input::selection {
 .ione-hub-calendar__template-list button { width:100%; text-align:left; margin-bottom:4px; }
 .ione-hub-reminder__event { padding:var(--size-4-2) 0; border-bottom:1px solid var(--background-modifier-border); }
 .ione-hub-onboarding__style-preview { max-height:360px; overflow:auto; }
+
+.ione-hub-lobby__module-panel {
+	min-width: 0;
+}
+.ione-hub-calendar-sidebar {
+	width: 100%;
+}
+.ione-hub-calendar-sidebar__open {
+	display: block;
+	margin: var(--size-4-3) auto 0;
+}
+.ione-hub-calendar--compact .ione-hub-calendar__header {
+	gap: var(--size-4-1);
+}
+.ione-hub-calendar--compact .ione-hub-calendar__title {
+	text-align: center;
+}
+.ione-hub-calendar--compact .ione-hub-calendar__event-indicator {
+	font-size: var(--font-ui-smaller);
+	margin-top: 1px;
+}

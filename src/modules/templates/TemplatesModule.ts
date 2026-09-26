@@ -5,6 +5,7 @@ import {
 	decidePendingAction,
 	STATUS_PENDING_INITIAL,
 	STATUS_COMPLETE_NORMALIZED,
+	applyCompletionMetadata,
 } from "../../core/NoteStatus";
 import {
 	addSuggestion,
@@ -476,11 +477,15 @@ export class TemplatesModule implements HubModule {
 		this.movingFiles.add(pathBefore);
 		this.movingFiles.add(origem);
 		try {
-			if (action.rewriteStatus) {
+			if (!action.move) {
 				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
-					frontmatter.status = STATUS_COMPLETE_NORMALIZED;
-					frontmatter.concluido = true;
+					if (fm.concluido === true) {
+						applyCompletionMetadata(frontmatter);
+					} else if (action.rewriteStatus) {
+						frontmatter.status = STATUS_COMPLETE_NORMALIZED;
+					}
 				});
+				return;
 			}
 
 			if (action.move) {
@@ -494,6 +499,11 @@ export class TemplatesModule implements HubModule {
 				);
 
 				await this.context!.app.fileManager.processFrontMatter(file, (frontmatter) => {
+					if (fm.concluido === true) {
+						applyCompletionMetadata(frontmatter);
+					} else if (action.rewriteStatus) {
+						frontmatter.status = STATUS_COMPLETE_NORMALIZED;
+					}
 					delete frontmatter.origem;
 				});
 				if (this.stopped) return;

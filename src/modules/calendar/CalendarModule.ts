@@ -342,7 +342,7 @@ export class CalendarModule implements HubModule {
 	}
 
 	/** Abre o formulário para CRIAR um evento novo, já com a data preenchida. */
-	openEventEditor(date: Date): void {
+	openEventEditor(date: Date, onSaved?: () => void): void {
 		void this.ensureEventNotesFolder();
 		const notes = this.context!.app.vault.getMarkdownFiles().map((f) => f.path);
 		new EventEditorModal(
@@ -354,12 +354,13 @@ export class CalendarModule implements HubModule {
 				await this.addEvent(event);
 				new Notice(`Evento "${event.title}" marcado.`);
 				this.refreshPanel();
+				onSaved?.();
 			}
 		).open();
 	}
 
 	/** Abre o formulário para EDITAR um evento já existente. */
-	editEvent(event: CalendarEvent): void {
+	editEvent(event: CalendarEvent, onSaved?: () => void): void {
 		void this.ensureEventNotesFolder();
 		const notes = this.context!.app.vault.getMarkdownFiles().map((f) => f.path);
 		const date = new Date(event.year ?? new Date().getFullYear(), event.month - 1, event.day);
@@ -375,6 +376,7 @@ export class CalendarModule implements HubModule {
 				});
 				new Notice(`Evento "${updated.title}" atualizado.`);
 				this.refreshPanel();
+				onSaved?.();
 			},
 			event
 		).open();
@@ -436,27 +438,32 @@ export class CalendarModule implements HubModule {
 	}
 
 	/** Grade do mês com navegação entre meses e indicadores visuais por dia. */
-	private async renderMonthGrid(container: HTMLElement, compact = false): Promise<void> {
+	private async renderMonthGrid(container: HTMLElement, compact = false, rerender?: () => void): Promise<void> {
 		const year=this.displayedMonth.getFullYear(), month=this.displayedMonth.getMonth();
+		const rerenderCurrent=rerender ?? (()=>this.rerenderView());
 		const header=container.createDiv({cls:"ione-hub-calendar__header"});
-		const prev=header.createEl("button",{text:"←"}), next=header.createEl("button",{text:"→"});
+		const prev=header.createEl("button",{text:"<"});
 		header.createSpan({text:this.displayedMonth.toLocaleDateString("pt-BR",{month:"long",year:"numeric"}),cls:"ione-hub-calendar__title"});
+		const today=header.createEl("button",{text:"Hoje"});
+		const next=header.createEl("button",{text:">"});
 		prev.setAttr("aria-label","Mês anterior"); next.setAttr("aria-label","Próximo mês");
-		prev.onclick=()=>{this.displayedMonth=new Date(year,month-1,1);this.rerenderView()}; next.onclick=()=>{this.displayedMonth=new Date(year,month+1,1);this.rerenderView()};
-		if(!compact){const today=header.createEl("button",{text:"Hoje"});today.onclick=()=>{this.displayedMonth=new Date();this.rerenderView()};}
+		prev.onclick=()=>{this.displayedMonth=new Date(year,month-1,1);rerenderCurrent()}; next.onclick=()=>{this.displayedMonth=new Date(year,month+1,1);rerenderCurrent()};
+		today.onclick=()=>{this.displayedMonth=new Date();rerenderCurrent()};
+		if(compact) { header.classList.add("ione-hub-calendar__header--compact"); }
 		const grid=container.createDiv({cls:"ione-hub-calendar"+(compact?" ione-hub-calendar--compact":"")});
 		for(const label of WEEKDAY_LABELS)grid.createDiv({cls:"ione-hub-calendar__weekday",text:label});
 		const firstWeekday=new Date(year,month,1).getDay(), daysInMonth=new Date(year,month+1,0).getDate(), prevDays=new Date(year,month,0).getDate(), total=Math.ceil((firstWeekday+daysInMonth)/7)*7;
 		for(let i=0;i<total;i++){let d:Date,adj=false;if(i<firstWeekday){d=new Date(year,month-1,prevDays-firstWeekday+i+1);adj=true}else if(i>=firstWeekday+daysInMonth){d=new Date(year,month+1,i-firstWeekday-daysInMonth+1);adj=true}else d=new Date(year,month,i-firstWeekday+1);
 			const cell=grid.createDiv({cls:"ione-hub-calendar__day"+(adj?" ione-hub-calendar__day--adjacent":"")});cell.createSpan({text:String(d.getDate())});
 			const notes=this.findNotesForDate(d),events=this.eventsForDate(d);if(notes.length)cell.createSpan({cls:"ione-hub-calendar__dots",text:"●".repeat(Math.min(3,notes.length))});if(events.length){cell.addClass("ione-hub-calendar__day--has-event");cell.createSpan({cls:"ione-hub-calendar__event-indicator",text:"🔔"});cell.setAttr("title",events.map(e=>e.title).join(", "));}if(this.isToday(d.getFullYear(),d.getMonth(),d.getDate()))cell.addClass("ione-hub-calendar__day--today");
-			cell.tabIndex=0;cell.addClass("ione-hub-focusable");cell.setAttr("role","button");cell.setAttr("aria-label",d.toLocaleDateString("pt-BR")+": "+notes.length+" nota(s), "+events.length+" evento(s)");cell.onclick=()=>void this.handleDayClick(d);cell.onkeydown=evt=>{if(evt.key==="Enter"||evt.key===" "){evt.preventDefault();void this.handleDayClick(d)}};
+			cell.tabIndex=0;cell.addClass("ione-hub-focusable");cell.setAttr("role","button");cell.setAttr("aria-label",d.toLocaleDateString("pt-BR")+": "+notes.length+" nota(s), "+events.length+" evento(s)");cell.onclick=()=>void this.handleDayClick(d, compact ? rerenderCurrent : undefined);cell.onkeydown=evt=>{if(evt.key==="Enter"||evt.key===" "){evt.preventDefault();void this.handleDayClick(d, compact ? rerenderCurrent : undefined)}};
 		}
 	}
 
 	/** Renderiza a mesma grade usada pelo módulo em uma sidebar compacta. */
 	async renderSidebarCalendar(container: HTMLElement): Promise<void> {
-		await this.renderMonthGrid(container, true);
+		container.empty();
+		await this.renderMonthGrid(container, true, () => void this.renderSidebarCalendar(container));
 	}
 
 	/** Visão de semana: os 7 dias da semana atual, em linha, com mais detalhe. */
@@ -558,9 +565,9 @@ export class CalendarModule implements HubModule {
 	}
 
 	/** Clique num dia: abre a nota existente, ou pergunta o que fazer. */
-	private async handleDayClick(date: Date): Promise<void> {
+	private async handleDayClick(date: Date, onChanged?: () => void): Promise<void> {
 		const notes=this.findNotesForDate(date),events=this.eventsForDate(date),templates=await this.listAvailableTemplates();
-		new DateActionModal(this.context!.app,date,notes,events,templates,{openNote:file=>this.context!.app.workspace.getLeaf(false).openFile(file),createDaily:async()=>{const f=await this.createDailyNote(date);await this.context!.app.workspace.getLeaf(false).openFile(f)},createTemplate:async t=>{const f=await this.createTemplateNote(date,t);await this.context!.app.workspace.getLeaf(false).openFile(f)},createEvent:()=>this.openEventEditor(date),editEvent:e=>this.editEvent(e),deleteEvent:e=>this.removeEvent(e.id)}).open();
+		new DateActionModal(this.context!.app,date,notes,events,templates,{openNote:file=>this.context!.app.workspace.getLeaf(false).openFile(file),createDaily:async()=>{const f=await this.createDailyNote(date);await this.context!.app.workspace.getLeaf(false).openFile(f);onChanged?.()},createNew:async()=>{const f=await this.createNewNote(date);await this.context!.app.workspace.getLeaf(false).openFile(f);onChanged?.()},createTemplate:async t=>{const f=await this.createTemplateNote(date,t);await this.context!.app.workspace.getLeaf(false).openFile(f);onChanged?.()},createEvent:()=>this.openEventEditor(date,onChanged),editEvent:e=>this.editEvent(e,onChanged),deleteEvent:async e=>{await this.removeEvent(e.id);onChanged?.()}}).open();
 	}
 
 	private async updateGlobalPath(key: string, value: string): Promise<void> {
@@ -629,6 +636,10 @@ export class CalendarModule implements HubModule {
 		const path=this.pathForDate(date),existing=this.context!.app.vault.getAbstractFileByPath(path);if(existing instanceof TFile)return existing;await ensureVaultFolder(this.context!.app,path.substring(0,path.lastIndexOf("/")));
 		const tp=normalizePath(this.context!.getFullSettings().paths.calendarTemplatesFolder+"/calendario/Nota diaria.md"),tf=this.context!.app.vault.getAbstractFileByPath(tp);const body=tf instanceof TFile?stripFrontmatter(await this.context!.app.vault.read(tf)).trim():"";
 		const file=await this.context!.app.vault.create(path,body);await this.context!.app.fileManager.processFrontMatter(file,fm=>{fm.date=dateKey(date);fm.thema=["Calendario",String(date.getFullYear()),MONTH_NAMES[date.getMonth()]];fm.origem=path;fm.concluido=false;fm.status=["incompleto"]});await this.context?.bus.emit("calendar:note-created",{path,templateName:"Nota diaria"},"calendar");return file;
+	}
+	async createNewNote(date: Date): Promise<TFile>{
+		const folder=normalizePath(this.context!.getFullSettings().paths.calendarFolder+"/"+date.getFullYear()+"/"+monthFolderName(date.getMonth()));await ensureVaultFolder(this.context!.app,folder);
+		const suffix=firstAvailableTemplateSuffix(this.findNotesForDate(date).map(f=>f.name),"nota",date),path=normalizePath(folder+"/"+templateNoteFilename("nota",date,suffix));const file=await this.context!.app.vault.create(path,"");await this.context!.app.fileManager.processFrontMatter(file,fm=>{fm.date=dateKey(date);fm.thema=["Calendario",String(date.getFullYear()),MONTH_NAMES[date.getMonth()]];fm.origem=path;fm.concluido=false;fm.status=["incompleto"]});await this.context?.bus.emit("calendar:note-created",{path,templateName:null},"calendar");return file;
 	}
 	async createTemplateNote(date: Date,template: string): Promise<TFile>{
 		const root=normalizePath(this.context!.getFullSettings().paths.calendarTemplatesFolder),source=this.context!.app.vault.getAbstractFileByPath(normalizePath(root+"/"+template));if(!(source instanceof TFile))throw new Error("Template não encontrado: "+template);
@@ -828,6 +839,7 @@ export type DayAction =
 interface DateActionCallbacks {
 	openNote(file: TFile): void | Promise<void>;
 	createDaily(): void | Promise<void>;
+	createNew(): void | Promise<void>;
 	createTemplate(template: string): void | Promise<void>;
 	createEvent(): void;
 	editEvent(event: CalendarEvent): void;
@@ -846,12 +858,17 @@ class DateActionModal extends Modal {
 
 	onOpen(): void {
 		this.contentEl.createEl("h2", { text: this.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" }) });
-		if (this.notes.length === 0) this.button("📝 Nota diária", () => this.callbacks.createDaily());
-		else if (this.notes.length === 1) this.button("📝 Nota diária", () => this.callbacks.openNote(this.notes[0]));
-		else {
+		const daily = this.notes.find((note) => note.basename === dailyNoteFilename(this.date));
+		if (daily) this.button("📝 Nota diária", () => this.callbacks.openNote(daily));
+		else this.button("📝 Nota diária", () => this.callbacks.createDaily());
+		if (this.notes.length > 0) {
 			this.contentEl.createEl("h3", { text: "📝 Notas do dia" });
-			for (const note of this.notes) this.button(note.basename, () => this.callbacks.openNote(note));
+			for (const note of this.notes) {
+				if (note === daily) continue;
+				this.button(note.basename, () => this.callbacks.openNote(note));
+			}
 		}
+		this.button("📝 Nota nova", () => this.callbacks.createNew());
 		this.contentEl.createEl("h3", { text: "📋 Nota template" });
 		this.renderTemplates();
 		this.contentEl.createEl("h3", { text: "🔔 Eventos" });

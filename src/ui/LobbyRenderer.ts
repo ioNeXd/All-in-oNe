@@ -44,11 +44,13 @@ export class LobbyRenderer {
 	private detachCalendarOpen?: () => void;
 
 	constructor(private app: App, private core: HubCore, private containerEl: HTMLElement) {
+		this.containerEl.addClass("ione-hub-lobby-host");
 		this.detachCalendarOpen = this.core.bus.on("calendar:open-main", "lobby-calendar", () => { this.activeSection = "calendar"; this.render(); });
 	}
 
 	destroy(): void {
 		this.detachCalendarOpen?.();
+		this.containerEl.removeClass("ione-hub-lobby-host");
 		this.detachCalendarOpen = undefined;
 	}
 
