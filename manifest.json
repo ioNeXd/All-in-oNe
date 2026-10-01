@@ -1,0 +1,10 @@
+{
+    "author": "ioNe",
+    "name": "All-in-oNe",
+    "id": "all-in-oNe",
+    "isDesktopOnly": true,
+    "description": "A plugin that combines multiple features into one.",
+    "version": "0.0.1",
+    "minAppVersion": "1.0.0",
+    "authorUrl": "https://github.com/ioNeXd"
+}
